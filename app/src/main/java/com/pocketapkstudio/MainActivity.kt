@@ -123,7 +123,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                             var count = 0
                             var entry = zip.nextEntry
                             while (entry != null && count < 30000) {
-                                val name = entry.name.replace('\\\\', '/')
+                                val name = entry.name.replace('\\', '/')
                                 if (count == 0) firstName = name.substringBefore('/').ifBlank { firstName }
                                 if (name.endsWith("build.gradle") || name.endsWith("build.gradle.kts")) hasGradle = true
                                 if (name.endsWith("settings.gradle") || name.endsWith("settings.gradle.kts")) hasSettings = true
