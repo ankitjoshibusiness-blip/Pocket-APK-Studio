@@ -13,11 +13,15 @@ Pocket APK Studio is designed to prepare and build Android projects locally on a
 This version uses the user's local Termux + Ubuntu environment as the compiler host. It is not yet a self-contained compiler bundled inside the APK.
 
 1. Install Termux and the matching Termux:RunCommand add-on from the same trusted source.
-2. In Termux, run `termux-setup-storage`.
+2. In Termux, run `termux-setup-storage` and grant storage access.
 3. In Termux `~/.termux/termux.properties`, set `allow-external-apps = true`, then restart Termux.
-4. Install/configure `proot-distro` and an Ubuntu distribution.
-5. Inside Ubuntu, install Java 17, Gradle, unzip, Android SDK command-line tools, platform-tools, platform 35 and build-tools 35.0.0.
-6. Configure `ANDROID_HOME` (and accept Android SDK licences) in the Ubuntu shell.
+4. Install `proot-distro` in Termux and install/login to Ubuntu.
+5. Inside Ubuntu, install Java 17, Gradle 8.9, `wget`, `unzip`, and the Android SDK command-line tools.
+6. Install Android Platform 35 and Platform Tools using `sdkmanager`.
+7. Use ARM64-compatible Android Build Tools 34.0.4 in `$ANDROID_HOME/build-tools/34.0.4`. The standard Linux SDK Build Tools downloaded by `sdkmanager` are x86-64 binaries and cannot run directly in an ARM64-only Ubuntu environment.
+8. Set `ANDROID_HOME` in the Ubuntu login shell and accept Android SDK licences.
+
+The app project itself is configured for compile SDK 35, Android Gradle Plugin 8.7.3, Java 17 and Build Tools 34.0.4. Gradle 8.9 is required by this Android Gradle Plugin version.
 
 The bridge expects the Ubuntu distribution name `ubuntu`, the command `proot-distro`, and the ZIP at `/sdcard/Download/PocketAPKStudio/`. The Android app's Build button starts the build command, but cannot currently stream terminal logs back into the app.
 
