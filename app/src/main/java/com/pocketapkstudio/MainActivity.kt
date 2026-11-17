@@ -219,12 +219,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val sharedZip = "/sdcard/Download/PocketAPKStudio/$zipName"
         val command = """
             set -e
-            echo 'Pocket APK Studio: starting local Android build'
+            echo "Pocket APK Studio: starting local Android build"
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
             proot-distro login ubuntu -- bash -lc '
               set -e
               command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
-              command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
               test -n "${'$'}ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
               PROJECT="${'$'}HOME/pocket-apk-studio/project"
               mkdir -p "${'$'}PROJECT"
@@ -233,7 +232,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
               SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
               test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
               cd "${'$'}(dirname "${'$'}SETTINGS")"
-              gradle assembleDebug
+              if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew assembleDebug; else command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }; gradle assembleDebug; fi
               echo "BUILD SUCCESS. APK files:"
               find . -path "*/build/outputs/apk/*" -type f -name "*.apk" -print
             '
