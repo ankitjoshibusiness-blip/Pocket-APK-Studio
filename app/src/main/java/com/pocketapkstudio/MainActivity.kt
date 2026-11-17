@@ -225,14 +225,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
               set -e
               command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
               command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
-              test -n "$ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
-              PROJECT="$HOME/pocket-apk-studio/project"
-              mkdir -p "$PROJECT"
-              rm -rf "$PROJECT"/*
-              unzip -q -o "$sharedZip" -d "$PROJECT"
-              SETTINGS=$(find "$PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
-              test -n "$SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
-              cd "$(dirname "$SETTINGS")"
+              test -n "${'$'}ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
+              PROJECT="${'$'}HOME/pocket-apk-studio/project"
+              mkdir -p "${'$'}PROJECT"
+              rm -rf "${'$'}PROJECT"/*
+              unzip -q -o "$sharedZip" -d "${'$'}PROJECT"
+              SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+              test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
+              cd "${'$'}(dirname "${'$'}SETTINGS")"
               gradle assembleDebug
               echo "BUILD SUCCESS. APK files:"
               find . -path "*/build/outputs/apk/*" -type f -name "*.apk" -print
