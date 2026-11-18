@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -29,6 +30,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var projectName: TextView
     private lateinit var projectType: TextView
+    private lateinit var buildProgress: ProgressBar
     private var selectedUri: Uri? = null
     private var importedZipName: String? = null
     private var projectIsGradle = false
@@ -37,6 +39,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
             status.text = prefs.getString("last_build_status", "Build finished. Check result.")
+            buildProgress.visibility = View.GONE
         }
     }
 
@@ -45,8 +48,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT")
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
-        val saved = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_build_status", null)
-        if (saved != null && ::status.isInitialized) status.text = saved
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val saved = prefs.getString("last_build_status", null)
+        if (saved != null && ::status.isInitialized) {
+            status.text = saved
+            buildProgress.visibility = if (saved.startsWith("Build running")) View.VISIBLE else View.GONE
+        }
     }
 
     override fun onStop() {
@@ -116,6 +123,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildCard.addView(label("3. BUILD", 12, 0xFF9AA7FF.toInt(), true))
         buildCard.addView(space(8))
         buildCard.addView(actionButton("Build Android APK", true) { startLocalBuild() })
+        buildCard.addView(space(8))
+        buildProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF7184FF.toInt())
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF7184FF.toInt())
+        }
+        buildCard.addView(buildProgress, LinearLayout.LayoutParams(-1, dp(6)))
         buildCard.addView(space(8))
         status = label("Waiting for a project.", 13, 0xFFB6BBC9.toInt(), false)
         buildCard.addView(status)
@@ -194,13 +209,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
             return
         }
 
-        status.text = "Copying project ZIP to shared Downloads…"
+        buildProgress.visibility = View.VISIBLE
+        status.text = "Preparing project…"
         lifecycleScope.launch {
             try {
                 val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
                 importedZipName = fileName
                 launchTermuxBuild(fileName)
             } catch (e: Exception) {
+                buildProgress.visibility = View.GONE
                 status.text = "Could not prepare ZIP: ${e.message ?: "storage error"}"
             }
         }
@@ -291,8 +308,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
                 .apply()
             startService(intent)
-            status.text = "Build started in background. Termux terminal will not open. Result and APK will appear here / in Downloads."
+            buildProgress.visibility = View.VISIBLE
+            status.text = "Build running… Please keep Pocket APK Studio available. The progress bar is indeterminate while Gradle works in the background."
         } catch (e: Exception) {
+            buildProgress.visibility = View.GONE
             status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
         }
     }
