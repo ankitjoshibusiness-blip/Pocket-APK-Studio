@@ -183,16 +183,21 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(14))
             setBackgroundColor(0xFF10131B.toInt())
         }
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content)
+        fun page(): Pair<ScrollView, LinearLayout> {
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(2), dp(4), dp(2), dp(18)) }
+            return ScrollView(this).apply { addView(body) } to body
+        }
+        val (homeScroll, homeContent) = page()
+        val (editorScroll, editorContent) = page()
+        val (toolsScroll, toolsContent) = page()
+        val (settingsScroll, settingsContent) = page()
 
-        content.addView(label("Pocket Apk Studio", 13, 0xFF9AA7FF.toInt(), true))
-        content.addView(label("Build APKs on your phone", 24, 0xFFFFFFFF.toInt(), true).apply {
+        homeContent.addView(label("Pocket APK Studio", 13, 0xFF9AA7FF.toInt(), true))
+        homeContent.addView(label("Build APKs on your phone", 24, 0xFFFFFFFF.toInt(), true).apply {
             setPadding(0, dp(10), 0, dp(6))
         })
-        content.addView(label("Import Android projects and prepare local builds without GitHub Actions.", 14, 0xFFB6BBC9.toInt(), false))
-        content.addView(space(22))
+        homeContent.addView(label("Your local Android build workspace.", 14, 0xFFB6BBC9.toInt(), false))
+        homeContent.addView(space(18))
 
         val importCard = card()
         importCard.addView(label("1. IMPORT PROJECT", 12, 0xFF9AA7FF.toInt(), true))
@@ -200,7 +205,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         importCard.addView(actionButton("Choose ZIP project") { pickZip.launch(arrayOf("application/zip", "application/octet-stream")) })
         importCard.addView(space(8))
         importCard.addView(actionButton("Choose project folder") { pickFolder.launch(null) })
-        content.addView(importCard)
+        editorContent.addView(importCard)
         content.addView(space(14))
 
         val projectCard = card()
@@ -220,7 +225,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 editProjectResult.launch(editorIntent)
             }
         })
-        content.addView(projectCard)
+        editorContent.addView(projectCard)
         content.addView(space(14))
 
         val serverCard = card()
@@ -230,7 +235,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         serverCard.addView(serverStatus)
         serverCard.addView(space(8))
         serverCard.addView(actionButton("Check Termux + Ubuntu server") { checkBuildServer() })
-        content.addView(serverCard)
+        settingsContent.addView(serverCard)
         content.addView(space(14))
 
         val buildCard = card()
@@ -254,7 +259,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
-        content.addView(buildCard)
+        homeContent.addView(buildCard)
         content.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -272,19 +277,24 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        content.addView(logCard)
+        homeContent.addView(logCard)
         content.addView(space(18))
 
         val setupCard = card()
         setupCard.addView(label("LOCAL BUILD REQUIREMENTS", 12, 0xFF9AA7FF.toInt(), true))
         setupCard.addView(label("Builds run in the background through the local Termux + Ubuntu engine. You do not need to open the Termux terminal. Termux, Termux:RunCommand, Java 17, Gradle and Android SDK must remain installed and configured.", 13, 0xFFB6BBC9.toInt(), false))
         setupCard.addView(space(8))
-        setupCard.addView(actionButton("Analyze existing APK") {
+        setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
+        settingsContent.addView(setupCard)
+        val toolsIntro = card()
+        toolsIntro.addView(label("APK INSPECTION & RECOVERY", 12, 0xFF9AA7FF.toInt(), true))
+        toolsIntro.addView(space(8))
+        toolsIntro.addView(label("Inspect an APK, recover readable code with JADX, and export the recovered files.", 13, 0xFFB6BBC9.toInt(), false))
+        toolsIntro.addView(space(10))
+        toolsIntro.addView(actionButton("Analyze existing APK", true) {
             pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         })
-        setupCard.addView(space(6))
-        setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
-        content.addView(setupCard)
+        toolsContent.addView(toolsIntro)
         content.addView(space(12))
         analysisCard = card().apply { visibility = View.GONE }
         analysisCard.addView(label("APK ANALYSIS REPORT", 12, 0xFF9AA7FF.toInt(), true))
@@ -320,9 +330,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("APK Analysis Report", analysisReportText))
             Toast.makeText(this, "Analysis report copied.", Toast.LENGTH_SHORT).show()
         })
-        content.addView(analysisCard)
-        content.addView(space(18))
-        content.addView(label("Version 1.4 • APK analysis + JADX recovery", 12, 0xFF737B8D.toInt(), false))
+        toolsContent.addView(analysisCard)
+        homeContent.addView(space(18))
+        homeContent.addView(label("Version 1.4 • APK analysis + JADX recovery", 12, 0xFF737B8D.toInt(), false))
 
         val previewContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -368,26 +378,40 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
         val previewScroll = ScrollView(this).apply { visibility = View.GONE }
         previewScroll.addView(previewContent)
-        val tabBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-        }
-        val buildTab = actionButton("Build", true) {
-            scroll.visibility = View.VISIBLE; previewScroll.visibility = View.GONE
-        }
-        val previewTab = actionButton("Preview") {
-            scroll.visibility = View.GONE; previewScroll.visibility = View.VISIBLE
-        }
-        listOf(buildTab, previewTab).forEach {
-            it.layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                leftMargin = dp(3); rightMargin = dp(3)
+        val pages = listOf(homeScroll, editorScroll, toolsScroll, previewScroll, settingsScroll)
+        var activePage = 0
+        fun showPage(index: Int) {
+            activePage = index
+            pages.forEachIndexed { i, view -> view.visibility = if (i == index) View.VISIBLE else View.GONE }
+            val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
+            buttons.forEachIndexed { i, button ->
+                button.alpha = if (i == index) 1f else 0.72f
+                button.setBackgroundColor(if (i == index) 0xFF5268F5.toInt() else 0xFF293247.toInt())
             }
         }
-        tabBar.addView(buildTab)
-        tabBar.addView(previewTab)
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+            setBackgroundColor(0xFF171C28.toInt())
+        }
+        val homeTab = actionButton("Home") { showPage(0) }
+        val editorTab = actionButton("Editor") { showPage(1) }
+        val toolsTab = actionButton("APK Tools") { showPage(2) }
+        val previewTab = actionButton("Preview") { showPage(3) }
+        val settingsTab = actionButton("Settings") { showPage(4) }
+        listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach {
+            it.textSize = 10f
+            it.layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                leftMargin = dp(2); rightMargin = dp(2)
+            }
+        }
+        listOf(homeScroll, editorScroll, toolsScroll, previewScroll, settingsScroll).forEach {
+            root.addView(it, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
         root.addView(tabBar)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach { tabBar.addView(it) }
+        showPage(0)
         setContentView(root)
     }
 
