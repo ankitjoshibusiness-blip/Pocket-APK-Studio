@@ -87,19 +87,19 @@ class ProjectEditorActivity : Activity() {
             isFocusableInTouchMode = true
         }
         applyTheme()
-        val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE7ECF7.toInt(),14) }
+        val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE7ECF7.toInt(),14) }
         explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; toolbar.addView(explorerToggle)
         toolbar.addView(smallButton("＋ File") { showFileActions() })
         toolbar.addView(smallButton("⌕ Find") { showFindReplace(false) })
         toolbar.addView(smallButton("⇄ Replace") { showFindReplace(true) })
         toolbar.addView(smallButton("✓ Save") { saveCurrent(true) })
         root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
-        fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF121D30.toInt() else 0xFFEFF2F8.toInt(),9) }
+        fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
         root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
         val tabsScroll=HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; addView(tabsBar) }
         root.addView(tabsScroll,LinearLayout.LayoutParams(-1,dp(42)))
-        val workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF101A2A.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
+        val workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF202A33.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
         val codeRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.TOP }
         lineNumbers=TextView(this).apply { typeface=Typeface.MONOSPACE; textSize=12f; gravity=Gravity.TOP or Gravity.END; setPadding(dp(8),dp(12),dp(8),dp(12)); text="1" }
         codeRow.addView(lineNumbers,LinearLayout.LayoutParams(dp(42),-1))
@@ -114,7 +114,7 @@ class ProjectEditorActivity : Activity() {
         workArea.addView(codeScroll,FrameLayout.LayoutParams(-1,-1))
         explorerPanel=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10))
-            background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFF0F3FA.toInt(),12); elevation=dp(14).toFloat()
+            background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFF0F3FA.toInt(),12); elevation=dp(14).toFloat()
         }
         val explorerHeader=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL }
         explorerHeader.addView(label("PROJECT EXPLORER",11,true),LinearLayout.LayoutParams(0,dp(36),1f))
@@ -129,7 +129,7 @@ class ProjectEditorActivity : Activity() {
         root.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
         suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)) }
         root.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
-        diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE9EEF8.toInt(),12) }
+        diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE9EEF8.toInt(),12) }
         diagnosticsPanel.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
         diagnosticsPanel.addView(errorsPanel)
@@ -374,8 +374,8 @@ class ProjectEditorActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     private fun applyTheme() {
-        root.setBackgroundColor(if(darkTheme) 0xFF080D1D.toInt() else 0xFFF4F6FA.toInt())
-        if(::explorerPanel.isInitialized) explorerPanel.background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFF0F3FA.toInt(),12)
+        root.setBackgroundColor(if(darkTheme) 0xFF202A33.toInt() else 0xFFF4F6FA.toInt())
+        if(::explorerPanel.isInitialized) explorerPanel.background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFF0F3FA.toInt(),12)
     }
 
     private fun refreshEditorColors() {
@@ -384,7 +384,7 @@ class ProjectEditorActivity : Activity() {
         editor.setTextColor(fg); editor.setBackgroundColor(bg)
         lineNumbers.setTextColor(if (darkTheme) 0xFF8290A5.toInt() else 0xFF7A8494.toInt())
         lineNumbers.setBackgroundColor(if (darkTheme) 0xFF131C29.toInt() else 0xFFE9EDF4.toInt())
-        fileLabel.setTextColor(if (darkTheme) 0xFF9FB4FF.toInt() else 0xFF425DB5.toInt())
+        fileLabel.setTextColor(if (darkTheme) 0xFF9FC3C4.toInt() else 0xFF425DB5.toInt())
         errorsPanel.setTextColor(if (darkTheme) 0xFFFFB4A8.toInt() else 0xFFB3261E.toInt())
         highlightCode()
     }
@@ -435,10 +435,10 @@ class ProjectEditorActivity : Activity() {
         val source = editor.text.toString()
         val cursor = editor.selectionStart.coerceAtLeast(0)
         val styled = SpannableString(source)
-        val keywordColor = if (darkTheme) 0xFFC792EA.toInt() else 0xFF7B2CBF.toInt()
-        val stringColor = if (darkTheme) 0xFFC3E88D.toInt() else 0xFF26733A.toInt()
+        val keywordColor = if (darkTheme) 0xFFB7A3D0.toInt() else 0xFF7B2CBF.toInt()
+        val stringColor = if (darkTheme) 0xFFA9C99B.toInt() else 0xFF26733A.toInt()
         val commentColor = if (darkTheme) 0xFF8295A8.toInt() else 0xFF687786.toInt()
-        val numberColor = if (darkTheme) 0xFFF78C6C.toInt() else 0xFFB45309.toInt()
+        val numberColor = if (darkTheme) 0xFFD6A080.toInt() else 0xFFB45309.toInt()
         val patterns = listOf(
             Pair("\\b(class|object|fun|val|var|if|else|when|for|while|return|public|private|protected|override|import|package|interface|suspend|const|lateinit|new|static|void|int|String|true|false|null)\\b", keywordColor),
             Pair("""\"([^\\"]|\\.)*\"|'([^\\']|\\.)*'""", stringColor),
@@ -550,14 +550,14 @@ class ProjectEditorActivity : Activity() {
     private fun smallButton(text:String,action:()->Unit):Button=Button(this).apply {
         this.text=text; isAllCaps=false; textSize=10.5f; minHeight=dp(36); minimumHeight=dp(36)
         setTextColor(if(darkTheme) 0xFFE8EEFF.toInt() else 0xFF263653.toInt())
-        background=roundedSurface(if(darkTheme) 0xFF26365D.toInt() else 0xFFDCE5F7.toInt(),10)
+        background=roundedSurface(if(darkTheme) 0xFF3C4A56.toInt() else 0xFFDCE5F7.toInt(),10)
         setPadding(dp(7),0,dp(7),0); stateListAnimator=null
         setOnClickListener { action() }
     }
 
     private fun roundedSurface(color:Int,radius:Int)=android.graphics.drawable.GradientDrawable().apply {
         setColor(color); cornerRadius=dp(radius).toFloat()
-        setStroke(dp(1),if(darkTheme) 0xFF293A5C.toInt() else 0xFFD6DEEC.toInt())
+        setStroke(dp(1),if(darkTheme) 0xFF3C4A56.toInt() else 0xFFD6DEEC.toInt())
     }
 
     private fun premiumGradient(start:Int,end:Int,radius:Int)=android.graphics.drawable.GradientDrawable(
