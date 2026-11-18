@@ -15,6 +15,8 @@ import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
+import android.graphics.Rect
+import android.view.WindowManager
 import android.widget.*
 import androidx.core.content.FileProvider
 import java.io.File
@@ -35,6 +37,8 @@ class ProjectEditorActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var explorerPanel: LinearLayout
     private lateinit var explorerToggle: Button
+    private lateinit var diagnosticsPanel: LinearLayout
+    private lateinit var exportButton: Button
     private var explorerOpen = false
     private var currentFile: File? = null
     private val openTabs = LinkedHashMap<File, String>()
@@ -48,6 +52,7 @@ class ProjectEditorActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val source = intent.getStringExtra("zip_uri")?.let { Uri.parse(it) }
         if (source == null) { finish(); return }
         rootDir = File(cacheDir, "editor-project").apply { deleteRecursively(); mkdirs() }
@@ -76,30 +81,18 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun showEditor() {
-        root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(10),dp(12),dp(10)) }
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(5), dp(10), dp(6))
+            isFocusableInTouchMode = true
+        }
         applyTheme()
-        val header=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(4),dp(3),dp(12)) }
-        val logo=TextView(this).apply { text="⌘"; textSize=24f; gravity=Gravity.CENTER; setTextColor(0xFFFFFFFF.toInt()); background=premiumGradient(0xFF6C4BFF.toInt(),0xFF078CEB.toInt(),15) }
-        header.addView(logo,LinearLayout.LayoutParams(dp(42),dp(42)))
-        val heading=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
-        heading.addView(label("POCKET APK STUDIO",15,true))
-        heading.addView(label("PROJECT CODE EDITOR  •  PRO",9,false))
-        header.addView(heading,LinearLayout.LayoutParams(0,-2,1f))
-        header.addView(smallButton("☼ / ☾") { darkTheme=!darkTheme; applyTheme(); refreshEditorColors() })
-        root.addView(header)
-        val titleRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(4),dp(3),dp(8)) }
-        val titleBlock=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        titleBlock.addView(label("Code Workspace",20,true))
-        titleBlock.addView(label("Edit  •  Preview  •  Build",11,false))
-        titleRow.addView(titleBlock,LinearLayout.LayoutParams(0,-2,1f))
-        titleRow.addView(label("●  READY",10,true).apply { setTextColor(0xFF48D6A0.toInt()); setPadding(dp(10),dp(7),dp(10),dp(7)); background=roundedSurface(if(darkTheme) 0xFF153A3B.toInt() else 0xFFDDF6ED.toInt(),30) })
-        root.addView(titleRow)
         val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE7ECF7.toInt(),14) }
         explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; toolbar.addView(explorerToggle)
         toolbar.addView(smallButton("⌕ Find") { showFindReplace(false) })
         toolbar.addView(smallButton("⇄ Replace") { showFindReplace(true) })
         toolbar.addView(smallButton("✓ Save") { saveCurrent(true) })
-        root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(8) })
+        root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF121D30.toInt() else 0xFFEFF2F8.toInt(),9) }
         root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
@@ -111,7 +104,7 @@ class ProjectEditorActivity : Activity() {
         codeRow.addView(lineNumbers,LinearLayout.LayoutParams(dp(42),-1))
         editor=EditText(this).apply {
             typeface=Typeface.MONOSPACE; textSize=13f; gravity=Gravity.TOP or Gravity.START
-            setPadding(dp(10),dp(12),dp(10),dp(18)); minLines=18; setHorizontallyScrolling(true)
+            setPadding(dp(10),dp(12),dp(10),dp(18)); setHorizontallyScrolling(true)
             isVerticalScrollBarEnabled=true; background=null
             inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
@@ -135,13 +128,33 @@ class ProjectEditorActivity : Activity() {
         root.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
         suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)) }
         root.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
-        val diagnostics=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE9EEF8.toInt(),12) }
-        diagnostics.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
+        diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE9EEF8.toInt(),12) }
+        diagnosticsPanel.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
-        diagnostics.addView(errorsPanel)
-        root.addView(diagnostics,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
-        root.addView(smallButton("⇧  SAVE CHANGES & RETURN TO PROJECT") { exportEditedZip() },LinearLayout.LayoutParams(-1,dp(46)).apply { topMargin=dp(7) })
-        setContentView(root); refreshExplorer(); refreshEditorColors()
+        diagnosticsPanel.addView(errorsPanel)
+        root.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
+        exportButton=smallButton("⇧  SAVE CHANGES & RETURN TO PROJECT") { exportEditedZip() }
+        root.addView(exportButton,LinearLayout.LayoutParams(-1,dp(42)).apply { topMargin=dp(5) })
+        setContentView(root)
+        refreshExplorer()
+        refreshEditorColors()
+        root.viewTreeObserver.addOnGlobalLayoutListener {
+            val visible = Rect()
+            root.getWindowVisibleDisplayFrame(visible)
+            val keyboardVisible = root.rootView.height - visible.bottom > dp(160)
+            suggestionsBar.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
+            diagnosticsPanel.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
+            exportButton.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
+            if (keyboardVisible && editor.hasFocus()) {
+                editor.post {
+                    val line = editor.layout?.getLineForOffset(editor.selectionStart.coerceAtLeast(0)) ?: 0
+                    val y = editor.layout?.getLineTop(line) ?: 0
+                    if (y < editor.scrollY || y > editor.scrollY + editor.height - dp(36)) {
+                        editor.post { editor.requestRectangleOnScreen(Rect(0, y, editor.width, y + dp(32)), false) }
+                    }
+                }
+            }
+        }
         editor.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
