@@ -6,8 +6,6 @@ plugins {
 android {
     namespace = "com.pocketapkstudio"
     compileSdk = 35
-    // The phone-side Ubuntu environment uses ARM64-compatible Build Tools 34.0.4.
-    buildToolsVersion = "34.0.4"
 
     defaultConfig {
         applicationId = "com.pocketapkstudio"
