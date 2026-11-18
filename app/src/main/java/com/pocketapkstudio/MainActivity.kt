@@ -661,6 +661,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun copyApkToRecoveryFolder(uri: Uri) {
         val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Recovery"
+        if (Build.VERSION.SDK_INT >= 29) {
+            contentResolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                arrayOf("customer-manager.apk", folder + "/"))
+        }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "customer-manager.apk")
             put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
@@ -691,24 +696,24 @@ class MainActivity : androidx.activity.ComponentActivity() {
               command -v curl >/dev/null || apt-get update && apt-get install -y curl
               command -v unzip >/dev/null || apt-get install -y unzip
               command -v zip >/dev/null || apt-get install -y zip
-              JADXD="$HOME/.local/share/jadx-1.5.1"
-              if [ ! -x "$JADXD/bin/jadx" ]; then
-                mkdir -p "$JADXD"
+              JADXD="${'$'}HOME/.local/share/jadx-1.5.1"
+              if [ ! -x "${'$'}JADXD/bin/jadx" ]; then
+                mkdir -p "${'$'}JADXD"
                 curl -L --fail --silent --show-error "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/jadx-1.5.1.zip
-                unzip -q -o /tmp/jadx-1.5.1.zip -d "$JADXD"
+                unzip -q -o /tmp/jadx-1.5.1.zip -d "${'$'}JADXD"
               fi
               INPUT="/sdcard/Download/PocketAPKStudio/Recovery/customer-manager.apk"
-              test -s "$INPUT" || { echo "ERROR: selected APK not found in Recovery folder"; exit 22; }
-              OUT="$HOME/pocket-apk-studio/recovered_customer_manager"
-              rm -rf "$OUT"
-              mkdir -p "$OUT"
-              "$JADXD/bin/jadx" --show-bad-code -d "$OUT" "$INPUT"
+              test -s "${'$'}INPUT" || { echo "ERROR: selected APK not found in Recovery folder"; exit 22; }
+              OUT="${'$'}HOME/pocket-apk-studio/recovered_customer_manager"
+              rm -rf "${'$'}OUT"
+              mkdir -p "${'$'}OUT"
+              "${'$'}JADXD/bin/jadx" --show-bad-code -d "${'$'}OUT" "${'$'}INPUT"
               OUTPUT="/sdcard/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
-              rm -f "$OUTPUT"
-              cd "$(dirname "$OUT")"
-              zip -qr "$OUTPUT" "$(basename "$OUT")"
-              test -s "$OUTPUT" || { echo "ERROR: recovered ZIP was not created"; exit 23; }
-              echo "RECOVERY_SAVED=$OUTPUT"
+              rm -f "${'$'}OUTPUT"
+              cd "$(dirname "${'$'}OUT")"
+              zip -qr "${'$'}OUTPUT" "$(basename "${'$'}OUT")"
+              test -s "${'$'}OUTPUT" || { echo "ERROR: recovered ZIP was not created"; exit 23; }
+              echo "RECOVERY_SAVED=${'$'}OUTPUT"
               echo "JADX_DECOMPILE_SUCCESS=1"
             '
         """.trimIndent()
