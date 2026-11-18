@@ -242,6 +242,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         welcomeHeader.addView(label("Start your next awesome project!", 13, 0xFFB4C0C8.toInt(), false).apply { gravity = android.view.Gravity.CENTER })
         homeContent.addView(welcomeHeader)
 
+        var openSettingsPage: (() -> Unit)? = null
         fun welcomeMenuItem(symbol: String, title: String, action: () -> Unit): View {
             return LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -296,8 +297,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 checkBuildServer()
             }
         })
-        homeContent.addView(welcomeMenuItem("⚙", "Preferences") { showPage(4) })
-        homeContent.addView(welcomeMenuItem("☷", "IDE Configurations") { showPage(4) })
+        homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
+        homeContent.addView(welcomeMenuItem("☷", "IDE Configurations") { openSettingsPage?.invoke() })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
                 .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nCode Editor: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
@@ -576,6 +577,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }.start()
             }
         }
+        openSettingsPage = { showPage(4) }
         val tabBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
