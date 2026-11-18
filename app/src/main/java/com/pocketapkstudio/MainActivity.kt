@@ -301,7 +301,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         })
         homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { openPage?.invoke(2) })
-        homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
                 .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nWorkspace: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
