@@ -45,6 +45,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var previewDetails: TextView
     private lateinit var previewPermissions: TextView
     private lateinit var previewInstallButton: Button
+    private lateinit var analysisCard: LinearLayout
+    private lateinit var analysisStatus: TextView
+    private lateinit var analysisDetails: TextView
+    private lateinit var analysisComponents: TextView
+    private lateinit var analysisPermissions: TextView
+    private var analysisReportText: String = ""
     private var previewApkFile: File? = null
     private var selectedUri: Uri? = null
     private var importedZipName: String? = null
@@ -115,6 +121,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private val pickApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { loadApkPreview(it) }
+    }
+
+    private val pickAnalyzeApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { analyzeExistingApk(it) }
     }
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -257,13 +267,39 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(label("Builds run in the background through the local Termux + Ubuntu engine. You do not need to open the Termux terminal. Termux, Termux:RunCommand, Java 17, Gradle and Android SDK must remain installed and configured.", 13, 0xFFB6BBC9.toInt(), false))
         setupCard.addView(space(8))
         setupCard.addView(actionButton("Analyze existing APK") {
-            pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+            pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         })
         setupCard.addView(space(6))
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         content.addView(setupCard)
+        content.addView(space(12))
+        analysisCard = card().apply { visibility = View.GONE }
+        analysisCard.addView(label("APK ANALYSIS REPORT", 12, 0xFF9AA7FF.toInt(), true))
+        analysisStatus = label("Select an APK to begin analysis.", 14, 0xFFB6BBC9.toInt(), false)
+        analysisCard.addView(analysisStatus)
+        analysisCard.addView(space(8))
+        analysisDetails = label("", 13, 0xFFFFFFFF.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisCard.addView(analysisDetails)
+        analysisCard.addView(space(10))
+        analysisCard.addView(label("APK CONTENTS", 11, 0xFF9AA7FF.toInt(), true))
+        analysisComponents = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisCard.addView(analysisComponents)
+        analysisCard.addView(space(10))
+        analysisCard.addView(label("REQUESTED PERMISSIONS", 11, 0xFF9AA7FF.toInt(), true))
+        analysisPermissions = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisCard.addView(analysisPermissions)
+        analysisCard.addView(space(10))
+        analysisCard.addView(label("SOURCE CODE RECOVERY", 11, 0xFF9AA7FF.toInt(), true))
+        analysisCard.addView(label("APK analysis does not decompile DEX bytecode. JADX decompilation is a separate step and has not been run.", 12, 0xFFB6BBC9.toInt(), false))
+        analysisCard.addView(space(8))
+        analysisCard.addView(actionButton("Copy analysis report") {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("APK Analysis Report", analysisReportText))
+            Toast.makeText(this, "Analysis report copied.", Toast.LENGTH_SHORT).show()
+        })
+        content.addView(analysisCard)
         content.addView(space(18))
-        content.addView(label("Version 1.2 • Background local build", 12, 0xFF737B8D.toInt(), false))
+        content.addView(label("Version 1.3 • APK analysis report", 12, 0xFF737B8D.toInt(), false))
 
         val previewContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -574,6 +610,74 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
             .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+    private fun analyzeExistingApk(uri: Uri) {
+        analysisCard.visibility = View.VISIBLE
+        analysisStatus.text = "Analyzing APK…"
+        analysisDetails.text = "Reading package metadata and APK contents."
+        analysisComponents.text = ""
+        analysisPermissions.text = ""
+        lifecycleScope.launch {
+            try {
+                val report = withContext(Dispatchers.IO) {
+                    val temp = File(cacheDir, "apk-analysis-" + System.currentTimeMillis() + ".apk")
+                    try {
+                        contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                            ?: error("Cannot read selected APK")
+                        @Suppress("DEPRECATION")
+                        val info = packageManager.getPackageArchiveInfo(temp.absolutePath,
+                            android.content.pm.PackageManager.GET_PERMISSIONS or
+                            android.content.pm.PackageManager.GET_ACTIVITIES or
+                            android.content.pm.PackageManager.GET_SERVICES or
+                            android.content.pm.PackageManager.GET_RECEIVERS or
+                            android.content.pm.PackageManager.GET_PROVIDERS) ?: error("Invalid APK or metadata unavailable")
+                        val appInfo = info.applicationInfo ?: error("Application information unavailable")
+                        appInfo.sourceDir = temp.absolutePath
+                        appInfo.publicSourceDir = temp.absolutePath
+                        val dexNames = mutableListOf<String>()
+                        var resourceCount = 0
+                        var assetCount = 0
+                        java.util.zip.ZipFile(temp).use { zip ->
+                            val entries = zip.entries()
+                            while (entries.hasMoreElements()) {
+                                val name = entries.nextElement().name
+                                if (Regex("classes(\\\\d+)?\\\\.dex").matches(name)) dexNames.add(name)
+                                if (name.startsWith("res/") && !name.endsWith("/")) resourceCount++
+                                if (name.startsWith("assets/") && !name.endsWith("/")) assetCount++
+                            }
+                        }
+                        val versionCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+                        val appName = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+                        val details = "App: " + appName + "\\nPackage: " + info.packageName +
+                            "\\nVersion: " + (info.versionName ?: "Unknown") + " (code " + versionCode + ")" +
+                            "\\nMin SDK: " + appInfo.minSdkVersion + "\\nTarget SDK: " + appInfo.targetSdkVersion +
+                            "\\nAPK size: " + (temp.length() / 1024) + " KB\\nDEX files: " + dexNames.size
+                        val components = "DEX files: " + dexNames.joinToString().ifBlank { "None" } +
+                            "\\nResources: " + resourceCount + "\\nAssets: " + assetCount +
+                            "\\nActivities: " + (info.activities?.size ?: 0) +
+                            "\\nServices: " + (info.services?.size ?: 0) +
+                            "\\nReceivers: " + (info.receivers?.size ?: 0) +
+                            "\\nProviders: " + (info.providers?.size ?: 0)
+                        val permissions = info.requestedPermissions?.joinToString("\\n") ?: "None listed"
+                        details + "\\n\\n" + components + "\\n\\nRequested permissions:\\n" + permissions
+                    } finally { temp.delete() }
+                }
+                analysisReportText = report
+                val parts = report.split("\\n\\nRequested permissions:\\n", limit = 2)
+                val mainParts = parts[0].split("\\n\\n", limit = 2)
+                analysisDetails.text = mainParts[0]
+                analysisComponents.text = if (mainParts.size > 1) mainParts[1] else "No content details"
+                analysisPermissions.text = if (parts.size > 1) parts[1] else "None listed"
+                analysisStatus.text = "Analysis completed successfully."
+            } catch (e: Exception) {
+                analysisStatus.text = "Analysis failed."
+                analysisDetails.text = e.message ?: "Could not analyze APK."
+                analysisComponents.text = "No APK content data available."
+                analysisPermissions.text = "No permissions available."
+                analysisReportText = "APK analysis failed: " + (e.message ?: "Unknown error")
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
