@@ -89,6 +89,7 @@ class ProjectEditorActivity : Activity() {
         applyTheme()
         val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE7ECF7.toInt(),14) }
         explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; toolbar.addView(explorerToggle)
+        toolbar.addView(smallButton("＋ File") { showFileActions() })
         toolbar.addView(smallButton("⌕ Find") { showFindReplace(false) })
         toolbar.addView(smallButton("⇄ Replace") { showFindReplace(true) })
         toolbar.addView(smallButton("✓ Save") { saveCurrent(true) })
@@ -197,9 +198,180 @@ class ProjectEditorActivity : Activity() {
             }
             item.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             item.maxLines = 1
+            item.setOnLongClickListener { showFileContextMenu(file); true }
             list.addView(item, LinearLayout.LayoutParams(-1, dp(38)))
         }
     }
+
+    private fun showFileActions() {
+        val actions = arrayOf("Create new file", "Create new folder", "Import file from device", "Rename current file", "Delete current file", "Save current file as…")
+        AlertDialog.Builder(this).setTitle("File & Project Actions").setItems(actions) { _, which ->
+            when (which) {
+                0 -> promptCreateFile()
+                1 -> promptCreateFolder()
+                2 -> importFile()
+                3 -> currentFile?.let { promptRename(it) } ?: toast("Open a file first")
+                4 -> currentFile?.let { confirmDelete(it) } ?: toast("Open a file first")
+                5 -> promptSaveAs()
+            }
+        }.setNegativeButton("Close", null).show()
+    }
+
+    private fun showFileContextMenu(file: File) {
+        val actions = arrayOf("Open / Edit", "Rename", "Copy", "Delete")
+        AlertDialog.Builder(this).setTitle(file.name).setItems(actions) { _, which ->
+            when (which) {
+                0 -> openFile(file)
+                1 -> promptRename(file)
+                2 -> copyFile(file)
+                3 -> confirmDelete(file)
+            }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun promptCreateFile() {
+        val box = EditText(this).apply { hint = "e.g. app/src/main/java/NewFile.kt"; setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Create new file").setMessage("Enter a project-relative path and file name.")
+            .setView(box).setPositiveButton("Create") { _, _ ->
+                val path = box.text.toString().trim().replace('\\\\', '/')
+                if (path.isBlank()) return@setPositiveButton
+                try {
+                    val file = File(rootDir, path).canonicalFile
+                    require(file.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                    require(!file.exists()) { "File already exists" }
+                    require(file.name.contains('.')) { "Add a file extension, e.g. .kt or .xml" }
+                    file.parentFile?.mkdirs()
+                    file.writeText("", Charsets.UTF_8)
+                    refreshExplorer()
+                    openFile(file)
+                    toast("File created")
+                } catch (e: Exception) { toast("Create failed: ${e.message}") }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun promptCreateFolder() {
+        val box = EditText(this).apply { hint = "e.g. app/src/main/res/drawable"; setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Create new folder").setView(box)
+            .setPositiveButton("Create") { _, _ ->
+                val path = box.text.toString().trim().replace('\\\\', '/')
+                if (path.isBlank()) return@setPositiveButton
+                try {
+                    val dir = File(rootDir, path).canonicalFile
+                    require(dir.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                    require(!dir.exists()) { "Folder already exists" }
+                    dir.mkdirs()
+                    refreshExplorer()
+                    toast("Folder created")
+                } catch (e: Exception) { toast("Create failed: ${e.message}") }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun promptRename(file: File) {
+        val box = EditText(this).apply { setText(file.relativeTo(rootDir).invariantSeparatorsPath); setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Rename / Move file").setMessage("Enter the new project-relative path.")
+            .setView(box).setPositiveButton("Save") { _, _ ->
+                val path = box.text.toString().trim().replace('\\\\', '/')
+                if (path.isBlank()) return@setPositiveButton
+                try {
+                    saveCurrent(false)
+                    val target = File(rootDir, path).canonicalFile
+                    require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                    require(!target.exists()) { "Destination already exists" }
+                    target.parentFile?.mkdirs()
+                    if (!file.renameTo(target)) error("Could not move or rename file")
+                    val oldText = openTabs.remove(file)
+                    if (oldText != null) openTabs[target] = oldText
+                    if (currentFile == file) currentFile = target
+                    refreshExplorer()
+                    currentFile?.takeIf { it == target }?.let { openFile(it) }
+                    renderTabs()
+                    toast("File renamed / moved")
+                } catch (e: Exception) { toast("Rename failed: ${e.message}") }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun copyFile(file: File) {
+        val box = EditText(this).apply { setText(file.relativeTo(rootDir).invariantSeparatorsPath.substringBeforeLast('.', file.name) + "_copy." + file.extension); setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Copy file").setView(box).setPositiveButton("Copy") { _, _ ->
+            try {
+                val target = File(rootDir, box.text.toString().trim()).canonicalFile
+                require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                require(!target.exists()) { "Destination already exists" }
+                target.parentFile?.mkdirs()
+                file.copyTo(target)
+                refreshExplorer()
+                toast("File copied")
+            } catch (e: Exception) { toast("Copy failed: ${e.message}") }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun confirmDelete(file: File) {
+        AlertDialog.Builder(this).setTitle("Delete ${file.name}?").setMessage("This permanently removes the file from this project.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
+                try {
+                    require(file.isFile && file.delete()) { "Could not delete file" }
+                    openTabs.remove(file)
+                    if (currentFile == file) {
+                        currentFile = null
+                        loadingText = true
+                        editor.setText("")
+                        loadingText = false
+                        fileLabel.text = "Select a source file to start editing"
+                        dirty = false
+                    }
+                    refreshExplorer()
+                    renderTabs()
+                    toast("File deleted")
+                } catch (e: Exception) { toast("Delete failed: ${e.message}") }
+            }.show()
+    }
+
+    private fun promptSaveAs() {
+        val box = EditText(this).apply { hint = "e.g. app/src/main/java/Backup.kt"; setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Save current file as").setView(box).setPositiveButton("Save As") { _, _ ->
+            val path = box.text.toString().trim().replace('\\\\', '/')
+            if (path.isBlank()) return@setPositiveButton
+            try {
+                val target = File(rootDir, path).canonicalFile
+                require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                require(!target.exists()) { "File already exists" }
+                target.parentFile?.mkdirs()
+                target.writeText(editor.text.toString(), Charsets.UTF_8)
+                openFile(target)
+                refreshExplorer()
+                toast("Saved as ${target.name}")
+            } catch (e: Exception) { toast("Save As failed: ${e.message}") }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun importFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, 7102)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7102 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                val name = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.contains('.') } ?: "imported_file.txt"
+                val target = File(rootDir, name).canonicalFile
+                require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid file name" }
+                require(!target.exists()) { "A file with this name already exists in project root" }
+                contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                    ?: error("Cannot read selected file")
+                refreshExplorer()
+                openFile(target)
+                toast("File imported")
+            } catch (e: Exception) { toast("Import failed: ${e.message}") }
+        }
+    }
+
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     private fun applyTheme() {
         root.setBackgroundColor(if(darkTheme) 0xFF080D1D.toInt() else 0xFFF4F6FA.toInt())
