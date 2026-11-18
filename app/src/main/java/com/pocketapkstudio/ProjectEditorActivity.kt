@@ -233,7 +233,7 @@ class ProjectEditorActivity : Activity() {
         val box = EditText(this).apply { hint = "e.g. app/src/main/java/NewFile.kt"; setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Create new file").setMessage("Enter a project-relative path and file name.")
             .setView(box).setPositiveButton("Create") { _, _ ->
-                val path = box.text.toString().trim().replace('\\\\', '/')
+                val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
                     val file = File(rootDir, path).canonicalFile
@@ -253,7 +253,7 @@ class ProjectEditorActivity : Activity() {
         val box = EditText(this).apply { hint = "e.g. app/src/main/res/drawable"; setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Create new folder").setView(box)
             .setPositiveButton("Create") { _, _ ->
-                val path = box.text.toString().trim().replace('\\\\', '/')
+                val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
                     val dir = File(rootDir, path).canonicalFile
@@ -270,7 +270,7 @@ class ProjectEditorActivity : Activity() {
         val box = EditText(this).apply { setText(file.relativeTo(rootDir).invariantSeparatorsPath); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Rename / Move file").setMessage("Enter the new project-relative path.")
             .setView(box).setPositiveButton("Save") { _, _ ->
-                val path = box.text.toString().trim().replace('\\\\', '/')
+                val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
                     saveCurrent(false)
@@ -329,7 +329,7 @@ class ProjectEditorActivity : Activity() {
     private fun promptSaveAs() {
         val box = EditText(this).apply { hint = "e.g. app/src/main/java/Backup.kt"; setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Save current file as").setView(box).setPositiveButton("Save As") { _, _ ->
-            val path = box.text.toString().trim().replace('\\\\', '/')
+            val path = box.text.toString().trim().replace('\\', '/')
             if (path.isBlank()) return@setPositiveButton
             try {
                 val target = File(rootDir, path).canonicalFile
