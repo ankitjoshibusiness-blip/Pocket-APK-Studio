@@ -13,8 +13,8 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val exitCode = result?.getInt("exitCode", -1) ?: -1
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
-        val successful = exitCode == 0 && errCode == -1
         if (intent.getStringExtra("task_type") == "server_check") {
+            val successful = exitCode == 0 && errCode == -1
             val ready = successful && stdout.contains("BUILD_SERVER_READY=1")
             val failure = Regex("BUILD_SERVER_FAILED=([^\\r\\n]+)").find(stdout)?.groupValues?.get(1)
             val detail = failure ?: errMessage.ifBlank { stderr.ifBlank { "Check Termux and Ubuntu setup." } }
@@ -24,14 +24,16 @@ class TermuxResultService : IntentService("TermuxResultService") {
             return
         }
         val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
-        val taskCount = Regex("(?m)^> Task ").findAll(stdout).count()
+        val verifiedApk = apkPath?.let(::java.io.File)?.takeIf { it.isFile && it.length() > 0L }
+        val successful = exitCode == 0 && errCode == -1 && verifiedApk != null
         val combined = buildString {
             append(stdout)
             if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
             if (errMessage.isNotBlank()) append("\n\nTERMUX ERROR:\n").append(errMessage)
         }
         val status = when {
-            successful -> "BUILD SUCCESS! APK saved in Downloads/PocketAPKStudio/Builds."
+            successful -> "BUILD SUCCESS! APK verified: " + verifiedApk!!.name
+            exitCode == 0 && errCode == -1 && verifiedApk == null -> "BUILD FAILED: Gradle returned success, but no valid APK file was found at the reported path."
             errCode != -1 -> "Termux could not run the build: $errMessage"
             else -> "BUILD FAILED (exit code $exitCode).\n${combined.takeLast(2200)}"
         }
@@ -40,7 +42,7 @@ class TermuxResultService : IntentService("TermuxResultService") {
             .putString("last_build_log", combined.takeLast(40000))
             .putBoolean("build_running", false)
             .putInt("last_build_percent", if (successful) 100 else 0)
-            .putString("last_apk_path", if (successful) apkPath else null)
+            .putString("last_apk_path", if (successful) verifiedApk!!.absolutePath else null)
             .apply()
         sendBroadcast(Intent("com.pocketapkstudio.BUILD_RESULT").setPackage(packageName))
         Log.i("PocketAPKStudio", "Termux build finished. exit=$exitCode err=$errCode")
