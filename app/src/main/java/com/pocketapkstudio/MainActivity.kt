@@ -127,8 +127,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             selectedUri = it
-            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            inspectZip(it)
+            try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            openProjectEditor(it)
         }
     }
 
@@ -273,6 +273,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(welcomeMenuItem("▣", "Open existing project") {
             pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
         })
+        homeContent.addView(welcomeMenuItem("</>", "Code Editor") { openPage?.invoke(1) })
         homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
             val repoUrl = EditText(this).apply {
                 hint = "https://github.com/owner/repository"
@@ -299,8 +300,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         })
         homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
-        homeContent.addView(welcomeMenuItem("☷", "IDE Configurations") { openSettingsPage?.invoke() })
-        homeContent.addView(welcomeMenuItem("</>", "Code Editor") { openPage?.invoke(1) })
         homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { openPage?.invoke(2) })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
@@ -331,12 +330,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         projectCard.addView(actionButton("Open ZIP in Code Editor", true) {
             val uri = selectedUri
             if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
-            else {
-                val editorIntent = Intent(this, ProjectEditorActivity::class.java)
-                    .putExtra("zip_uri", uri.toString())
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                editProjectResult.launch(editorIntent)
-            }
+            else openProjectEditor(uri)
         })
         editorContent.addView(projectCard)
         editorContent.addView(space(14))
@@ -637,6 +631,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
         homeTab.background = premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13)
         setContentView(root)
+    }
+
+    private fun openProjectEditor(uri: Uri) {
+        val editorIntent = Intent(this, ProjectEditorActivity::class.java)
+            .putExtra("zip_uri", uri.toString())
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        editProjectResult.launch(editorIntent)
     }
 
     private fun inspectZip(uri: Uri) {
