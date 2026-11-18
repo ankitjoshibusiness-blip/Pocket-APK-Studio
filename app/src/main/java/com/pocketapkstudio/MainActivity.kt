@@ -213,6 +213,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val (editorScroll, editorContent) = page()
         val (toolsScroll, toolsContent) = page()
         val (settingsScroll, settingsContent) = page()
+        editorContent.addView(label("CODE EDITOR", 18, 0xFFFFFFFF.toInt(), true))
+        editorContent.addView(label("Import and edit your Android project files", 12, 0xFF9EADD0.toInt(), false))
+        editorContent.addView(space(12))
+        settingsContent.addView(label("SETTINGS", 18, 0xFFFFFFFF.toInt(), true))
+        settingsContent.addView(label("Build environment and device information", 12, 0xFF9EADD0.toInt(), false))
+        settingsContent.addView(space(12))
 
         val welcomeCard = card().apply {
             background = premiumGradient(0xFF101B4B.toInt(), 0xFF3320A0.toInt(), 22)
@@ -383,7 +389,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(10), dp(4), dp(16))
         }
-        previewContent.addView(label("APK PREVIEW", 13, 0xFF9AA7FF.toInt(), true))
+        previewContent.addView(label("◉  APP PREVIEW", 18, 0xFFFFFFFF.toInt(), true))
         previewContent.addView(space(8))
         previewContent.addView(label("Check an APK before installing", 22, 0xFFFFFFFF.toInt(), true))
         previewContent.addView(label("View its app icon, package, version, SDK details and requested permissions.", 14, 0xFFB6BBC9.toInt(), false))
@@ -434,7 +440,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
             buttons.forEachIndexed { i, button ->
                 button.alpha = if (i == index) 1f else 0.72f
-                button.setBackgroundColor(if (i == index) 0xFF5268F5.toInt() else 0xFF293247.toInt())
+                button.background = if (i == index) premiumGradient(0xFF1647F5.toInt(), 0xFF5426D8.toInt(), 13) else premiumGradient(0xFF26365D.toInt(), 0xFF1B2948.toInt(), 13)
             }
         }
         val tabBar = LinearLayout(this).apply {
