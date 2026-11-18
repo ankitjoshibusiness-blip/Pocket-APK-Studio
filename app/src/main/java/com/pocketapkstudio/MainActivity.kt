@@ -232,9 +232,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
                 set -e
                 export DEBIAN_FRONTEND=noninteractive
-                SDK_DIR=/root/Android/Sdk
-                SDKMANAGER=/root/Android/cmdline-tools/latest/bin/sdkmanager
-
                 if command -v java >/dev/null 2>&1 &&
                    java -version 2>&1 | grep -q 17 &&
                    command -v git >/dev/null 2>&1 &&
@@ -242,9 +239,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
                    command -v wget >/dev/null 2>&1 &&
                    command -v unzip >/dev/null 2>&1 &&
                    command -v zip >/dev/null 2>&1 &&
-                   test -x "$SDKMANAGER" &&
-                   test -f "$SDK_DIR/platforms/android-35/android.jar" &&
-                   test -x "$SDK_DIR/build-tools/35.0.0/aapt"; then
+                   test -x "/root/Android/cmdline-tools/latest/bin/sdkmanager" &&
+                   test -f "/root/Android/Sdk/platforms/android-35/android.jar" &&
+                   test -x "/root/Android/Sdk/build-tools/35.0.0/aapt"; then
                     echo BUILD_SERVER_READY=1
                     exit 0
                 fi
@@ -255,7 +252,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 fi
                 apt-get install -y git curl wget unzip zip
 
-                if [ ! -x "$SDKMANAGER" ]; then
+                if [ ! -x "/root/Android/cmdline-tools/latest/bin/sdkmanager" ]; then
                     mkdir -p /root/Android/cmdline-tools
                     cd /tmp
                     wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
@@ -265,10 +262,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
                 fi
 
-                yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null || true
-                "$SDKMANAGER" --sdk_root="$SDK_DIR" platform-tools platforms;android-35 build-tools;35.0.0
-                test -f "$SDK_DIR/platforms/android-35/android.jar"
-                test -x "$SDK_DIR/build-tools/35.0.0/aapt"
+                yes | "/root/Android/cmdline-tools/latest/bin/sdkmanager" --sdk_root=/root/Android/Sdk --licenses >/dev/null || true
+                "/root/Android/cmdline-tools/latest/bin/sdkmanager" --sdk_root=/root/Android/Sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+                test -f "/root/Android/Sdk/platforms/android-35/android.jar"
+                test -x "/root/Android/Sdk/build-tools/35.0.0/aapt"
                 echo BUILD_SERVER_READY=1
             '
         """.trimIndent()
