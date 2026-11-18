@@ -470,12 +470,19 @@ class MainActivity : androidx.activity.ComponentActivity() {
             selectedPage = index
             val interpolator = android.view.animation.DecelerateInterpolator(1.7f)
             previous.animate()
-                .translationX(-dp(12).toFloat())
-                .scaleX(0.975f).scaleY(0.975f).alpha(0.48f)
-                .setDuration(280L).setInterpolator(interpolator).start()
+                .translationX(-dp(24).toFloat())
+                .scaleX(0.94f).scaleY(0.94f).alpha(0f)
+                .setDuration(125L).setInterpolator(interpolator)
+                .withEndAction {
+                    previous.visibility = View.GONE
+                    previous.alpha = 1f
+                    previous.translationX = 0f
+                    previous.scaleX = 1f
+                    previous.scaleY = 1f
+                }.start()
             next.animate()
                 .translationX(0f).scaleX(1f).scaleY(1f).alpha(1f)
-                .setDuration(280L).setInterpolator(interpolator)
+                .setDuration(245L).setInterpolator(interpolator)
                 .withEndAction {
                     previous.visibility = View.GONE
                     previous.alpha = 1f
