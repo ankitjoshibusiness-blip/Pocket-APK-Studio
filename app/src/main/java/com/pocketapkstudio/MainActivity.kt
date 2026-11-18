@@ -460,6 +460,30 @@ class MainActivity : androidx.activity.ComponentActivity() {
               command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
               test -n "${'$'}ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
               test -f "${'$'}ANDROID_HOME/platforms/android-35/android.jar" || { echo "ERROR: Android 35 SDK platform is missing"; exit 15; }
+              AAPT2_DIR="${'$'}HOME/.local/bin"
+              AAPT2="${'$'}AAPT2_DIR/aapt2"
+              mkdir -p "${'$'}AAPT2_DIR"
+              if [ ! -x "${'$'}AAPT2" ] || ! "${'$'}AAPT2" version >/dev/null 2>&1; then
+                echo "Installing ARM64 AAPT2..."
+                if command -v curl >/dev/null 2>&1; then
+                  curl -L --fail --silent --show-error "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -o "${'$'}AAPT2"
+                elif command -v wget >/dev/null 2>&1; then
+                  wget -q "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -O "${'$'}AAPT2"
+                else
+                  echo "ERROR: curl or wget is required to install ARM64 AAPT2"
+                  exit 17
+                fi
+              fi
+              echo "7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b  ${'$'}AAPT2" | sha256sum -c - || { echo "ERROR: ARM64 AAPT2 checksum verification failed"; exit 18; }
+              chmod 755 "${'$'}AAPT2"
+              "${'$'}AAPT2" version
+              mkdir -p "${'$'}HOME/.gradle"
+              touch "${'$'}HOME/.gradle/gradle.properties"
+              if grep -q '^android.aapt2FromMavenOverride=' "${'$'}HOME/.gradle/gradle.properties"; then
+                sed -i "s|^android.aapt2FromMavenOverride=.*|android.aapt2FromMavenOverride=${'$'}AAPT2|" "${'$'}HOME/.gradle/gradle.properties"
+              else
+                echo "android.aapt2FromMavenOverride=${'$'}AAPT2" >> "${'$'}HOME/.gradle/gradle.properties"
+              fi
               PROJECT="${'$'}HOME/pocket-apk-studio/project"
               mkdir -p "${'$'}PROJECT"
               rm -rf "${'$'}PROJECT"/*
