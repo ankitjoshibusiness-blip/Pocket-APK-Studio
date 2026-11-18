@@ -1074,8 +1074,145 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun showQuickStart() {
-        Toast.makeText(this, "Choose Editor to import a project, or APK Tools to analyze an APK.", Toast.LENGTH_LONG).show()
+        val box=LinearLayout(this).apply{orientation=1;setPadding(dp(16),dp(8),dp(16),dp(8))}
+        val scroll=ScrollView(this).apply{addView(box)}
+        fun title(t:String){box.addView(label(t,12,0xFF9AA7FF.toInt(),true))}
+        val name=EditText(this).apply{hint="My First App";setSingleLine(true)}
+        val pkg=EditText(this).apply{setText("com.example.myapp");setSingleLine(true)}
+        val ver=EditText(this).apply{setText("1.0");setSingleLine(true)}
+        fun spin(a:List<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,a)}
+        val lang=spin(listOf("Kotlin","Java"))
+        val template=spin(listOf("Empty Activity","Basic Activity","Material UI App","WebView App","Login & Signup App","Navigation Drawer App","Bottom Navigation App","Custom Template"))
+        val sdk=spin(listOf("24","26","28","29","30","31","33","35")).apply{setSelection(1)}
+        box.addView(label("CREATE NEW ANDROID PROJECT",18,0xFFFFFFFF.toInt(),true))
+        box.addView(label("Ready-to-edit Gradle project",12,0xFFB6C5E8.toInt(),false))
+        title("PROJECT NAME");box.addView(name)
+        title("PACKAGE NAME");box.addView(pkg)
+        title("LANGUAGE");box.addView(lang)
+        title("TEMPLATE");box.addView(template)
+        title("MINIMUM SDK");box.addView(sdk)
+        title("APP VERSION");box.addView(ver)
+        val dlg=AlertDialog.Builder(this).setTitle("Quick Start").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Create Project",null).create()
+        dlg.setOnShowListener{dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val n=name.text.toString().trim();val p=pkg.text.toString().trim();val v=ver.text.toString().trim()
+            if(n.isBlank()){name.error="Required";return@setOnClickListener}
+            if(!p.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))){pkg.error="Example: com.example.myapp";return@setOnClickListener}
+            if(!v.matches(Regex("[0-9]+(\\.[0-9]+){0,2}"))){ver.error="Example: 1.0";return@setOnClickListener}
+            dlg.dismiss();createNewProject(n,p,lang.selectedItem.toString(),template.selectedItem.toString(),sdk.selectedItem.toString().toInt(),v)
+        }}
+        dlg.show()
     }
+
+    private fun createNewProject(appName:String,pkg:String,language:String,template:String,minSdk:Int,version:String){
+        try{
+            val dir=File(cacheDir,"quick-start-project").apply{deleteRecursively();mkdirs()}
+            fun write(path:String,data:String){val f=File(dir,path);f.parentFile?.mkdirs();f.writeText(data.trimIndent()+"\n")}
+            val kotlin=language=="Kotlin"
+            write("settings.gradle.kts","""
+                pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+                dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+                rootProject.name = "$appName"
+                include(":app")
+            """)
+            write("build.gradle.kts","""
+                plugins {
+                    id("com.android.application") version "8.7.3" apply false
+                    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+                }
+            """)
+            write("gradle.properties","""
+                org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8
+                android.useAndroidX=true
+                kotlin.code.style=official
+            """)
+            val kotlinPlugin=if(kotlin) "id(\"org.jetbrains.kotlin.android\")" else ""
+            write("app/build.gradle.kts","""
+                plugins { id("com.android.application"); $kotlinPlugin }
+                android {
+                    namespace = "$pkg"
+                    compileSdk = 35
+                    defaultConfig { applicationId = "$pkg"; minSdk = $minSdk; targetSdk = 35; versionCode = 1; versionName = "$version" }
+                }
+            """)
+            val permission=if(template=="WebView App") "<uses-permission android:name=\"android.permission.INTERNET\"/>" else ""
+            val safeName=appName.replace("&","&amp;").replace("\"","&quot;")
+            write("app/src/main/AndroidManifest.xml","""
+                <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                    $permission
+                    <application android:label="$safeName" android:theme="@style/AppTheme" android:allowBackup="true">
+                        <activity android:name=".MainActivity" android:exported="true">
+                            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+                        </activity>
+                    </application>
+                </manifest>
+            """)
+            write("app/src/main/res/values/styles.xml","""
+                <resources><style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+                    <item name="android:colorAccent">#536DFE</item><item name="android:statusBarColor">#10172C</item>
+                    <item name="android:navigationBarColor">#10172C</item>
+                </style></resources>
+            """)
+            val source=starterSource(pkg,appName,template,kotlin)
+            val ext=if(kotlin) "kt" else "java"
+            write("app/src/main/java/"+pkg.replace(".","/")+"/MainActivity."+ext,source)
+            write("README.md","# $appName\nPocket APK Studio starter project.\nTemplate: $template\nLanguage: $language\nMinimum SDK: $minSdk\n")
+            val zip=File(cacheDir,"quick-start-"+System.currentTimeMillis()+".zip")
+            java.util.zip.ZipOutputStream(zip.outputStream().buffered()).use{z->dir.walkTopDown().filter{it.isFile}.forEach{f->
+                z.putNextEntry(java.util.zip.ZipEntry(f.relativeTo(dir).invariantSeparatorsPath));f.inputStream().buffered().use{it.copyTo(z)};z.closeEntry()
+            }}
+            val uri=FileProvider.getUriForFile(this,"$packageName.fileprovider",zip)
+            editProjectResult.launch(Intent(this,ProjectEditorActivity::class.java).putExtra("zip_uri",uri.toString()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            Toast.makeText(this,"$template project created.",Toast.LENGTH_SHORT).show()
+        }catch(e:Exception){Toast.makeText(this,"Project creation failed: \${e.message}",Toast.LENGTH_LONG).show()}
+    }
+
+    private fun starterSource(pkg:String,appName:String,template:String,kotlin:Boolean):String{
+        val app=appName.replace("\"","\\\"")
+        val body=when(template){
+            "Empty Activity" -> "// Start coding here."
+            "WebView App" -> if(kotlin) """val web=WebView(this);web.settings.javaScriptEnabled=true;web.loadUrl("https://example.com");root.addView(web,LinearLayout.LayoutParams(-1,0,1f))""" else """WebView web=new WebView(this);web.getSettings().setJavaScriptEnabled(true);web.loadUrl("https://example.com");root.addView(web,new LinearLayout.LayoutParams(-1,0,1f));"""
+            "Login & Signup App" -> if(kotlin) """val email=EditText(this).apply{hint="Email"};val pass=EditText(this).apply{hint="Password";inputType=129};root.addView(email);root.addView(pass);root.addView(Button(this).apply{text="Login"});root.addView(Button(this).apply{text="Sign up"})""" else """EditText email=new EditText(this);email.setHint("Email");root.addView(email);EditText pass=new EditText(this);pass.setHint("Password");root.addView(pass);Button login=new Button(this);login.setText("Login");root.addView(login);"""
+            "Navigation Drawer App" -> if(kotlin) """root.addView(Button(this).apply{text="☰ Open menu";setOnClickListener{android.app.AlertDialog.Builder(this@MainActivity).setItems(arrayOf("Home","Profile","Settings")){_,i->heading.text=arrayOf("Home","Profile","Settings")[i]}.show()}})""" else """Button menu=new Button(this);menu.setText("Open menu");menu.setOnClickListener(v->new android.app.AlertDialog.Builder(this).setItems(new String[]{"Home","Profile","Settings"},(d,i)->heading.setText(new String[]{"Home","Profile","Settings"}[i])).show());root.addView(menu);"""
+            "Bottom Navigation App" -> if(kotlin) """val content=TextView(this).apply{text="Home screen";gravity=Gravity.CENTER};root.addView(content,LinearLayout.LayoutParams(-1,0,1f));val nav=LinearLayout(this);listOf("Home","Search","Profile").forEach{item->nav.addView(Button(this).apply{text=item;setOnClickListener{content.text=item+" screen"}},LinearLayout.LayoutParams(0,52,1f))};root.addView(nav)""" else """TextView content=new TextView(this);content.setText("Home screen");content.setGravity(Gravity.CENTER);root.addView(content,new LinearLayout.LayoutParams(-1,0,1f));LinearLayout nav=new LinearLayout(this);for(String item:new String[]{"Home","Search","Profile"}){Button b=new Button(this);b.setText(item);b.setOnClickListener(v->content.setText(item+" screen"));nav.addView(b,new LinearLayout.LayoutParams(0,52,1f));}root.addView(nav);"""
+            "Material UI App" -> if(kotlin) """val card=TextView(this).apply{text="Welcome to your app";textSize=20f;setPadding(28,28,28,28);setBackgroundColor(0xFFE8EAF6.toInt())};root.addView(card);root.addView(Button(this).apply{text="Get Started"})""" else """TextView card=new TextView(this);card.setText("Welcome to your app");card.setTextSize(20);card.setPadding(28,28,28,28);card.setBackgroundColor(0xFFE8EAF6);root.addView(card);"""
+            "Custom Template" -> if(kotlin) """root.addView(TextView(this).apply{text="Your custom app starts here."})""" else """TextView note=new TextView(this);note.setText("Your custom app starts here.");root.addView(note);"""
+            else -> if(kotlin) """val message=TextView(this).apply{text="Welcome to $app";textSize=20f};root.addView(message);root.addView(Button(this).apply{text="Get Started";setOnClickListener{message.text="Ready!"}})""" else """TextView message=new TextView(this);message.setText("Welcome to $app");root.addView(message);"""
+        }
+        val webImport=if(template=="WebView App") "import android.webkit.WebView\n" else ""
+        return if(kotlin) """
+            package $pkg
+            import android.app.Activity
+            import android.os.Bundle
+            import android.view.Gravity
+            import android.widget.*
+            $webImport
+            class MainActivity:Activity(){
+                override fun onCreate(savedInstanceState:Bundle?){
+                    super.onCreate(savedInstanceState)
+                    val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL;setPadding(24,24,24,24);setBackgroundColor(0xFFF5F7FF.toInt())}
+                    val heading=TextView(this).apply{text="$app";textSize=24f;setTextColor(0xFF18264A.toInt());setPadding(0,0,0,20)}
+                    root.addView(heading)
+                    $body
+                    setContentView(root)
+                }
+            }
+        """.trimIndent() else """
+            package $pkg;
+            import android.app.Activity;import android.os.Bundle;import android.view.Gravity;import android.widget.*;
+            $webImport
+            public class MainActivity extends Activity{
+                @Override public void onCreate(Bundle savedInstanceState){
+                    super.onCreate(savedInstanceState);
+                    LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setGravity(Gravity.CENTER_VERTICAL);root.setPadding(24,24,24,24);root.setBackgroundColor(0xFFF5F7FF);
+                    TextView heading=new TextView(this);heading.setText("$app");heading.setTextSize(24);root.addView(heading);
+                    $body
+                    setContentView(root);
+                }
+            }
+        """.trimIndent()
+    }
+
+
 
     private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
         this.text = text
