@@ -20,6 +20,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,6 +33,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var projectName: TextView
     private lateinit var projectType: TextView
     private lateinit var buildProgress: ProgressBar
+    private lateinit var percentText: TextView
+    private lateinit var logs: TextView
+    private lateinit var installButton: Button
+    private lateinit var shareButton: Button
     private var selectedUri: Uri? = null
     private var importedZipName: String? = null
     private var projectIsGradle = false
@@ -39,7 +45,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
             status.text = prefs.getString("last_build_status", "Build finished. Check result.")
-            buildProgress.visibility = View.GONE
+            buildProgress.visibility = View.VISIBLE
+            buildProgress.isIndeterminate = false
+            buildProgress.progress = prefs.getInt("last_build_percent", 0)
+            percentText.text = "${buildProgress.progress}%"
+            logs.text = prefs.getString("last_build_log", "No build logs yet.")
+            val apk = prefs.getString("last_apk_path", null)?.let(::File)
+            val available = apk?.isFile == true
+            installButton.visibility = if (available) View.VISIBLE else View.GONE
+            shareButton.visibility = if (available) View.VISIBLE else View.GONE
         }
     }
 
@@ -131,10 +145,34 @@ class MainActivity : androidx.activity.ComponentActivity() {
             indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF7184FF.toInt())
         }
         buildCard.addView(buildProgress, LinearLayout.LayoutParams(-1, dp(6)))
+        percentText = label("0%", 11, 0xFF9AA7FF.toInt(), true)
+        buildCard.addView(percentText)
         buildCard.addView(space(8))
         status = label("Waiting for a project.", 13, 0xFFB6BBC9.toInt(), false)
         buildCard.addView(status)
+        installButton = actionButton("Install APK") { installBuiltApk() }.apply { visibility = View.GONE }
+        shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
+        buildCard.addView(space(6)); buildCard.addView(installButton)
+        buildCard.addView(space(6)); buildCard.addView(shareButton)
         content.addView(buildCard)
+        content.addView(space(12))
+        val logCard = card()
+        logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
+        logs = label("Build output will appear here.", 11, 0xFFB6BBC9.toInt(), false).apply {
+            setTextIsSelectable(true)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF0B0E15.toInt()); cornerRadius = dp(10).toFloat() }
+        }
+        val logScroll = ScrollView(this).apply { layoutParams = LinearLayout.LayoutParams(-1, dp(180)) }
+        logScroll.addView(logs)
+        logCard.addView(logScroll)
+        logCard.addView(space(6))
+        logCard.addView(actionButton("Copy build logs") {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
+            Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
+        })
+        content.addView(logCard)
         content.addView(space(18))
 
         val setupCard = card()
@@ -210,7 +248,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
 
         buildProgress.visibility = View.VISIBLE
+        buildProgress.isIndeterminate = true
+        percentText.text = "BUILD RUNNING"
+        installButton.visibility = View.GONE
+        shareButton.visibility = View.GONE
         status.text = "Preparing project…"
+        logs.text = "Preparing project…"
+        getSharedPreferences("build_state", MODE_PRIVATE).edit()
+            .putBoolean("build_running", true).putInt("last_build_percent", 0)
+            .putString("last_build_log", "Preparing project…").apply()
         lifecycleScope.launch {
             try {
                 val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
@@ -309,11 +355,33 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 .apply()
             startService(intent)
             buildProgress.visibility = View.VISIBLE
-            status.text = "Build running… Please keep Pocket APK Studio available. The progress bar is indeterminate while Gradle works in the background."
+            buildProgress.isIndeterminate = true
+            percentText.text = "BUILD RUNNING"
+            status.text = "Build running in background. Gradle task logs will be shown when the build finishes."
         } catch (e: Exception) {
             buildProgress.visibility = View.GONE
             status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
         }
+    }
+
+    private fun installBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File)
+        if (apk == null || !apk.isFile) { status.text = "APK file not found. Build again."; return }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { status.text = "Could not open installer: ${e.message}" }
+    }
+
+    private fun shareBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File) ?: return
+        if (!apk.isFile) return
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
     }
 
     private fun card() = LinearLayout(this).apply {
