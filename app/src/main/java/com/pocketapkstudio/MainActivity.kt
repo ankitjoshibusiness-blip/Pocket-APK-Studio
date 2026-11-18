@@ -484,7 +484,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
               else
                 echo "android.aapt2FromMavenOverride=${'$'}AAPT2" >> "${'$'}HOME/.gradle/gradle.properties"
               fi
-              PROJECT="${'"${'$'}PROJECT"/*
+              PROJECT="${'$'}HOME/pocket-apk-studio/project"
+              mkdir -p "${'$'}PROJECT"
+              rm -rf "${'$'}PROJECT"/*
               unzip -q -o "$sharedZip" -d "${'$'}PROJECT"
               SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
               test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
