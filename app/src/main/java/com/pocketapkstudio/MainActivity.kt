@@ -277,44 +277,41 @@ class MainActivity : androidx.activity.ComponentActivity() {
         serverStatus.text = "Checking Termux + Ubuntu build engine…"
         val command = """
             set -e
-            command -v proot-distro >/dev/null || { echo BUILD_SERVER_FAILED=Termux-proot-distro-missing; exit 10; }
-            proot-distro login ubuntu -- bash -lc "command -v java >/dev/null || { echo BUILD_SERVER_FAILED=Java-missing; exit 11; }; test -n \"${'
-        val source = selectedUri
-        if (source == null) {
-            Toast.makeText(this, "Please import a project ZIP first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (projectIsFlutter) {
-            status.text = "Flutter project detected. Flutter SDK build integration is planned for a later version."
-            return
-        }
-        if (!projectIsGradle) {
-            status.text = "No Gradle settings/build file found. Select a valid Android Studio project ZIP."
-            return
-        }
+            if ! command -v proot-distro >/dev/null 2>&1; then
+                echo BUILD_SERVER_FAILED=Termux-proot-distro-missing
+                exit 10
+            fi
+            proot-distro login ubuntu -- bash -lc ' 
+                if ! command -v java >/dev/null 2>&1; then echo BUILD_SERVER_FAILED=Java-missing; exit 11; fi
+                if [ -z "$ANDROID_HOME" ]; then echo BUILD_SERVER_FAILED=ANDROID_HOME-not-configured; exit 13; fi
+                if [ ! -f "$ANDROID_HOME/platforms/android-35/android.jar" ]; then echo BUILD_SERVER_FAILED=Android-SDK-35-missing; exit 15; fi
+                mkdir -p "$HOME/pocket-apk-studio/project"
+                echo BUILD_SERVER_READY=1
+            '
+        """.trimIndent()
 
-        buildProgress.visibility = View.VISIBLE
-        buildProgress.isIndeterminate = true
-        percentText.text = "BUILD RUNNING"
-        installButton.visibility = View.GONE
-        shareButton.visibility = View.GONE
-        status.text = "Preparing project…"
-        logs.text = "Preparing project…"
-        getSharedPreferences("build_state", MODE_PRIVATE).edit()
-            .putBoolean("build_running", true).putInt("last_build_percent", 0)
-            .putString("last_build_log", "Preparing project…").apply()
-        lifecycleScope.launch {
-            try {
-                val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
-                importedZipName = fileName
-                launchTermuxBuild(fileName)
-            } catch (e: Exception) {
-                buildProgress.visibility = View.GONE
-                status.text = "Could not prepare ZIP: ${e.message ?: "storage error"}"
-            }
+        val resultIntent = Intent(this, TermuxResultService::class.java).apply {
+            putExtra("task_type", "server_check")
+        }
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val callback = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", callback)
+        }
+        try {
+            startService(intent)
+        } catch (e: Exception) {
+            serverStatus.text = "Cannot start Termux: ${e.message ?: "check Termux permissions"}"
         }
     }
-
     private fun copyZipToDownloads(uri: Uri): String {
         val original = queryDisplayName(uri) ?: "android-project.zip"
         val safeName = original.replace(Regex("[^A-Za-z0-9._-]"), "_").let {
