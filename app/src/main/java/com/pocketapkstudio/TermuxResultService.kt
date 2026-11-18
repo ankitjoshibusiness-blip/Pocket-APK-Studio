@@ -36,6 +36,25 @@ class TermuxResultService : IntentService("TermuxResultService") {
             Log.i("PocketAPKStudio", "JADX decompilation finished. exit=$exitCode err=$errCode")
             return
         }
+        if (intent.getStringExtra("task_type") == "environment_setup") {
+            val successful = exitCode == 0 && errCode == -1 && stdout.contains("BUILD_SERVER_READY=1")
+            val combined = buildString {
+                append(stdout)
+                if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
+                if (errMessage.isNotBlank()) append("\n\nTERMUX ERROR:\n").append(errMessage)
+            }
+            val message = if (successful) {
+                "Build environment READY — Termux, Ubuntu, Java 17 and Android SDK are configured."
+            } else {
+                "Automatic setup did not finish. Check Termux permission, allow-external-apps setting and internet connection.\n" + combined.takeLast(1800)
+            }
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("server_status", message)
+                .apply()
+            sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
+            Log.i("PocketAPKStudio", "Environment setup finished. exit=$exitCode err=$errCode")
+            return
+        }
         if (intent.getStringExtra("task_type") == "server_check") {
             val successful = exitCode == 0 && errCode == -1
             val ready = successful && stdout.contains("BUILD_SERVER_READY=1")
