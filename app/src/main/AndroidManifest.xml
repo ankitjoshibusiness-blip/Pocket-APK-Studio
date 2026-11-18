@@ -7,7 +7,7 @@
     </queries>
     <application
         android:allowBackup="true"
-        android:label="Pocket APK Studio"
+        android:label="Pocket Apk Studio"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme"
