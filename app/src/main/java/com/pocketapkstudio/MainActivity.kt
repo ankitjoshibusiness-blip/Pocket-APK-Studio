@@ -453,9 +453,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     page.scaleY = 1f
                 }
             }
-            // Layer-slide: the incoming page rises above the outgoing page,
-            // while the old page subtly recedes to create a stacked-card effect.
-            val slideDistance = dp(42).toFloat()
+            // Reverse the layer-slide direction when navigating to an earlier tab.
+            // Later tab: incoming from right, outgoing to left.
+            // Earlier tab: incoming from left, outgoing to right.
+            val direction = if (index > selectedPage) 1f else -1f
+            val slideDistance = dp(42).toFloat() * direction
+            val exitDistance = dp(24).toFloat() * direction
             next.visibility = View.VISIBLE
             next.bringToFront()
             next.alpha = 0f
@@ -470,7 +473,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             selectedPage = index
             val interpolator = android.view.animation.DecelerateInterpolator(1.7f)
             previous.animate()
-                .translationX(-dp(24).toFloat())
+                .translationX(-exitDistance)
                 .scaleX(0.94f).scaleY(0.94f).alpha(0f)
                 .setDuration(125L).setInterpolator(interpolator)
                 .withEndAction {
