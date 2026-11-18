@@ -64,7 +64,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT")
+        val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT").apply {
+            addAction("com.pocketapkstudio.SERVER_STATUS")
+        }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
         refreshBuildResult()
