@@ -14,6 +14,15 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
         val successful = exitCode == 0 && errCode == -1
+        if (intent.getStringExtra("task_type") == "server_check") {
+            val ready = successful && stdout.contains("BUILD_SERVER_READY=1")
+            val failure = Regex("BUILD_SERVER_FAILED=([^\\r\\n]+)").find(stdout)?.groupValues?.get(1)
+            val detail = failure ?: errMessage.ifBlank { stderr.ifBlank { "Check Termux and Ubuntu setup." } }
+            val message = if (ready) "Build server READY - Termux + Ubuntu + Java + Android SDK connected." else "Build server NOT READY. " + detail
+            getSharedPreferences("build_state", MODE_PRIVATE).edit().putString("server_status", message).apply()
+            sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
+            return
+        }
         val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
         val taskCount = Regex("(?m)^> Task ").findAll(stdout).count()
         val combined = buildString {
