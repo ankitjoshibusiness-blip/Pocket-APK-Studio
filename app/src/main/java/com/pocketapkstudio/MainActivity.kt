@@ -206,7 +206,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         importCard.addView(space(8))
         importCard.addView(actionButton("Choose project folder") { pickFolder.launch(null) })
         editorContent.addView(importCard)
-        content.addView(space(14))
+        editorContent.addView(space(14))
 
         val projectCard = card()
         projectCard.addView(label("2. PROJECT DETAILS", 12, 0xFF9AA7FF.toInt(), true))
@@ -226,7 +226,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         })
         editorContent.addView(projectCard)
-        content.addView(space(14))
+        editorContent.addView(space(14))
 
         val serverCard = card()
         serverCard.addView(label("3. LOCAL BUILD SERVER", 12, 0xFF9AA7FF.toInt(), true))
@@ -236,7 +236,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         serverCard.addView(space(8))
         serverCard.addView(actionButton("Check Termux + Ubuntu server") { checkBuildServer() })
         settingsContent.addView(serverCard)
-        content.addView(space(14))
+        editorContent.addView(space(14))
 
         val buildCard = card()
         buildCard.addView(label("3. BUILD", 12, 0xFF9AA7FF.toInt(), true))
@@ -260,7 +260,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
         homeContent.addView(buildCard)
-        content.addView(space(12))
+        toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
         logs = label("Build output will appear here.", 11, 0xFFB6BBC9.toInt(), false).apply {
@@ -278,7 +278,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
         homeContent.addView(logCard)
-        content.addView(space(18))
+        homeContent.addView(space(18))
 
         val setupCard = card()
         setupCard.addView(label("LOCAL BUILD REQUIREMENTS", 12, 0xFF9AA7FF.toInt(), true))
