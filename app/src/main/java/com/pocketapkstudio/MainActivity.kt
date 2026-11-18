@@ -127,6 +127,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private val editProjectResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data?.data != null) {
+            selectedUri = result.data!!.data
+            projectIsGradle = true
+            projectIsFlutter = false
+            projectName.text = "Edited project ZIP"
+            projectType.text = "Changes saved. Build will use the edited project."
+            status.text = "Edited project ready to build."
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         clearLegacyAiData()
@@ -175,6 +186,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         projectCard.addView(projectName)
         projectType = label("Targets: Android Java/Kotlin first; Flutter later", 14, 0xFFB6BBC9.toInt(), false)
         projectCard.addView(projectType)
+        projectCard.addView(space(8))
+        projectCard.addView(actionButton("Open ZIP in Code Editor", true) {
+            val uri = selectedUri
+            if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
+            else {
+                val editorIntent = Intent(this, ProjectEditorActivity::class.java)
+                    .putExtra("zip_uri", uri.toString())
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                editProjectResult.launch(editorIntent)
+            }
+        })
         content.addView(projectCard)
         content.addView(space(14))
 
