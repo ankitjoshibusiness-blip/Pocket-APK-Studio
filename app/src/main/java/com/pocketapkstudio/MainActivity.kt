@@ -165,10 +165,44 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private val termuxPermissionRequest = 7401
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         clearLegacyAiData()
         buildScreen()
+        connectTermuxOnStartup()
+    }
+
+    private fun connectTermuxOnStartup() {
+        if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
+            serverStatus.text = "Termux is not installed. Install Termux and Ubuntu to connect."
+            return
+        }
+        val permission = "com.termux.permission.RUN_COMMAND"
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            serverStatus.text = "Waiting for Termux permission…"
+            requestPermissions(arrayOf(permission), termuxPermissionRequest)
+        } else {
+            checkBuildServer()
+        }
+    }
+
+    @Deprecated("Deprecated in Android API; retained for compatibility with permission callback")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == termuxPermissionRequest) {
+            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                checkBuildServer()
+            } else {
+                serverStatus.text = "Termux permission denied. Allow RUN_COMMAND permission to connect."
+                AlertDialog.Builder(this)
+                    .setTitle("Termux permission required")
+                    .setMessage("Allow Pocket APK Studio to run commands in Termux. Then reopen the app to connect to Ubuntu automatically.")
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
     }
 
     private fun clearLegacyAiData() {
