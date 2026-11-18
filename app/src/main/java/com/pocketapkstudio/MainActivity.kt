@@ -299,6 +299,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
         })
         homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
         homeContent.addView(welcomeMenuItem("☷", "IDE Configurations") { openSettingsPage?.invoke() })
+        homeContent.addView(welcomeMenuItem("</>", "Code Editor") { showPage(1) })
+        homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { showPage(2) })
+        homeContent.addView(welcomeMenuItem("◉", "App Preview") { showPage(3) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
                 .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nCode Editor: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
@@ -368,7 +371,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
-        homeContent.addView(buildCard)
+        editorContent.addView(buildCard)
         toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -386,7 +389,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        homeContent.addView(logCard)
+        editorContent.addView(logCard)
         homeContent.addView(space(18))
 
         val setupCard = card()
@@ -578,6 +581,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         }
         openSettingsPage = { showPage(4) }
+
+        fun addPageBackHeader(target: LinearLayout, title: String, home: Boolean = false) {
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(2), dp(4), dp(2), dp(12))
+            }
+            val back = actionButton("‹") {
+                if (home) finish() else showPage(0)
+            }.apply {
+                textSize = 27f
+                setPadding(dp(10), 0, dp(10), 0)
+                minWidth = dp(46)
+                background = premiumGradient(0xFF344653.toInt(), 0xFF2B3B47.toInt(), 12)
+                contentDescription = if (home) "Exit app" else "Back to Home"
+            }
+            header.addView(back, LinearLayout.LayoutParams(dp(48), dp(44)))
+            header.addView(label(title, 17, 0xFFE2E8ED.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
+            target.addView(header, 0)
+        }
+        addPageBackHeader(homeContent, "Pocket APK Studio", true)
+        addPageBackHeader(editorContent, "Code Editor")
+        addPageBackHeader(toolsContent, "APK Tools")
+        addPageBackHeader(previewContent, "App Preview")
+        addPageBackHeader(settingsContent, "Settings")
         val tabBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -602,8 +630,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             pageContainer.addView(page, FrameLayout.LayoutParams(-1, -1))
         }
         root.addView(pageContainer, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(tabBar)
-        listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach { tabBar.addView(it) }
+        // Bottom navigation removed; navigation is available from the Welcome screen and page back controls.
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
         homeTab.background = premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13)
         setContentView(root)
