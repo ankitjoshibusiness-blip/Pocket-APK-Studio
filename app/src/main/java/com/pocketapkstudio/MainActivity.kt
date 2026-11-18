@@ -641,31 +641,33 @@ class MainActivity : androidx.activity.ComponentActivity() {
                         java.util.zip.ZipFile(temp).use { zip ->
                             val entries = zip.entries()
                             while (entries.hasMoreElements()) {
-                                val name = entries.nextElement().name
-                                if (Regex("classes(\\\\d+)?\\\\.dex").matches(name)) dexNames.add(name)
-                                if (name.startsWith("res/") && !name.endsWith("/")) resourceCount++
-                                if (name.startsWith("assets/") && !name.endsWith("/")) assetCount++
+                                val entryName = entries.nextElement().name
+                                val name = entryName.substringAfterLast('/')
+                                if (name.endsWith(".dex", ignoreCase = true)) dexNames.add(entryName)
+                                if (entryName.startsWith("res/") && !entryName.endsWith("/")) resourceCount++
+                                if (entryName.startsWith("assets/") && !entryName.endsWith("/")) assetCount++
                             }
                         }
+                        dexNames.sort()
                         val versionCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
                         val appName = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
-                        val details = "App: " + appName + "\\nPackage: " + info.packageName +
-                            "\\nVersion: " + (info.versionName ?: "Unknown") + " (code " + versionCode + ")" +
-                            "\\nMin SDK: " + appInfo.minSdkVersion + "\\nTarget SDK: " + appInfo.targetSdkVersion +
-                            "\\nAPK size: " + (temp.length() / 1024) + " KB\\nDEX files: " + dexNames.size
-                        val components = "DEX files: " + dexNames.joinToString().ifBlank { "None" } +
-                            "\\nResources: " + resourceCount + "\\nAssets: " + assetCount +
-                            "\\nActivities: " + (info.activities?.size ?: 0) +
-                            "\\nServices: " + (info.services?.size ?: 0) +
-                            "\\nReceivers: " + (info.receivers?.size ?: 0) +
-                            "\\nProviders: " + (info.providers?.size ?: 0)
-                        val permissions = info.requestedPermissions?.joinToString("\\n") ?: "None listed"
-                        details + "\\n\\n" + components + "\\n\\nRequested permissions:\\n" + permissions
+                        val details = "App: " + appName + "\nPackage: " + info.packageName +
+                            "\nVersion: " + (info.versionName ?: "Unknown") + " (code " + versionCode + ")" +
+                            "\nMin SDK: " + appInfo.minSdkVersion + "\nTarget SDK: " + appInfo.targetSdkVersion +
+                            "\nAPK size: " + (temp.length() / 1024) + " KB\nDEX files: " + dexNames.size
+                        val components = "DEX files: " + dexNames.joinToString().ifBlank { "None found" } +
+                            "\nResources: " + resourceCount + "\nAssets: " + assetCount +
+                            "\nActivities: " + (info.activities?.size ?: 0) +
+                            "\nServices: " + (info.services?.size ?: 0) +
+                            "\nReceivers: " + (info.receivers?.size ?: 0) +
+                            "\nProviders: " + (info.providers?.size ?: 0)
+                        val permissions = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+                        details + "\n\n" + components + "\n\nRequested permissions:\n" + permissions
                     } finally { temp.delete() }
                 }
                 analysisReportText = report
-                val parts = report.split("\\n\\nRequested permissions:\\n", limit = 2)
-                val mainParts = parts[0].split("\\n\\n", limit = 2)
+                val parts = report.split("\n\nRequested permissions:\n", limit = 2)
+                val mainParts = parts[0].split("\n\n", limit = 2)
                 analysisDetails.text = mainParts[0]
                 analysisComponents.text = if (mainParts.size > 1) mainParts[1] else "No content details"
                 analysisPermissions.text = if (parts.size > 1) parts[1] else "None listed"
