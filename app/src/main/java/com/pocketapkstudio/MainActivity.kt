@@ -597,12 +597,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
             header.addView(label(title, 17, 0xFFE2E8ED.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
             target.addView(header, 0)
         }
-        addPageBackHeader(homeContent, "Pocket APK Studio", true)
         addPageBackHeader(editorContent, "Code Editor")
         addPageBackHeader(toolsContent, "APK Tools")
         addPageBackHeader(previewContent, "App Preview")
         addPageBackHeader(settingsContent, "Settings")
-        editorContent.addView(actionButton("◉  Open App Preview", true) { showPage(3) }, 1)
         val tabBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
