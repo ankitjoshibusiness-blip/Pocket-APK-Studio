@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
@@ -438,17 +439,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         var selectedPage = 0
         fun showPage(index: Int) {
             if (index !in pages.indices || index == selectedPage) return
-            val previous = pages[selectedPage]
+            // Keep exactly one page visible. Fade only the incoming page so pages
+            // never occupy separate vertical slots or remain layered accidentally.
+            pages.forEach { page ->
+                page.animate().cancel()
+                page.visibility = View.GONE
+                page.alpha = 1f
+            }
             val next = pages[index]
-            previous.animate().cancel()
-            next.animate().cancel()
-            next.alpha = 0f
             next.visibility = View.VISIBLE
-            next.animate().alpha(1f).setDuration(230L).start()
-            previous.animate().alpha(0f).setDuration(170L).withEndAction {
-                if (selectedPage != index) previous.visibility = View.GONE
-                previous.alpha = 1f
-            }.start()
+            next.alpha = 0f
+            next.animate().alpha(1f).setDuration(220L).start()
             selectedPage = index
             val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
             buttons.forEachIndexed { i, button ->
@@ -476,9 +477,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 leftMargin = dp(2); rightMargin = dp(2)
             }
         }
-        listOf(homeScroll, editorScroll, toolsScroll, previewScroll, settingsScroll).forEach {
-            root.addView(it, LinearLayout.LayoutParams(-1, 0, 1f))
+        val pageContainer = FrameLayout(this).apply {
+            clipChildren = true
+            clipToPadding = true
         }
+        pages.forEach { page ->
+            pageContainer.addView(page, FrameLayout.LayoutParams(-1, -1))
+        }
+        root.addView(pageContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(tabBar)
         listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach { tabBar.addView(it) }
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
