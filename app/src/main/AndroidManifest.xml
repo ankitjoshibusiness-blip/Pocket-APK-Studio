@@ -9,6 +9,7 @@
         android:label="Pocket APK Studio"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
+        <service android:name=".TermuxResultService" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
