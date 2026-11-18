@@ -185,7 +185,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(0xFF080D1D.toInt())
+            setBackgroundColor(0xFF202A33.toInt())
         }
         val appBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -196,7 +196,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             text = "🚀"
             textSize = 23f
             gravity = android.view.Gravity.CENTER
-            background = premiumGradient(0xFF4424D8.toInt(), 0xFF078CEB.toInt(), 18)
+            background = premiumGradient(0xFF568B91.toInt(), 0xFF456F7A.toInt(), 18)
         }
         appBar.addView(appLogo, LinearLayout.LayoutParams(dp(42), dp(42)))
         val appTitle = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
@@ -205,7 +205,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         appBar.addView(appTitle, LinearLayout.LayoutParams(0, -2, 1f))
         val proBadge = label("✦ PRO", 11, 0xFFFFD36A.toInt(), true).apply {
             setPadding(dp(9), dp(6), dp(9), dp(6))
-            background = premiumGradient(0xFF754000.toInt(), 0xFFBD7800.toInt(), 30)
+            background = premiumGradient(0xFF806B3F.toInt(), 0xFF9A8050.toInt(), 30)
         }
         appBar.addView(proBadge)
         root.addView(appBar)
@@ -225,12 +225,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         settingsContent.addView(space(12))
 
         val welcomeCard = card().apply {
-            background = premiumGradient(0xFF101B4B.toInt(), 0xFF3320A0.toInt(), 22)
+            background = premiumGradient(0xFF3D6870.toInt(), 0xFF385D70.toInt(), 22)
             setPadding(dp(18), dp(20), dp(18), dp(18))
         }
-        welcomeCard.addView(label("WELCOME TO", 10, 0xFF9FC5FF.toInt(), true))
+        welcomeCard.addView(label("WELCOME TO", 10, 0xFFD6E8E8.toInt(), true))
         welcomeCard.addView(label("Pocket APK Studio", 24, 0xFFFFFFFF.toInt(), true))
-        welcomeCard.addView(label("Your complete Android development toolkit", 13, 0xFFD8E2FF.toInt(), false))
+        welcomeCard.addView(label("Your complete Android development toolkit", 13, 0xFFE3ECEC.toInt(), false))
         welcomeCard.addView(space(14))
         welcomeCard.addView(actionButton("▶  Quick Start", true) { showQuickStart() })
         homeContent.addView(welcomeCard)
@@ -289,8 +289,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             visibility = View.GONE
-            progressTintList = android.content.res.ColorStateList.valueOf(0xFF7184FF.toInt())
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF7184FF.toInt())
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
         }
         buildCard.addView(buildProgress, LinearLayout.LayoutParams(-1, dp(6)))
         percentText = label("0%", 11, 0xFF9AA7FF.toInt(), true)
@@ -337,17 +337,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val analyzeAction = actionButton("⌕   Analyze APK     ›", true) {
             pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         }
-        analyzeAction.background = premiumGradient(0xFF0759D9.toInt(), 0xFF087DEB.toInt(), 16)
+        analyzeAction.background = premiumGradient(0xFF587F9D.toInt(), 0xFF4C718D.toInt(), 16)
         toolsIntro.addView(analyzeAction)
         toolsIntro.addView(space(8))
         val decompileAction = actionButton("⟳   Decompile APK with JADX     ›") {
             pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         }
-        decompileAction.background = premiumGradient(0xFF008B69.toInt(), 0xFF00B887.toInt(), 16)
+        decompileAction.background = premiumGradient(0xFF568B78.toInt(), 0xFF4D806E.toInt(), 16)
         toolsIntro.addView(decompileAction)
         toolsIntro.addView(space(8))
         val exportAction = actionButton("⇧   Export Recovered ZIP     ›") { shareRecoveredProject() }
-        exportAction.background = premiumGradient(0xFFB64A00.toInt(), 0xFFEB7900.toInt(), 16)
+        exportAction.background = premiumGradient(0xFF8A7860.toInt(), 0xFF796B58.toInt(), 16)
         toolsIntro.addView(exportAction)
         toolsContent.addView(toolsIntro)
         toolsContent.addView(space(12))
@@ -505,7 +505,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             buttons.forEachIndexed { i, button ->
                 button.animate().cancel()
                 button.animate().alpha(if (i == index) 1f else 0.72f).setDuration(180L).start()
-                button.background = if (i == index) premiumGradient(0xFF1647F5.toInt(), 0xFF5426D8.toInt(), 13) else premiumGradient(0xFF26365D.toInt(), 0xFF1B2948.toInt(), 13)
+                button.background = if (i == index) premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13) else premiumGradient(0xFF344653.toInt(), 0xFF2B3B47.toInt(), 13)
                 if (i == index) button.animate().scaleX(1.035f).scaleY(1.035f).setDuration(150L).withEndAction {
                     button.animate().scaleX(1f).scaleY(1f).setDuration(130L).start()
                 }.start()
@@ -515,7 +515,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
             setPadding(dp(4), dp(6), dp(4), dp(6))
-            background = premiumGradient(0xFF111B36.toInt(), 0xFF10172C.toInt(), 18)
+            background = premiumGradient(0xFF273640.toInt(), 0xFF202A33.toInt(), 18)
         }
         homeTab = navButton("⌂", "Home") { showPage(0) }
         editorTab = navButton("</>", "Editor") { showPage(1) }
@@ -538,7 +538,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         root.addView(tabBar)
         listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach { tabBar.addView(it) }
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
-        homeTab.background = premiumGradient(0xFF1647F5.toInt(), 0xFF5426D8.toInt(), 13)
+        homeTab.background = premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13)
         setContentView(root)
     }
 
@@ -1057,7 +1057,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(14), dp(14), dp(14), dp(14))
-        background = premiumGradient(0xFF17213B.toInt(), 0xFF111A30.toInt(), 18)
+        background = premiumGradient(0xFF2B3742.toInt(), 0xFF2B3742.toInt(), 18)
         elevation = dp(2).toFloat()
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(7)
@@ -1070,9 +1070,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
         isAllCaps = false
         textSize = 11f
         setLineSpacing(0f, 0.9f)
-        setTextColor(0xFFE5EBFF.toInt())
+        setTextColor(0xFFE2E8ED.toInt())
         gravity = android.view.Gravity.CENTER
-        background = premiumGradient(0xFF26365D.toInt(), 0xFF1B2948.toInt(), 13)
+        background = premiumGradient(0xFF344653.toInt(), 0xFF2B3B47.toInt(), 13)
         setOnClickListener { action() }
     }
 
@@ -1229,9 +1229,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
         this.text = text
         isAllCaps = false
         textSize = 15f
-        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFE4E7F2.toInt())
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFDCE5E9.toInt())
         background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
+            setColor(if (primary) 0xFF568B91.toInt() else 0xFF344653.toInt())
             cornerRadius = dp(12).toFloat()
         }
         isFocusable = true
