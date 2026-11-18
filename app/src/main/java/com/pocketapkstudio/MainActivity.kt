@@ -222,10 +222,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              SDK=/root/Android/Sdk
+              if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q "17" && command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f "$SDK/platforms/android-35/android.jar" && test -x "$SDK/build-tools/35.0.0/aapt"; then echo BUILD_SERVER_READY=1; exit 0; fi
               apt-get update
               if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then apt-get install -y openjdk-17-jdk; fi
               apt-get install -y git curl wget unzip zip
-              SDK=/root/Android/Sdk
               if [ ! -x /root/Android/cmdline-tools/latest/bin/sdkmanager ]; then
                 mkdir -p /root/Android/cmdline-tools
                 cd /tmp
@@ -770,29 +771,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
-    private fun checkBuildServer() {
-        startAutomaticEnvironmentSetup()
-        return
-        serverStatus.text = "Checking Termux + Ubuntu + Java + Android SDK…"
-        val command = "command -v proot-distro >/dev/null 2>&1 && proot-distro login ubuntu -- bash -lc \"command -v java >/dev/null 2>&1 && test -f /root/Android/Sdk/platforms/android-35/android.jar && echo BUILD_SERVER_READY=1\""
-        val resultIntent = Intent(this, TermuxResultService::class.java).apply {
-            putExtra("task_type", "server_check")
-        }
-        val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
-        val flags = PendingIntent.FLAG_ONE_SHOT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-        val callback = PendingIntent.getService(this, requestCode, resultIntent, flags)
-        val intent = Intent("com.termux.RUN_COMMAND").apply {
-            setClassName("com.termux", "com.termux.app.RunCommandService")
-            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
-            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", callback)
-        }
-        try { startService(intent) } catch (e: Exception) {
-            serverStatus.text = "Could not start Termux: " + (e.message ?: "check Termux permissions")
-        }
-    }
+    private fun checkBuildServer() { startAutomaticEnvironmentSetup() }
 
     private fun startLocalBuild() {
         val source = selectedUri
