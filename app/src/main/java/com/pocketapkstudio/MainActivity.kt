@@ -693,9 +693,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
               set -e
               command -v java >/dev/null || { echo "ERROR: Java 17 is required in Ubuntu"; exit 21; }
-              command -v curl >/dev/null || apt-get update && apt-get install -y curl
-              command -v unzip >/dev/null || apt-get install -y unzip
-              command -v zip >/dev/null || apt-get install -y zip
+              if ! command -v curl >/dev/null 2>&1; then apt-get update; apt-get install -y curl; fi
+              if ! command -v unzip >/dev/null 2>&1; then apt-get install -y unzip; fi
+              if ! command -v zip >/dev/null 2>&1; then apt-get install -y zip; fi
               JADXD="${'$'}HOME/.local/share/jadx-1.5.1"
               if [ ! -x "${'$'}JADXD/bin/jadx" ]; then
                 mkdir -p "${'$'}JADXD"
