@@ -654,7 +654,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 withContext(Dispatchers.IO) { copyApkToRecoveryFolder(uri) }
                 launchTermuxDecompile()
             } catch (e: Exception) {
-                recoveryStatus.text = "Could not prepare APK: \${e.message ?: "storage error"}"
+                recoveryStatus.text = "Could not prepare APK: ${e.message ?: "storage error"}"
             }
         }
     }
@@ -737,7 +737,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             startService(intent)
             recoveryStatus.text = "JADX is running in Ubuntu. First run downloads JADX and may take several minutes."
         } catch (e: Exception) {
-            recoveryStatus.text = "Could not start JADX: \${e.message ?: "Termux permission or service error"}"
+            recoveryStatus.text = "Could not start JADX: ${e.message ?: "Termux permission or service error"}"
         }
     }
 
