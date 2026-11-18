@@ -76,99 +76,94 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun showEditor() {
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-        }
+        root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(10),dp(12),dp(10)) }
         applyTheme()
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(label("POCKET APK STUDIO", 16, true), LinearLayout.LayoutParams(0, dp(42), 1f))
-        header.addView(smallButton("☼ / ☾") { darkTheme = !darkTheme; applyTheme(); refreshEditorColors() })
+        val header=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(4),dp(3),dp(12)) }
+        val logo=TextView(this).apply { text="⌘"; textSize=24f; gravity=Gravity.CENTER; setTextColor(0xFFFFFFFF.toInt()); background=premiumGradient(0xFF6C4BFF.toInt(),0xFF078CEB.toInt(),15) }
+        header.addView(logo,LinearLayout.LayoutParams(dp(42),dp(42)))
+        val heading=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(10),0,0,0) }
+        heading.addView(label("POCKET APK STUDIO",15,true))
+        heading.addView(label("PROJECT CODE EDITOR  •  PRO",9,false))
+        header.addView(heading,LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(smallButton("☼ / ☾") { darkTheme=!darkTheme; applyTheme(); refreshEditorColors() })
         root.addView(header)
-        val toolbar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        explorerToggle = smallButton("☰ Explorer") { toggleExplorer() }
-        toolbar.addView(explorerToggle)
-        toolbar.addView(smallButton("Find") { showFindReplace(false) })
-        toolbar.addView(smallButton("Replace") { showFindReplace(true) })
-        toolbar.addView(smallButton("Save") { saveCurrent(true) })
-        root.addView(toolbar)
-        fileLabel = label("Select a source file", 12, false)
-        root.addView(fileLabel)
-        tabsBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val tabsScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(tabsBar) }
-        root.addView(tabsScroll, LinearLayout.LayoutParams(-1, dp(42)))
-        val codeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP }
-        lineNumbers = TextView(this).apply {
-            typeface = Typeface.MONOSPACE; textSize = 12f; gravity = Gravity.TOP or Gravity.END
-            setPadding(dp(7), dp(9), dp(7), dp(9)); text = "1"
+        val titleRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(4),dp(3),dp(8)) }
+        val titleBlock=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        titleBlock.addView(label("Code Workspace",20,true))
+        titleBlock.addView(label("Edit  •  Preview  •  Build",11,false))
+        titleRow.addView(titleBlock,LinearLayout.LayoutParams(0,-2,1f))
+        titleRow.addView(label("●  READY",10,true).apply { setTextColor(0xFF48D6A0.toInt()); setPadding(dp(10),dp(7),dp(10),dp(7)); background=roundedSurface(if(darkTheme) 0xFF153A3B.toInt() else 0xFFDDF6ED.toInt(),30) })
+        root.addView(titleRow)
+        val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE7ECF7.toInt(),14) }
+        explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; toolbar.addView(explorerToggle)
+        toolbar.addView(smallButton("⌕ Find") { showFindReplace(false) })
+        toolbar.addView(smallButton("⇄ Replace") { showFindReplace(true) })
+        toolbar.addView(smallButton("✓ Save") { saveCurrent(true) })
+        root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(8) })
+        fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF121D30.toInt() else 0xFFEFF2F8.toInt(),9) }
+        root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
+        tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        val tabsScroll=HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; addView(tabsBar) }
+        root.addView(tabsScroll,LinearLayout.LayoutParams(-1,dp(42)))
+        val workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF101A2A.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
+        val codeRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.TOP }
+        lineNumbers=TextView(this).apply { typeface=Typeface.MONOSPACE; textSize=12f; gravity=Gravity.TOP or Gravity.END; setPadding(dp(8),dp(12),dp(8),dp(12)); text="1" }
+        codeRow.addView(lineNumbers,LinearLayout.LayoutParams(dp(42),-1))
+        editor=EditText(this).apply {
+            typeface=Typeface.MONOSPACE; textSize=13f; gravity=Gravity.TOP or Gravity.START
+            setPadding(dp(10),dp(12),dp(10),dp(18)); minLines=18; setHorizontallyScrolling(true)
+            isVerticalScrollBarEnabled=true; background=null
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
-        codeRow.addView(lineNumbers, LinearLayout.LayoutParams(dp(42), -1))
-        editor = EditText(this).apply {
-            typeface = Typeface.MONOSPACE; textSize = 13f; gravity = Gravity.TOP or Gravity.START
-            setPadding(dp(8), dp(9), dp(8), dp(18)); minLines = 18
-            setHorizontallyScrolling(true); isVerticalScrollBarEnabled = true
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        codeRow.addView(editor,LinearLayout.LayoutParams(0,-1,1f))
+        val codeScroll=ScrollView(this).apply { addView(codeRow) }
+        workArea.addView(codeScroll,FrameLayout.LayoutParams(-1,-1))
+        explorerPanel=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10))
+            background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFF0F3FA.toInt(),12); elevation=dp(14).toFloat()
         }
-        codeRow.addView(editor, LinearLayout.LayoutParams(0, -1, 1f))
-        val codeScroll = ScrollView(this).apply { addView(codeRow) }
-        val workArea = FrameLayout(this)
-        workArea.addView(codeScroll, FrameLayout.LayoutParams(-1, -1))
-        explorerPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            setBackgroundColor(if (darkTheme) 0xFF17213B.toInt() else 0xFFF0F3FA.toInt())
-            elevation = dp(12).toFloat()
-        }
-        explorerPanel.addView(label("PROJECT EXPLORER", 11, true))
-        val explorerScroll = ScrollView(this)
-        val explorerFiles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val explorerHeader=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL }
+        explorerHeader.addView(label("PROJECT EXPLORER",11,true),LinearLayout.LayoutParams(0,dp(36),1f))
+        explorerHeader.addView(smallButton("×") { toggleExplorer() })
+        explorerPanel.addView(explorerHeader)
+        val explorerScroll=ScrollView(this)
+        val explorerFiles=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         explorerScroll.addView(explorerFiles)
-        explorerPanel.addView(explorerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        workArea.addView(explorerPanel, FrameLayout.LayoutParams(dp(225), -1, Gravity.START))
-        explorerPanel.translationX = -dp(245).toFloat()
-        explorerPanel.visibility = View.GONE
-        root.addView(workArea, LinearLayout.LayoutParams(-1, 0, 1f))
-        suggestionsBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        root.addView(suggestionsBar, LinearLayout.LayoutParams(-1, dp(42)))
-        root.addView(label("BUILD ERRORS / PROBLEMS", 11, true))
-        errorsPanel = label("No build errors loaded. Run a build to see diagnostics here.", 11, false)
-        errorsPanel.maxLines = 4
-        errorsPanel.setOnClickListener { showBuildErrors() }
-        root.addView(errorsPanel)
-        root.addView(smallButton("Save changes & return to project") { exportEditedZip() })
-        setContentView(root)
-        refreshExplorer()
-
-        editor.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                if (!loadingText) {
-                    dirty = true
-                    currentFile?.let { openTabs[it] = s?.toString() ?: "" }
-                    updateLineNumbers()
-                    updateSuggestions()
-                    handler.removeCallbacks(autoSave)
-                    handler.postDelayed(autoSave, 900)
-                    highlightCode()
+        explorerPanel.addView(explorerScroll,LinearLayout.LayoutParams(-1,0,1f))
+        workArea.addView(explorerPanel,FrameLayout.LayoutParams(dp(205),-1,Gravity.START))
+        explorerPanel.translationX=-dp(225).toFloat(); explorerPanel.visibility=View.GONE
+        root.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
+        suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)) }
+        root.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
+        val diagnostics=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFE9EEF8.toInt(),12) }
+        diagnostics.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
+        errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
+        diagnostics.addView(errorsPanel)
+        root.addView(diagnostics,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
+        root.addView(smallButton("⇧  SAVE CHANGES & RETURN TO PROJECT") { exportEditedZip() },LinearLayout.LayoutParams(-1,dp(46)).apply { topMargin=dp(7) })
+        setContentView(root); refreshExplorer(); refreshEditorColors()
+        editor.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
+                if(!loadingText) {
+                    dirty=true; currentFile?.let { openTabs[it]=s?.toString() ?: "" }
+                    updateLineNumbers(); updateSuggestions(); handler.removeCallbacks(autoSave); handler.postDelayed(autoSave,900); highlightCode()
                 }
             }
-            override fun afterTextChanged(s: Editable?) {}
+            override fun afterTextChanged(s:Editable?) {}
         })
-        updateBuildErrors()
-        renderTabs()
+        updateBuildErrors(); renderTabs()
     }
 
     private fun toggleExplorer() {
-        explorerOpen = !explorerOpen
-        if (explorerOpen) {
-            refreshExplorer()
-            explorerPanel.visibility = View.VISIBLE
-            explorerPanel.translationX = -dp(245).toFloat()
-            explorerPanel.animate().translationX(0f).setDuration(260L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-            explorerToggle.text = "☰ Close"
+        explorerOpen=!explorerOpen
+        if(explorerOpen) {
+            refreshExplorer(); explorerPanel.visibility=View.VISIBLE; explorerPanel.translationX=-dp(225).toFloat()
+            explorerPanel.animate().translationX(0f).setDuration(280L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            explorerToggle.text="☰  Explorer  ▾"
         } else {
-            explorerPanel.animate().translationX(-dp(245).toFloat()).setDuration(220L).setInterpolator(android.view.animation.AccelerateInterpolator()).withEndAction { explorerPanel.visibility = View.GONE }.start()
-            explorerToggle.text = "☰ Explorer"
+            explorerPanel.animate().translationX(-dp(225).toFloat()).setDuration(240L).setInterpolator(android.view.animation.AccelerateInterpolator()).withEndAction { explorerPanel.visibility=View.GONE }.start()
+            explorerToggle.text="☰  Explorer"
         }
     }
 
@@ -194,8 +189,8 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun applyTheme() {
-        val bg = if (darkTheme) 0xFF101722.toInt() else 0xFFF4F6FA.toInt()
-        root.setBackgroundColor(bg)
+        root.setBackgroundColor(if(darkTheme) 0xFF080D1D.toInt() else 0xFFF4F6FA.toInt())
+        if(::explorerPanel.isInitialized) explorerPanel.background=roundedSurface(if(darkTheme) 0xFF17243A.toInt() else 0xFFF0F3FA.toInt(),12)
     }
 
     private fun refreshEditorColors() {
@@ -360,18 +355,29 @@ class ProjectEditorActivity : Activity() {
         }
     }
 
-    private fun label(text: String, size: Int, bold: Boolean): TextView = TextView(this).apply {
-        this.text = text; textSize = size.toFloat()
-        setTextColor(if (darkTheme) 0xFFE5EAF3.toInt() else 0xFF202938.toInt())
-        if (bold) setTypeface(typeface, Typeface.BOLD)
-        setPadding(dp(5), dp(5), dp(5), dp(5))
+    private fun label(text:String,size:Int,bold:Boolean):TextView=TextView(this).apply {
+        this.text=text; textSize=size.toFloat()
+        setTextColor(if(darkTheme) 0xFFE8EEFF.toInt() else 0xFF202938.toInt())
+        if(bold) setTypeface(typeface,Typeface.BOLD)
+        setPadding(dp(4),dp(4),dp(4),dp(4))
     }
 
-    private fun smallButton(text: String, action: () -> Unit): Button = Button(this).apply {
-        this.text = text; isAllCaps = false; textSize = 11f
-        setPadding(dp(5), 0, dp(5), 0)
+    private fun smallButton(text:String,action:()->Unit):Button=Button(this).apply {
+        this.text=text; isAllCaps=false; textSize=10.5f; minHeight=dp(36); minimumHeight=dp(36)
+        setTextColor(if(darkTheme) 0xFFE8EEFF.toInt() else 0xFF263653.toInt())
+        background=roundedSurface(if(darkTheme) 0xFF26365D.toInt() else 0xFFDCE5F7.toInt(),10)
+        setPadding(dp(7),0,dp(7),0); stateListAnimator=null
         setOnClickListener { action() }
     }
+
+    private fun roundedSurface(color:Int,radius:Int)=android.graphics.drawable.GradientDrawable().apply {
+        setColor(color); cornerRadius=dp(radius).toFloat()
+        setStroke(dp(1),if(darkTheme) 0xFF293A5C.toInt() else 0xFFD6DEEC.toInt())
+    }
+
+    private fun premiumGradient(start:Int,end:Int,radius:Int)=android.graphics.drawable.GradientDrawable(
+        android.graphics.drawable.GradientDrawable.Orientation.TL_BR,intArrayOf(start,end)
+    ).apply { cornerRadius=dp(radius).toFloat() }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
