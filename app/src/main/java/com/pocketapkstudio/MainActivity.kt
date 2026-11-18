@@ -165,43 +165,99 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
-    private val termuxPermissionRequest = 7401
+    private val termuxPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startAutomaticEnvironmentSetup()
+        else {
+            serverStatus.text = "Termux command permission is required for automatic setup."
+            showEnvironmentSetupWizard()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         clearLegacyAiData()
         buildScreen()
-        connectTermuxOnStartup()
+        showEnvironmentSetupWizard()
     }
 
-    private fun connectTermuxOnStartup() {
+    private fun showEnvironmentSetupWizard() {
         if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
-            serverStatus.text = "Termux is not installed. Install Termux and Ubuntu to connect."
+            serverStatus.text = "Termux is not installed. Install it to prepare the build environment."
+            AlertDialog.Builder(this)
+                .setTitle("Welcome to Pocket APK Studio")
+                .setMessage("First, install the official Termux app. After installation, reopen Pocket APK Studio and it will check and prepare only the missing build components.")
+                .setPositiveButton("Install Termux") { _, _ ->
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/"))) }
+                    catch (_: Exception) { Toast.makeText(this, "Could not open Termux download page.", Toast.LENGTH_LONG).show() }
+                }
+                .setNegativeButton("Later", null)
+                .show()
             return
         }
-        val permission = "com.termux.permission.RUN_COMMAND"
-        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            serverStatus.text = "Waiting for Termux permission…"
-            requestPermissions(arrayOf(permission), termuxPermissionRequest)
-        } else {
-            checkBuildServer()
-        }
+        AlertDialog.Builder(this)
+            .setTitle("Automatic Environment Setup")
+            .setMessage("Pocket APK Studio will check Termux, Ubuntu, Java 17 and Android SDK. Already installed components will be kept; only missing tools will be installed. This may download several hundred MB.")
+            .setPositiveButton("Check & Setup") { _, _ ->
+                val permission = "com.termux.permission.RUN_COMMAND"
+                if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    serverStatus.text = "Waiting for Termux command permission…"
+                    termuxPermissionLauncher.launch(permission)
+                } else startAutomaticEnvironmentSetup()
+            }
+            .setNegativeButton("Later") { _, _ -> serverStatus.text = "Environment setup postponed. Open Preferences to check the build environment." }
+            .show()
     }
 
-    @Deprecated("Deprecated in Android API; retained for compatibility with permission callback")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == termuxPermissionRequest) {
-            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                checkBuildServer()
-            } else {
-                serverStatus.text = "Termux permission denied. Allow RUN_COMMAND permission to connect."
-                AlertDialog.Builder(this)
-                    .setTitle("Termux permission required")
-                    .setMessage("Allow Pocket APK Studio to run commands in Termux. Then reopen the app to connect to Ubuntu automatically.")
-                    .setPositiveButton("OK", null)
-                    .show()
-            }
+    private fun startAutomaticEnvironmentSetup() {
+        if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
+            showEnvironmentSetupWizard()
+            return
+        }
+        serverStatus.text = "Checking and preparing Termux, Ubuntu, Java 17 and Android SDK…"
+        val command = """
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            if ! command -v proot-distro >/dev/null 2>&1; then pkg update -y && pkg install -y proot-distro; fi
+            if ! proot-distro list installed 2>/dev/null | grep -qi ubuntu; then proot-distro install ubuntu; fi
+            proot-distro login ubuntu -- bash -lc '
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then apt-get install -y openjdk-17-jdk; fi
+              apt-get install -y git curl wget unzip zip
+              SDK=/root/Android/Sdk
+              if [ ! -x /root/Android/cmdline-tools/latest/bin/sdkmanager ]; then
+                mkdir -p /root/Android/cmdline-tools
+                cd /tmp
+                wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+                rm -rf /root/Android/cmdline-tools/latest /tmp/cmdline-tools
+                mkdir -p /tmp/cmdline-tools
+                unzip -q cmdline-tools.zip -d /tmp/cmdline-tools
+                mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
+              fi
+              yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK" --licenses >/dev/null || true
+              /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+              test -f "$SDK/platforms/android-35/android.jar"
+              echo BUILD_SERVER_READY=1
+            '
+        """.trimIndent()
+        val resultIntent = Intent(this, TermuxResultService::class.java).apply {
+            putExtra("task_type", "environment_setup")
+        }
+        val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
+        val flags = PendingIntent.FLAG_ONE_SHOT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val callback = PendingIntent.getService(this, requestCode, resultIntent, flags)
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", callback)
+        }
+        try { startService(intent) }
+        catch (e: Exception) {
+            serverStatus.text = "Could not start Termux setup: " + (e.message ?: "check Termux permissions and allow-external-apps setting")
         }
     }
 
@@ -715,6 +771,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun checkBuildServer() {
+        startAutomaticEnvironmentSetup()
+        return
         serverStatus.text = "Checking Termux + Ubuntu + Java + Android SDK…"
         val command = "command -v proot-distro >/dev/null 2>&1 && proot-distro login ubuntu -- bash -lc \"command -v java >/dev/null 2>&1 && test -f /root/Android/Sdk/platforms/android-35/android.jar && echo BUILD_SERVER_READY=1\""
         val resultIntent = Intent(this, TermuxResultService::class.java).apply {
