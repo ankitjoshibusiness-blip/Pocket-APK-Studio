@@ -50,6 +50,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var analysisDetails: TextView
     private lateinit var analysisComponents: TextView
     private lateinit var analysisPermissions: TextView
+    private lateinit var recoveryStatus: TextView
+    private lateinit var exportRecoveryButton: Button
+    private var recoveryFilePath: String? = null
     private var analysisReportText: String = ""
     private var previewApkFile: File? = null
     private var selectedUri: Uri? = null
@@ -59,6 +62,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private val buildResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+            if (intent?.action == "com.pocketapkstudio.RECOVERY_RESULT") {
+                refreshRecoveryResult()
+                return
+            }
             if (intent?.action == "com.pocketapkstudio.SERVER_STATUS") {
                 if (::serverStatus.isInitialized) serverStatus.text = prefs.getString("server_status", "Build server status unavailable.")
                 return
@@ -81,10 +88,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         super.onStart()
         val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT").apply {
             addAction("com.pocketapkstudio.SERVER_STATUS")
+            addAction("com.pocketapkstudio.RECOVERY_RESULT")
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
         refreshBuildResult()
+        refreshRecoveryResult()
     }
 
     override fun onStop() {
@@ -125,6 +134,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private val pickAnalyzeApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { analyzeExistingApk(it) }
+    }
+
+    private val pickDecompileApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { startApkDecompilation(it) }
     }
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -291,6 +304,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisCard.addView(space(10))
         analysisCard.addView(label("SOURCE CODE RECOVERY", 11, 0xFF9AA7FF.toInt(), true))
         analysisCard.addView(label("APK analysis does not decompile DEX bytecode. JADX decompilation is a separate step and has not been run.", 12, 0xFFB6BBC9.toInt(), false))
+        analysisCard.addView(space(8))
+        analysisCard.addView(actionButton("Decompile APK with JADX", true) {
+            pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+        })
+        analysisCard.addView(space(8))
+        recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
+        analysisCard.addView(recoveryStatus)
+        exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
+        analysisCard.addView(space(6))
+        analysisCard.addView(exportRecoveryButton)
         analysisCard.addView(space(8))
         analysisCard.addView(actionButton("Copy analysis report") {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -610,6 +633,123 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
             .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+
+    private fun refreshRecoveryResult() {
+        if (!::recoveryStatus.isInitialized || !::exportRecoveryButton.isInitialized) return
+        val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+        recoveryStatus.text = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
+        recoveryFilePath = prefs.getString("zip_path", null)
+        val file = recoveryFilePath?.let(::File)
+        exportRecoveryButton.visibility = if (file?.isFile == true && file.length() > 0L) View.VISIBLE else View.GONE
+    }
+
+    private fun startApkDecompilation(uri: Uri) {
+        recoveryStatus.text = "Preparing APK for JADX decompilation…"
+        exportRecoveryButton.visibility = View.GONE
+        getSharedPreferences("recovery_state", MODE_PRIVATE).edit().clear().putString("status", "Preparing APK for JADX decompilation…").apply()
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { copyApkToRecoveryFolder(uri) }
+                launchTermuxDecompile()
+            } catch (e: Exception) {
+                recoveryStatus.text = "Could not prepare APK: \${e.message ?: "storage error"}"
+            }
+        }
+    }
+
+    private fun copyApkToRecoveryFolder(uri: Uri) {
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Recovery"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "customer-manager.apk")
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val outputUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: error("Could not create APK in Downloads/PocketAPKStudio/Recovery")
+        try {
+            contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Cannot read selected APK" }
+                contentResolver.openOutputStream(outputUri).use { output ->
+                    requireNotNull(output) { "Cannot write APK to Recovery folder" }
+                    input.copyTo(output)
+                }
+            }
+        } catch (e: Exception) {
+            contentResolver.delete(outputUri, null, null)
+            throw e
+        }
+    }
+
+    private fun launchTermuxDecompile() {
+        val command = """
+            set -e
+            proot-distro login ubuntu -- bash -lc '
+              set -e
+              command -v java >/dev/null || { echo "ERROR: Java 17 is required in Ubuntu"; exit 21; }
+              command -v curl >/dev/null || apt-get update && apt-get install -y curl
+              command -v unzip >/dev/null || apt-get install -y unzip
+              command -v zip >/dev/null || apt-get install -y zip
+              JADXD="$HOME/.local/share/jadx-1.5.1"
+              if [ ! -x "$JADXD/bin/jadx" ]; then
+                mkdir -p "$JADXD"
+                curl -L --fail --silent --show-error "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/jadx-1.5.1.zip
+                unzip -q -o /tmp/jadx-1.5.1.zip -d "$JADXD"
+              fi
+              INPUT="/sdcard/Download/PocketAPKStudio/Recovery/customer-manager.apk"
+              test -s "$INPUT" || { echo "ERROR: selected APK not found in Recovery folder"; exit 22; }
+              OUT="$HOME/pocket-apk-studio/recovered_customer_manager"
+              rm -rf "$OUT"
+              mkdir -p "$OUT"
+              "$JADXD/bin/jadx" --show-bad-code -d "$OUT" "$INPUT"
+              OUTPUT="/sdcard/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
+              rm -f "$OUTPUT"
+              cd "$(dirname "$OUT")"
+              zip -qr "$OUTPUT" "$(basename "$OUT")"
+              test -s "$OUTPUT" || { echo "ERROR: recovered ZIP was not created"; exit 23; }
+              echo "RECOVERY_SAVED=$OUTPUT"
+              echo "JADX_DECOMPILE_SUCCESS=1"
+            '
+        """.trimIndent()
+        val resultIntent = Intent(this, TermuxResultService::class.java).putExtra("task_type", "apk_decompile")
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
+        }
+        try {
+            getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+                .putString("status", "JADX is running in Ubuntu. Keep Termux installed; this may take several minutes on first run.")
+                .apply()
+            startService(intent)
+            recoveryStatus.text = "JADX is running in Ubuntu. First run downloads JADX and may take several minutes."
+        } catch (e: Exception) {
+            recoveryStatus.text = "Could not start JADX: \${e.message ?: "Termux permission or service error"}"
+        }
+    }
+
+    private fun shareRecoveredProject() {
+        val file = recoveryFilePath?.let(::File)
+        if (file == null || !file.isFile || file.length() <= 0L) {
+            recoveryStatus.text = "Recovered ZIP not found. Run Decompile APK again."
+            exportRecoveryButton.visibility = View.GONE
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        startActivity(Intent.createChooser(
+            Intent(Intent.ACTION_SEND).setType("application/zip")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            "Export recovered project"
+        ))
     }
 
     private fun analyzeExistingApk(uri: Uri) {
