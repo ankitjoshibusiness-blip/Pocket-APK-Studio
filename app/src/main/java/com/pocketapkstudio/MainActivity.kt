@@ -223,7 +223,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
               set -e
               export DEBIAN_FRONTEND=noninteractive
               SDK=/root/Android/Sdk
-              if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q "17" && command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f "$SDK/platforms/android-35/android.jar" && test -x "$SDK/build-tools/35.0.0/aapt"; then echo BUILD_SERVER_READY=1; exit 0; fi
+              if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q "17" && command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f "\$SDK/platforms/android-35/android.jar" && test -x "\$SDK/build-tools/35.0.0/aapt"; then echo BUILD_SERVER_READY=1; exit 0; fi
               apt-get update
               if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then apt-get install -y openjdk-17-jdk; fi
               apt-get install -y git curl wget unzip zip
@@ -236,9 +236,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 unzip -q cmdline-tools.zip -d /tmp/cmdline-tools
                 mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
               fi
-              yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK" --licenses >/dev/null || true
-              /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-              test -f "$SDK/platforms/android-35/android.jar"
+              yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="\$SDK" --licenses >/dev/null || true
+              /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="\$SDK" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+              test -f "\$SDK/platforms/android-35/android.jar"
               echo BUILD_SERVER_READY=1
             '
         """.trimIndent()
