@@ -217,10 +217,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val (editorScroll, editorContent) = page()
         val (toolsScroll, toolsContent) = page()
         val (settingsScroll, settingsContent) = page()
-        editorContent.addView(label("WORKSPACE", 18, 0xFFFFFFFF.toInt(), true))
         editorContent.addView(label("Import and edit your Android project files", 12, 0xFF9EADD0.toInt(), false))
         editorContent.addView(space(12))
-        settingsContent.addView(label("SETTINGS", 18, 0xFFFFFFFF.toInt(), true))
         settingsContent.addView(label("Build environment and device information", 12, 0xFF9EADD0.toInt(), false))
         settingsContent.addView(space(12))
 
@@ -394,7 +392,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         settingsContent.addView(setupCard)
         val toolsIntro = card()
-        toolsIntro.addView(label("▣  APK TOOLS", 17, 0xFFFFFFFF.toInt(), true))
         toolsIntro.addView(space(8))
         toolsIntro.addView(label("Inspect an APK, recover readable code with JADX, and export the recovered files.", 13, 0xFFB6BBC9.toInt(), false))
         toolsIntro.addView(space(10))
@@ -457,7 +454,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(10), dp(4), dp(16))
         }
-        previewContent.addView(label("◉  APP PREVIEW", 18, 0xFFFFFFFF.toInt(), true))
         previewContent.addView(space(8))
         previewContent.addView(label("Check an APK before installing", 22, 0xFFFFFFFF.toInt(), true))
         previewContent.addView(label("View its app icon, package, version, SDK details and requested permissions.", 14, 0xFFB6BBC9.toInt(), false))
@@ -597,7 +593,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             header.addView(label(title, 17, 0xFFE2E8ED.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
             target.addView(header, 0)
         }
-        addPageBackHeader(editorContent, "Code Editor")
+        addPageBackHeader(editorContent, "Workspace")
         addPageBackHeader(toolsContent, "APK Tools")
         addPageBackHeader(previewContent, "App Preview")
         addPageBackHeader(settingsContent, "Settings")
