@@ -14,18 +14,18 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
         if (intent.getStringExtra("task_type") == "apk_decompile") {
-            val outputPath = Regex("RECOVERY_SAVED=([^\\\\r\\\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
+            val outputPath = Regex("RECOVERY_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
             val outputFile = outputPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
             val successful = exitCode == 0 && errCode == -1 && outputFile != null
             val combined = buildString {
                 append(stdout)
-                if (stderr.isNotBlank()) append("\\n\\nERROR OUTPUT:\\n").append(stderr)
-                if (errMessage.isNotBlank()) append("\\n\\nTERMUX ERROR:\\n").append(errMessage)
+                if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
+                if (errMessage.isNotBlank()) append("\n\nTERMUX ERROR:\n").append(errMessage)
             }
             val status = when {
                 successful -> "JADX decompilation completed. Recovered ZIP: " + outputFile!!.name
                 errCode != -1 -> "Termux could not run JADX: $errMessage"
-                else -> "Decompilation failed (exit code $exitCode).\\n" + combined.takeLast(2500)
+                else -> "Decompilation failed (exit code $exitCode).\n" + combined.takeLast(2500)
             }
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
                 .putString("status", status)
