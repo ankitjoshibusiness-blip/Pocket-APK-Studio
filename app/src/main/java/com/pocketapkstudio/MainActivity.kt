@@ -67,6 +67,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val available = apk?.isFile == true
             installButton.visibility = if (available) View.VISIBLE else View.GONE
             shareButton.visibility = if (available) View.VISIBLE else View.GONE
+            if (available) loadApkPreview(apk!!)
         }
     }
 
