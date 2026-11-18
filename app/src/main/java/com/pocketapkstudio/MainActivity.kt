@@ -78,6 +78,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private val pickApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { inspectApk(it) }
+    }
+
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
             selectedUri = it
@@ -96,7 +100,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun buildScreen() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(20), dp(20))
+            setPadding(dp(16), dp(16), dp(16), dp(14))
             setBackgroundColor(0xFF10131B.toInt())
         }
         val scroll = ScrollView(this)
@@ -104,7 +108,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         scroll.addView(content)
 
         content.addView(label("POCKET APK STUDIO", 13, 0xFF9AA7FF.toInt(), true))
-        content.addView(label("Build APKs on your phone", 27, 0xFFFFFFFF.toInt(), true).apply {
+        content.addView(label("Build APKs on your phone", 24, 0xFFFFFFFF.toInt(), true).apply {
             setPadding(0, dp(10), 0, dp(6))
         })
         content.addView(label("Import Android projects and prepare local builds without GitHub Actions.", 14, 0xFFB6BBC9.toInt(), false))
@@ -173,6 +177,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val setupCard = card()
         setupCard.addView(label("LOCAL BUILD REQUIREMENTS", 12, 0xFF9AA7FF.toInt(), true))
         setupCard.addView(label("Builds run in the background through the local Termux + Ubuntu engine. You do not need to open the Termux terminal. Termux, Termux:RunCommand, Java 17, Gradle and Android SDK must remain installed and configured.", 13, 0xFFB6BBC9.toInt(), false))
+        setupCard.addView(space(8))
+        setupCard.addView(actionButton("Analyze existing APK") {
+            pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+        })
+        setupCard.addView(space(6))
+        setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         content.addView(setupCard)
         content.addView(space(18))
         content.addView(label("Version 1.2 • Background local build", 12, 0xFF737B8D.toInt(), false))
@@ -379,12 +389,46 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
     }
 
+    @Suppress("DEPRECATION")
+    private fun inspectApk(uri: Uri) {
+        lifecycleScope.launch {
+            val details = withContext(Dispatchers.IO) {
+                val temp = File(cacheDir, "apk-inspect-${System.currentTimeMillis()}.apk")
+                try {
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cannot read selected APK")
+                    val info = packageManager.getPackageArchiveInfo(temp.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                        ?: error("Invalid APK or metadata unavailable")
+                    buildString {
+                        append("Package: ${info.packageName}\n")
+                        append("Version: ${info.versionName ?: "Unknown"}\n")
+                        append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                        append("Min SDK: ${info.applicationInfo?.minSdkVersion ?: "Unknown"}\n")
+                        append("Target SDK: ${info.applicationInfo?.targetSdkVersion ?: "Unknown"}\n")
+                        append("Size: ${temp.length() / 1024} KB\n\n")
+                        append("Requested permissions:\n")
+                        append(info.requestedPermissions?.joinToString("\n") ?: "None listed")
+                    }
+                } catch (e: Exception) { "APK analysis failed: ${e.message}" }
+                finally { temp.delete() }
+            }
+            android.app.AlertDialog.Builder(this@MainActivity).setTitle("APK Analyzer")
+                .setMessage(details).setPositiveButton("Close", null).show()
+        }
+    }
+
+    private fun showDeviceInfo() {
+        val details = "Device: ${Build.MANUFACTURER} ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nCPU ABI: ${Build.SUPPORTED_ABIS.joinToString()}\nBuild engine: Termux + Ubuntu\nOutput: Downloads/PocketAPKStudio/Builds"
+        android.app.AlertDialog.Builder(this).setTitle("Device & Build Information")
+            .setMessage(details).setPositiveButton("OK", null).show()
+    }
+
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(16), dp(16), dp(16))
+        setPadding(dp(14), dp(14), dp(14), dp(14))
         background = android.graphics.drawable.GradientDrawable().apply {
             setColor(0xFF1B202C.toInt())
-            cornerRadius = dp(18).toFloat()
+            cornerRadius = dp(16).toFloat()
         }
     }
 
@@ -406,7 +450,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             cornerRadius = dp(12).toFloat()
         }
         setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(-1, dp(52))
+        layoutParams = LinearLayout.LayoutParams(-1, dp(46))
     }
 
     private fun space(height: Int) = View(this).apply {
