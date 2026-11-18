@@ -62,12 +62,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT")
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
-        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
-        val saved = prefs.getString("last_build_status", null)
-        if (saved != null && ::status.isInitialized) {
-            status.text = saved
-            buildProgress.visibility = if (saved.startsWith("Build running")) View.VISIBLE else View.GONE
-        }
+        refreshBuildResult()
     }
 
     override fun onStop() {
