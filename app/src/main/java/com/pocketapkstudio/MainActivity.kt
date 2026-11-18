@@ -40,7 +40,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var installButton: Button
     private lateinit var shareButton: Button
     private lateinit var serverStatus: TextView
-    private lateinit var openAiKeyStatus: TextView
     private lateinit var previewIcon: ImageView
     private lateinit var previewName: TextView
     private lateinit var previewDetails: TextView
@@ -129,7 +128,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        clearLegacyAiData()
         buildScreen()
+    }
+
+    private fun clearLegacyAiData() {
+        getSharedPreferences("openai_secure_settings", MODE_PRIVATE).edit().clear().apply()
+        try {
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (keyStore.containsAlias("pocket_apk_studio_openai_key")) {
+                keyStore.deleteEntry("pocket_apk_studio_openai_key")
+            }
+        } catch (_: Exception) { }
     }
 
     private fun buildScreen() {
@@ -276,88 +286,26 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
         val previewScroll = ScrollView(this).apply { visibility = View.GONE }
         previewScroll.addView(previewContent)
-        val settingsContent = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-        }
-        settingsContent.addView(label("SETTINGS", 13, 0xFF9AA7FF.toInt(), true))
-        settingsContent.addView(space(8))
-        settingsContent.addView(label("OpenAI API", 22, 0xFFFFFFFF.toInt(), true))
-        settingsContent.addView(label("Add your API key to enable OpenAI features in a future update. Your key is encrypted with Android Keystore and is not uploaded to GitHub.", 14, 0xFFB6BBC9.toInt(), false))
-        settingsContent.addView(space(14))
-        val openAiCard = card()
-        openAiCard.addView(label("API KEY", 12, 0xFF9AA7FF.toInt(), true))
-        openAiKeyStatus = label(
-            if (OpenAiKeyStore.hasKey(this)) "API key saved securely on this device." else "No API key saved.",
-            13, 0xFFB6BBC9.toInt(), false
-        )
-        openAiCard.addView(openAiKeyStatus)
-        openAiCard.addView(space(10))
-        val apiKeyInput = EditText(this).apply {
-            hint = "sk-..."
-            setHintTextColor(0xFF8790A3.toInt())
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 14f
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            maxLines = 1
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF0B0E15.toInt())
-                cornerRadius = dp(10).toFloat()
-                setStroke(dp(1), 0xFF3B455A.toInt())
-            }
-        }
-        openAiCard.addView(apiKeyInput, LinearLayout.LayoutParams(-1, dp(50)))
-        openAiCard.addView(space(10))
-        openAiCard.addView(actionButton("Save API Key Securely", true) {
-            val key = apiKeyInput.text?.toString()?.trim().orEmpty()
-            try {
-                OpenAiKeyStore.save(this, key)
-                apiKeyInput.text?.clear()
-                openAiKeyStatus.text = "API key saved securely on this device."
-                Toast.makeText(this, "OpenAI API key saved securely.", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, e.message ?: "Could not save API key.", Toast.LENGTH_LONG).show()
-            }
-        })
-        openAiCard.addView(space(6))
-        openAiCard.addView(actionButton("Remove Saved API Key") {
-            OpenAiKeyStore.delete(this)
-            apiKeyInput.text?.clear()
-            openAiKeyStatus.text = "No API key saved."
-            Toast.makeText(this, "Saved API key removed from this device.", Toast.LENGTH_SHORT).show()
-        })
-        settingsContent.addView(openAiCard)
-        settingsContent.addView(space(12))
-        settingsContent.addView(label("API usage is billed separately by OpenAI. Saving a key does not make API usage free. No API requests are made by this settings screen.", 12, 0xFF9AA3B5.toInt(), false))
-        val settingsScroll = ScrollView(this).apply { visibility = View.GONE }
-        settingsScroll.addView(settingsContent)
-
         val tabBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
         val buildTab = actionButton("Build", true) {
-            scroll.visibility = View.VISIBLE; previewScroll.visibility = View.GONE; settingsScroll.visibility = View.GONE
+            scroll.visibility = View.VISIBLE; previewScroll.visibility = View.GONE
         }
         val previewTab = actionButton("Preview") {
-            scroll.visibility = View.GONE; previewScroll.visibility = View.VISIBLE; settingsScroll.visibility = View.GONE
+            scroll.visibility = View.GONE; previewScroll.visibility = View.VISIBLE
         }
-        val settingsTab = actionButton("Settings") {
-            scroll.visibility = View.GONE; previewScroll.visibility = View.GONE; settingsScroll.visibility = View.VISIBLE
-        }
-        listOf(buildTab, previewTab, settingsTab).forEach {
+        listOf(buildTab, previewTab).forEach {
             it.layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 leftMargin = dp(3); rightMargin = dp(3)
             }
         }
         tabBar.addView(buildTab)
         tabBar.addView(previewTab)
-        tabBar.addView(settingsTab)
         root.addView(tabBar)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
     }
 
