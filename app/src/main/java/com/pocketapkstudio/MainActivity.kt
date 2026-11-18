@@ -322,7 +322,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         })
         content.addView(analysisCard)
         content.addView(space(18))
-        content.addView(label("Version 1.3 • APK analysis report", 12, 0xFF737B8D.toInt(), false))
+        content.addView(label("Version 1.4 • APK analysis + JADX recovery", 12, 0xFF737B8D.toInt(), false))
 
         val previewContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
