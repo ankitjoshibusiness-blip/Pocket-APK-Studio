@@ -299,7 +299,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 14f
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            singleLine = true
+            maxLines = 1
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0xFF0B0E15.toInt())
