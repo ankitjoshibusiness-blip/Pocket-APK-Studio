@@ -1,6 +1,11 @@
 package com.pocketapkstudio
 
 import android.content.ContentValues
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.app.PendingIntent
+import android.os.SystemClock
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -28,6 +33,26 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private var importedZipName: String? = null
     private var projectIsGradle = false
     private var projectIsFlutter = false
+    private val buildResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+            status.text = prefs.getString("last_build_status", "Build finished. Check result.")
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT")
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
+        val saved = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_build_status", null)
+        if (saved != null && ::status.isInitialized) status.text = saved
+    }
+
+    override fun onStop() {
+        try { unregisterReceiver(buildResultReceiver) } catch (_: Exception) { }
+        super.onStop()
+    }
 
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
@@ -42,7 +67,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             selectedUri = it
             importedZipName = null
             projectName.text = it.lastPathSegment ?: "Selected project folder"
-            projectType.text = "Folder selected. ZIP import is currently required for the Termux build bridge."
+            projectType.text = "Folder selected. ZIP import is currently required for local builds."
             status.text = "Folder access saved. For this version, export the project as a ZIP to build it."
         }
     }
@@ -99,10 +124,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
         val setupCard = card()
         setupCard.addView(label("LOCAL BUILD REQUIREMENTS", 12, 0xFF9AA7FF.toInt(), true))
-        setupCard.addView(label("This build bridge uses Termux + Ubuntu on your phone. Install the Termux:RunCommand add-on, enable external commands in Termux, and install Java 17, Gradle and Android SDK Build Tools inside Ubuntu.", 13, 0xFFB6BBC9.toInt(), false))
+        setupCard.addView(label("Builds run in the background through the local Termux + Ubuntu engine. You do not need to open the Termux terminal. Termux, Termux:RunCommand, Java 17, Gradle and Android SDK must remain installed and configured.", 13, 0xFFB6BBC9.toInt(), false))
         content.addView(setupCard)
         content.addView(space(18))
-        content.addView(label("Version 1.1 • Local build bridge groundwork", 12, 0xFF737B8D.toInt(), false))
+        content.addView(label("Version 1.2 • Background local build", 12, 0xFF737B8D.toInt(), false))
 
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -219,12 +244,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val sharedZip = "/sdcard/Download/PocketAPKStudio/$zipName"
         val command = """
             set -e
-            echo "Pocket APK Studio: starting local Android build"
+            echo "Pocket APK Studio: background Android build started"
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
             proot-distro login ubuntu -- bash -lc '
               set -e
               command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
               test -n "${'$'}ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
+              test -f "${'$'}ANDROID_HOME/platforms/android-35/android.jar" || { echo "ERROR: Android 35 SDK platform is missing"; exit 15; }
               PROJECT="${'$'}HOME/pocket-apk-studio/project"
               mkdir -p "${'$'}PROJECT"
               rm -rf "${'$'}PROJECT"/*
@@ -232,23 +258,42 @@ class MainActivity : androidx.activity.ComponentActivity() {
               SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
               test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
               cd "${'$'}(dirname "${'$'}SETTINGS")"
-              if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew assembleDebug; else command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }; gradle assembleDebug; fi
-              echo "BUILD SUCCESS. APK files:"
-              find . -path "*/build/outputs/apk/*" -type f -name "*.apk" -print
+              if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew --no-daemon --max-workers=2 assembleDebug; else command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }; gradle --no-daemon --max-workers=2 assembleDebug; fi
+              mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+              APK_COUNT=0
+              while IFS= read -r APK; do
+                [ -n "${'$'}APK" ] || continue
+                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
+                APK_COUNT=${'$'}((APK_COUNT + 1))
+              done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
+              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
             '
         """.trimIndent()
+
+        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
             putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
             putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_SERVICE.EXTRA_PENDING_INTENT", resultPendingIntent)
         }
         try {
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
+                .apply()
             startService(intent)
-            status.text = "Build command sent to Termux. Open Termux to watch output. APK is not confirmed until Gradle reports BUILD SUCCESS."
+            status.text = "Build started in background. Termux terminal will not open. Result and APK will appear here / in Downloads."
         } catch (e: Exception) {
-            status.text = "Termux build bridge unavailable. Install Termux and Termux:RunCommand, then enable allow-external-apps in Termux."
+            status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
         }
     }
 
