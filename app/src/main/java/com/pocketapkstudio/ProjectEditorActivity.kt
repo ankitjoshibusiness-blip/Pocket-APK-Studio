@@ -78,10 +78,10 @@ class ProjectEditorActivity : Activity() {
                         zos.closeEntry()
                     }
                 }
-                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", out)
+                val uri = FileProvider.getUriForFile(this@ProjectEditorActivity, "$packageName.fileprovider", out)
                 setResult(Activity.RESULT_OK, Intent().setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 finish()
-            } catch (e: Exception) { Toast.makeText(this, "ZIP export failed: ${e.message}", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) { Toast.makeText(this@ProjectEditorActivity, "ZIP export failed: ${e.message}", Toast.LENGTH_LONG).show() }
         } })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val fileScroll = ScrollView(this).apply { addView(list) }
