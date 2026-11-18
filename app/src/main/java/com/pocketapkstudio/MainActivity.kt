@@ -217,7 +217,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val (editorScroll, editorContent) = page()
         val (toolsScroll, toolsContent) = page()
         val (settingsScroll, settingsContent) = page()
-        editorContent.addView(label("CODE EDITOR", 18, 0xFFFFFFFF.toInt(), true))
+        editorContent.addView(label("WORKSPACE", 18, 0xFFFFFFFF.toInt(), true))
         editorContent.addView(label("Import and edit your Android project files", 12, 0xFF9EADD0.toInt(), false))
         editorContent.addView(space(12))
         settingsContent.addView(label("SETTINGS", 18, 0xFFFFFFFF.toInt(), true))
@@ -273,7 +273,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(welcomeMenuItem("▣", "Open existing project") {
             pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
         })
-        homeContent.addView(welcomeMenuItem("</>", "Code Editor") { openPage?.invoke(1) })
+        homeContent.addView(welcomeMenuItem("</>", "Workspace") { openPage?.invoke(1) })
+        homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
             val repoUrl = EditText(this).apply {
                 hint = "https://github.com/owner/repository"
@@ -299,14 +300,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 checkBuildServer()
             }
         })
-        homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
         homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { openPage?.invoke(2) })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
-                .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nCode Editor: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
+                .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nWorkspace: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
                 .setPositiveButton("Got it", null).show()
         })
+        homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
         homeContent.addView(space(12))
         homeContent.addView(label("PROJECT & BUILD WORKSPACE", 12, 0xFF91B5B5.toInt(), true))
         homeContent.addView(label("Build status, recent activity and build logs remain available below.", 12, 0xFFB4C0C8.toInt(), false))
@@ -327,7 +328,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         projectType = label("Targets: Android Java/Kotlin first; Flutter later", 14, 0xFFB6BBC9.toInt(), false)
         projectCard.addView(projectType)
         projectCard.addView(space(8))
-        projectCard.addView(actionButton("Open ZIP in Code Editor", true) {
+        projectCard.addView(actionButton("Open ZIP in Workspace", true) {
             val uri = selectedUri
             if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
             else openProjectEditor(uri)
