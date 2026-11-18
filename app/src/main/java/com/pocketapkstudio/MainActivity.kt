@@ -57,6 +57,23 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 if (::serverStatus.isInitialized) serverStatus.text = prefs.getString("server_status", "Build server status unavailable.")
                 return
             }
+            if (intent?.action == "com.pocketapkstudio.BUILD_PROGRESS") {
+                val line = intent.getStringExtra("log_line").orEmpty()
+                if (line.isNotBlank() && ::logs.isInitialized) {
+                    val previous = prefs.getString("last_build_log", "").orEmpty()
+                    val updated = (previous + "\n" + line).takeLast(40000)
+                    var progress = prefs.getInt("last_build_percent", 5)
+                    if (line.startsWith("> Task")) progress = (progress + 3).coerceAtMost(95)
+                    else if (line.contains("Starting a Gradle Daemon")) progress = maxOf(progress, 10)
+                    prefs.edit().putString("last_build_log", updated).putInt("last_build_percent", progress).apply()
+                    logs.text = updated
+                    buildProgress.isIndeterminate = false
+                    buildProgress.progress = progress
+                    percentText.text = "$progress% (estimated)"
+                    status.text = "Building locally…"
+                }
+                return
+            }
             status.text = prefs.getString("last_build_status", "Build finished. Check result.")
             buildProgress.visibility = View.VISIBLE
             buildProgress.isIndeterminate = false
@@ -75,6 +92,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         super.onStart()
         val filter = IntentFilter("com.pocketapkstudio.BUILD_RESULT").apply {
             addAction("com.pocketapkstudio.SERVER_STATUS")
+            addAction("com.pocketapkstudio.BUILD_PROGRESS")
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(buildResultReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
@@ -401,7 +419,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         status.text = "Preparing project…"
         logs.text = "Preparing project…"
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
-            .putBoolean("build_running", true).putInt("last_build_percent", 0)
+            .putBoolean("build_running", true).putInt("last_build_percent", 5)
             .putString("last_build_log", "Preparing project…").apply()
         lifecycleScope.launch {
             try {
@@ -467,7 +485,696 @@ class MainActivity : androidx.activity.ComponentActivity() {
               SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
               test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
               cd "${'$'}(dirname "${'$'}SETTINGS")"
-              if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew --no-daemon --max-workers=2 assembleDebug; else command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }; gradle --no-daemon --max-workers=2 assembleDebug; fi
+              set -o pipefail
+              if [ -f ./gradlew ]; then
+                chmod +x ./gradlew
+                ./gradlew --no-daemon --max-workers=2 --console=plain assembleDebug 2>&1 | while IFS= read -r LINE; do
+                  echo "${'
+              mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+              APK_COUNT=0
+              while IFS= read -r APK; do
+                [ -n "${'$'}APK" ] || continue
+                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
+                APK_COUNT=${'$'}((APK_COUNT + 1))
+              done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
+              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
+            '
+        """.trimIndent()
+
+        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
+        }
+        try {
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
+                .apply()
+            startService(intent)
+            buildProgress.visibility = View.VISIBLE
+            buildProgress.isIndeterminate = true
+            percentText.text = "BUILD RUNNING"
+            status.text = "Build running in background. Gradle task logs will be shown when the build finishes."
+        } catch (e: Exception) {
+            buildProgress.visibility = View.GONE
+            status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
+        }
+    }
+
+    private fun installBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File)
+        if (apk == null || !apk.isFile) { status.text = "APK file not found. Build again."; return }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { status.text = "Could not open installer: ${e.message}" }
+    }
+
+    private fun shareBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File) ?: return
+        if (!apk.isFile) return
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(uri: Uri) {
+        lifecycleScope.launch {
+            val temp = File(cacheDir, "apk-preview-${System.currentTimeMillis()}.apk")
+            try {
+                withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cannot read selected APK")
+                }
+                loadApkPreview(temp)
+            } catch (e: Exception) {
+                previewName.text = "Preview failed"
+                previewDetails.text = e.message ?: "Could not read APK."
+                previewPermissions.text = "No permissions available."
+                previewInstallButton.visibility = View.GONE
+                temp.delete()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(file: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(file.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                ?: error("Invalid APK or metadata unavailable")
+            val appInfo = info.applicationInfo ?: error("App information unavailable")
+            appInfo.sourceDir = file.absolutePath
+            appInfo.publicSourceDir = file.absolutePath
+            previewApkFile = file
+            previewName.text = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+            previewIcon.setImageDrawable(appInfo.loadIcon(packageManager))
+            previewDetails.text = buildString {
+                append("Package: ${info.packageName}\n")
+                append("Version: ${info.versionName ?: "Unknown"}\n")
+                append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                append("Min SDK: ${appInfo.minSdkVersion}\n")
+                append("Target SDK: ${appInfo.targetSdkVersion}\n")
+                append("APK size: ${file.length() / 1024} KB")
+            }
+            previewPermissions.text = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+            previewInstallButton.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            previewName.text = "Preview failed"
+            previewDetails.text = e.message ?: "Could not analyze APK."
+            previewPermissions.text = "No permissions available."
+            previewInstallButton.visibility = View.GONE
+        }
+    }
+
+    private fun installPreviewApk() {
+        val apk = previewApkFile
+        if (apk == null || !apk.isFile) {
+            Toast.makeText(this, "Please select an APK again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDeviceInfo() {
+        val details = "Device: ${Build.MANUFACTURER} ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nCPU ABI: ${Build.SUPPORTED_ABIS.joinToString()}\nBuild engine: Termux + Ubuntu\nOutput: Downloads/PocketAPKStudio/Builds"
+        android.app.AlertDialog.Builder(this).setTitle("Device & Build Information")
+            .setMessage(details).setPositiveButton("OK", null).show()
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1B202C.toInt())
+            cornerRadius = dp(16).toFloat()
+        }
+    }
+
+    private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
+        this.text = text
+        textSize = size.toFloat()
+        setTextColor(color)
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(3), 0, dp(3))
+    }
+
+    private fun actionButton(text: String, primary: Boolean = false, action: () -> Unit) = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        textSize = 15f
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFE4E7F2.toInt())
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
+            cornerRadius = dp(12).toFloat()
+        }
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(-1, dp(46))
+    }
+
+    private fun space(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(1, dp(height))
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+}LINE"
+                  /system/bin/am broadcast -a com.pocketapkstudio.BUILD_PROGRESS -p com.pocketapkstudio --es log_line "${'
+              mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+              APK_COUNT=0
+              while IFS= read -r APK; do
+                [ -n "${'$'}APK" ] || continue
+                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
+                APK_COUNT=${'$'}((APK_COUNT + 1))
+              done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
+              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
+            '
+        """.trimIndent()
+
+        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
+        }
+        try {
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
+                .apply()
+            startService(intent)
+            buildProgress.visibility = View.VISIBLE
+            buildProgress.isIndeterminate = true
+            percentText.text = "BUILD RUNNING"
+            status.text = "Build running in background. Gradle task logs will be shown when the build finishes."
+        } catch (e: Exception) {
+            buildProgress.visibility = View.GONE
+            status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
+        }
+    }
+
+    private fun installBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File)
+        if (apk == null || !apk.isFile) { status.text = "APK file not found. Build again."; return }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { status.text = "Could not open installer: ${e.message}" }
+    }
+
+    private fun shareBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File) ?: return
+        if (!apk.isFile) return
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(uri: Uri) {
+        lifecycleScope.launch {
+            val temp = File(cacheDir, "apk-preview-${System.currentTimeMillis()}.apk")
+            try {
+                withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cannot read selected APK")
+                }
+                loadApkPreview(temp)
+            } catch (e: Exception) {
+                previewName.text = "Preview failed"
+                previewDetails.text = e.message ?: "Could not read APK."
+                previewPermissions.text = "No permissions available."
+                previewInstallButton.visibility = View.GONE
+                temp.delete()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(file: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(file.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                ?: error("Invalid APK or metadata unavailable")
+            val appInfo = info.applicationInfo ?: error("App information unavailable")
+            appInfo.sourceDir = file.absolutePath
+            appInfo.publicSourceDir = file.absolutePath
+            previewApkFile = file
+            previewName.text = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+            previewIcon.setImageDrawable(appInfo.loadIcon(packageManager))
+            previewDetails.text = buildString {
+                append("Package: ${info.packageName}\n")
+                append("Version: ${info.versionName ?: "Unknown"}\n")
+                append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                append("Min SDK: ${appInfo.minSdkVersion}\n")
+                append("Target SDK: ${appInfo.targetSdkVersion}\n")
+                append("APK size: ${file.length() / 1024} KB")
+            }
+            previewPermissions.text = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+            previewInstallButton.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            previewName.text = "Preview failed"
+            previewDetails.text = e.message ?: "Could not analyze APK."
+            previewPermissions.text = "No permissions available."
+            previewInstallButton.visibility = View.GONE
+        }
+    }
+
+    private fun installPreviewApk() {
+        val apk = previewApkFile
+        if (apk == null || !apk.isFile) {
+            Toast.makeText(this, "Please select an APK again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDeviceInfo() {
+        val details = "Device: ${Build.MANUFACTURER} ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nCPU ABI: ${Build.SUPPORTED_ABIS.joinToString()}\nBuild engine: Termux + Ubuntu\nOutput: Downloads/PocketAPKStudio/Builds"
+        android.app.AlertDialog.Builder(this).setTitle("Device & Build Information")
+            .setMessage(details).setPositiveButton("OK", null).show()
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1B202C.toInt())
+            cornerRadius = dp(16).toFloat()
+        }
+    }
+
+    private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
+        this.text = text
+        textSize = size.toFloat()
+        setTextColor(color)
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(3), 0, dp(3))
+    }
+
+    private fun actionButton(text: String, primary: Boolean = false, action: () -> Unit) = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        textSize = 15f
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFE4E7F2.toInt())
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
+            cornerRadius = dp(12).toFloat()
+        }
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(-1, dp(46))
+    }
+
+    private fun space(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(1, dp(height))
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+}LINE" >/dev/null 2>&1
+                done
+              else
+                command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
+                gradle --no-daemon --max-workers=2 --console=plain assembleDebug 2>&1 | while IFS= read -r LINE; do
+                  echo "${'
+              mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+              APK_COUNT=0
+              while IFS= read -r APK; do
+                [ -n "${'$'}APK" ] || continue
+                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
+                APK_COUNT=${'$'}((APK_COUNT + 1))
+              done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
+              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
+            '
+        """.trimIndent()
+
+        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
+        }
+        try {
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
+                .apply()
+            startService(intent)
+            buildProgress.visibility = View.VISIBLE
+            buildProgress.isIndeterminate = true
+            percentText.text = "BUILD RUNNING"
+            status.text = "Build running in background. Gradle task logs will be shown when the build finishes."
+        } catch (e: Exception) {
+            buildProgress.visibility = View.GONE
+            status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
+        }
+    }
+
+    private fun installBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File)
+        if (apk == null || !apk.isFile) { status.text = "APK file not found. Build again."; return }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { status.text = "Could not open installer: ${e.message}" }
+    }
+
+    private fun shareBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File) ?: return
+        if (!apk.isFile) return
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(uri: Uri) {
+        lifecycleScope.launch {
+            val temp = File(cacheDir, "apk-preview-${System.currentTimeMillis()}.apk")
+            try {
+                withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cannot read selected APK")
+                }
+                loadApkPreview(temp)
+            } catch (e: Exception) {
+                previewName.text = "Preview failed"
+                previewDetails.text = e.message ?: "Could not read APK."
+                previewPermissions.text = "No permissions available."
+                previewInstallButton.visibility = View.GONE
+                temp.delete()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(file: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(file.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                ?: error("Invalid APK or metadata unavailable")
+            val appInfo = info.applicationInfo ?: error("App information unavailable")
+            appInfo.sourceDir = file.absolutePath
+            appInfo.publicSourceDir = file.absolutePath
+            previewApkFile = file
+            previewName.text = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+            previewIcon.setImageDrawable(appInfo.loadIcon(packageManager))
+            previewDetails.text = buildString {
+                append("Package: ${info.packageName}\n")
+                append("Version: ${info.versionName ?: "Unknown"}\n")
+                append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                append("Min SDK: ${appInfo.minSdkVersion}\n")
+                append("Target SDK: ${appInfo.targetSdkVersion}\n")
+                append("APK size: ${file.length() / 1024} KB")
+            }
+            previewPermissions.text = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+            previewInstallButton.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            previewName.text = "Preview failed"
+            previewDetails.text = e.message ?: "Could not analyze APK."
+            previewPermissions.text = "No permissions available."
+            previewInstallButton.visibility = View.GONE
+        }
+    }
+
+    private fun installPreviewApk() {
+        val apk = previewApkFile
+        if (apk == null || !apk.isFile) {
+            Toast.makeText(this, "Please select an APK again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDeviceInfo() {
+        val details = "Device: ${Build.MANUFACTURER} ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nCPU ABI: ${Build.SUPPORTED_ABIS.joinToString()}\nBuild engine: Termux + Ubuntu\nOutput: Downloads/PocketAPKStudio/Builds"
+        android.app.AlertDialog.Builder(this).setTitle("Device & Build Information")
+            .setMessage(details).setPositiveButton("OK", null).show()
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1B202C.toInt())
+            cornerRadius = dp(16).toFloat()
+        }
+    }
+
+    private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
+        this.text = text
+        textSize = size.toFloat()
+        setTextColor(color)
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(3), 0, dp(3))
+    }
+
+    private fun actionButton(text: String, primary: Boolean = false, action: () -> Unit) = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        textSize = 15f
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFE4E7F2.toInt())
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
+            cornerRadius = dp(12).toFloat()
+        }
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(-1, dp(46))
+    }
+
+    private fun space(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(1, dp(height))
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+}LINE"
+                  /system/bin/am broadcast -a com.pocketapkstudio.BUILD_PROGRESS -p com.pocketapkstudio --es log_line "${'
+              mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+              APK_COUNT=0
+              while IFS= read -r APK; do
+                [ -n "${'$'}APK" ] || continue
+                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
+                APK_COUNT=${'$'}((APK_COUNT + 1))
+              done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
+              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
+            '
+        """.trimIndent()
+
+        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
+        }
+        try {
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Build running in background… You can stay in Pocket APK Studio.")
+                .apply()
+            startService(intent)
+            buildProgress.visibility = View.VISIBLE
+            buildProgress.isIndeterminate = true
+            percentText.text = "BUILD RUNNING"
+            status.text = "Build running in background. Gradle task logs will be shown when the build finishes."
+        } catch (e: Exception) {
+            buildProgress.visibility = View.GONE
+            status.text = "Could not start background build: ${e.message ?: "Termux permission or service error"}"
+        }
+    }
+
+    private fun installBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File)
+        if (apk == null || !apk.isFile) { status.text = "APK file not found. Build again."; return }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { status.text = "Could not open installer: ${e.message}" }
+    }
+
+    private fun shareBuiltApk() {
+        val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+        val apk = path?.let(::File) ?: return
+        if (!apk.isFile) return
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share APK"))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(uri: Uri) {
+        lifecycleScope.launch {
+            val temp = File(cacheDir, "apk-preview-${System.currentTimeMillis()}.apk")
+            try {
+                withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cannot read selected APK")
+                }
+                loadApkPreview(temp)
+            } catch (e: Exception) {
+                previewName.text = "Preview failed"
+                previewDetails.text = e.message ?: "Could not read APK."
+                previewPermissions.text = "No permissions available."
+                previewInstallButton.visibility = View.GONE
+                temp.delete()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(file: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(file.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                ?: error("Invalid APK or metadata unavailable")
+            val appInfo = info.applicationInfo ?: error("App information unavailable")
+            appInfo.sourceDir = file.absolutePath
+            appInfo.publicSourceDir = file.absolutePath
+            previewApkFile = file
+            previewName.text = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+            previewIcon.setImageDrawable(appInfo.loadIcon(packageManager))
+            previewDetails.text = buildString {
+                append("Package: ${info.packageName}\n")
+                append("Version: ${info.versionName ?: "Unknown"}\n")
+                append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                append("Min SDK: ${appInfo.minSdkVersion}\n")
+                append("Target SDK: ${appInfo.targetSdkVersion}\n")
+                append("APK size: ${file.length() / 1024} KB")
+            }
+            previewPermissions.text = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+            previewInstallButton.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            previewName.text = "Preview failed"
+            previewDetails.text = e.message ?: "Could not analyze APK."
+            previewPermissions.text = "No permissions available."
+            previewInstallButton.visibility = View.GONE
+        }
+    }
+
+    private fun installPreviewApk() {
+        val apk = previewApkFile
+        if (apk == null || !apk.isFile) {
+            Toast.makeText(this, "Please select an APK again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showDeviceInfo() {
+        val details = "Device: ${Build.MANUFACTURER} ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nCPU ABI: ${Build.SUPPORTED_ABIS.joinToString()}\nBuild engine: Termux + Ubuntu\nOutput: Downloads/PocketAPKStudio/Builds"
+        android.app.AlertDialog.Builder(this).setTitle("Device & Build Information")
+            .setMessage(details).setPositiveButton("OK", null).show()
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1B202C.toInt())
+            cornerRadius = dp(16).toFloat()
+        }
+    }
+
+    private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
+        this.text = text
+        textSize = size.toFloat()
+        setTextColor(color)
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(3), 0, dp(3))
+    }
+
+    private fun actionButton(text: String, primary: Boolean = false, action: () -> Unit) = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        textSize = 15f
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else 0xFFE4E7F2.toInt())
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
+            cornerRadius = dp(12).toFloat()
+        }
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(-1, dp(46))
+    }
+
+    private fun space(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(1, dp(height))
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+}LINE" >/dev/null 2>&1
+                done
+              fi
               mkdir -p /sdcard/Download/PocketAPKStudio/Builds
               APK_COUNT=0
               while IFS= read -r APK; do
