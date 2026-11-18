@@ -14,6 +14,8 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
         val successful = exitCode == 0 && errCode == -1
+        val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
+        val taskCount = Regex("(?m)^> Task ").findAll(stdout).count()
         val combined = buildString {
             append(stdout)
             if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
@@ -26,7 +28,10 @@ class TermuxResultService : IntentService("TermuxResultService") {
         }
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
             .putString("last_build_status", status)
-            .putString("last_build_log", combined.takeLast(20000))
+            .putString("last_build_log", combined.takeLast(40000))
+            .putBoolean("build_running", false)
+            .putInt("last_build_percent", if (successful) 100 else 0)
+            .putString("last_apk_path", if (successful) apkPath else null)
             .apply()
         sendBroadcast(Intent("com.pocketapkstudio.BUILD_RESULT").setPackage(packageName))
         Log.i("PocketAPKStudio", "Termux build finished. exit=$exitCode err=$errCode")
