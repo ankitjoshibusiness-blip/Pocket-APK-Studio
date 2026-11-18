@@ -33,6 +33,9 @@ class ProjectEditorActivity : Activity() {
     private lateinit var suggestionsBar: LinearLayout
     private lateinit var errorsPanel: TextView
     private lateinit var root: LinearLayout
+    private lateinit var explorerPanel: LinearLayout
+    private lateinit var explorerToggle: Button
+    private var explorerOpen = false
     private var currentFile: File? = null
     private val openTabs = LinkedHashMap<File, String>()
     private val handler = Handler(Looper.getMainLooper())
@@ -83,7 +86,8 @@ class ProjectEditorActivity : Activity() {
         header.addView(smallButton("☼ / ☾") { darkTheme = !darkTheme; applyTheme(); refreshEditorColors() })
         root.addView(header)
         val toolbar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        toolbar.addView(smallButton("Files") { showFilePicker() })
+        explorerToggle = smallButton("☰ Explorer") { toggleExplorer() }
+        toolbar.addView(explorerToggle)
         toolbar.addView(smallButton("Find") { showFindReplace(false) })
         toolbar.addView(smallButton("Replace") { showFindReplace(true) })
         toolbar.addView(smallButton("Save") { saveCurrent(true) })
@@ -107,7 +111,23 @@ class ProjectEditorActivity : Activity() {
         }
         codeRow.addView(editor, LinearLayout.LayoutParams(0, -1, 1f))
         val codeScroll = ScrollView(this).apply { addView(codeRow) }
-        root.addView(codeScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val workArea = FrameLayout(this)
+        workArea.addView(codeScroll, FrameLayout.LayoutParams(-1, -1))
+        explorerPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundColor(if (darkTheme) 0xFF17213B.toInt() else 0xFFF0F3FA.toInt())
+            elevation = dp(12).toFloat()
+        }
+        explorerPanel.addView(label("PROJECT EXPLORER", 11, true))
+        val explorerScroll = ScrollView(this)
+        val explorerFiles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        explorerScroll.addView(explorerFiles)
+        explorerPanel.addView(explorerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        workArea.addView(explorerPanel, FrameLayout.LayoutParams(dp(225), -1, Gravity.START))
+        explorerPanel.translationX = -dp(245).toFloat()
+        explorerPanel.visibility = View.GONE
+        root.addView(workArea, LinearLayout.LayoutParams(-1, 0, 1f))
         suggestionsBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         root.addView(suggestionsBar, LinearLayout.LayoutParams(-1, dp(42)))
         root.addView(label("BUILD ERRORS / PROBLEMS", 11, true))
@@ -117,6 +137,7 @@ class ProjectEditorActivity : Activity() {
         root.addView(errorsPanel)
         root.addView(smallButton("Save changes & return to project") { exportEditedZip() })
         setContentView(root)
+        refreshExplorer()
 
         editor.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -135,7 +156,41 @@ class ProjectEditorActivity : Activity() {
         })
         updateBuildErrors()
         renderTabs()
-        showFilePicker()
+    }
+
+    private fun toggleExplorer() {
+        explorerOpen = !explorerOpen
+        if (explorerOpen) {
+            refreshExplorer()
+            explorerPanel.visibility = View.VISIBLE
+            explorerPanel.translationX = -dp(245).toFloat()
+            explorerPanel.animate().translationX(0f).setDuration(260L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            explorerToggle.text = "☰ Close"
+        } else {
+            explorerPanel.animate().translationX(-dp(245).toFloat()).setDuration(220L).setInterpolator(android.view.animation.AccelerateInterpolator()).withEndAction { explorerPanel.visibility = View.GONE }.start()
+            explorerToggle.text = "☰ Explorer"
+        }
+    }
+
+    private fun refreshExplorer() {
+        if (!::explorerPanel.isInitialized) return
+        val scroll = explorerPanel.getChildAt(1) as? ScrollView ?: return
+        val list = scroll.getChildAt(0) as? LinearLayout ?: return
+        list.removeAllViews()
+        rootDir.walkTopDown().filter { it.isFile }.take(500).forEach { file ->
+            val editable = file.extension.lowercase() in editableExtensions
+            val item = smallButton((if (editable) "▤ " else "▧ ") + file.relativeTo(rootDir).invariantSeparatorsPath) {
+                if (!editable || file.length() > 1024 * 1024) {
+                    Toast.makeText(this, "This file cannot be opened in the text editor.", Toast.LENGTH_SHORT).show()
+                } else {
+                    openFile(file)
+                    if (explorerOpen) toggleExplorer()
+                }
+            }
+            item.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            item.maxLines = 1
+            list.addView(item, LinearLayout.LayoutParams(-1, dp(38)))
+        }
     }
 
     private fun applyTheme() {
