@@ -206,7 +206,7 @@ class ProjectEditorActivity : Activity() {
         val numberColor = if (darkTheme) 0xFFF78C6C.toInt() else 0xFFB45309.toInt()
         val patterns = listOf(
             Pair("\\b(class|object|fun|val|var|if|else|when|for|while|return|public|private|protected|override|import|package|interface|suspend|const|lateinit|new|static|void|int|String|true|false|null)\\b", keywordColor),
-            Pair("\"([^\\\\"]|\\\\.)*\"|'([^\\\\']|\\\\.)*'", stringColor),
+            Pair("""\"([^\\"]|\\.)*\"|'([^\\']|\\.)*'""", stringColor),
             Pair("//[^\\n]*|/\\*[\\s\\S]*?\\*/", commentColor),
             Pair("\\b\\d+\\b", numberColor)
         )
@@ -242,9 +242,9 @@ class ProjectEditorActivity : Activity() {
 
     private fun showFindReplace(replace: Boolean) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        val find = EditText(this).apply { hint = "Find text"; singleLine = true }
+        val find = EditText(this).apply { hint = "Find text"; isSingleLine = true }
         box.addView(find)
-        val replacement = EditText(this).apply { hint = "Replace with"; singleLine = true; visibility = if (replace) View.VISIBLE else View.GONE }
+        val replacement = EditText(this).apply { hint = "Replace with"; isSingleLine = true; visibility = if (replace) View.VISIBLE else View.GONE }
         box.addView(replacement)
         AlertDialog.Builder(this).setTitle(if (replace) "Find & Replace" else "Find")
             .setView(box).setPositiveButton(if (replace) "Replace all" else "Find next") { _, _ ->
