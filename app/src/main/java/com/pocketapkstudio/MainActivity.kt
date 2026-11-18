@@ -489,7 +489,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
               if [ -f ./gradlew ]; then
                 chmod +x ./gradlew
                 ./gradlew --no-daemon --max-workers=2 --console=plain assembleDebug 2>&1 | while IFS= read -r LINE; do
-                  echo "${'
+                  echo "${'$'}LINE"
+                  /system/bin/am broadcast -a com.pocketapkstudio.BUILD_PROGRESS -p com.pocketapkstudio --es log_line "${'$'}LINE" >/dev/null 2>&1
+                done
+              else
+                command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
+                gradle --no-daemon --max-workers=2 --console=plain assembleDebug 2>&1 | while IFS= read -r LINE; do
+                  echo "${'$'}LINE"
+                  /system/bin/am broadcast -a com.pocketapkstudio.BUILD_PROGRESS -p com.pocketapkstudio --es log_line "${'$'}LINE" >/dev/null 2>&1
+                done
+              fi
               mkdir -p /sdcard/Download/PocketAPKStudio/Builds
               APK_COUNT=0
               while IFS= read -r APK; do
