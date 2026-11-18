@@ -284,7 +284,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
             putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-            putExtra("com.termux.RUN_COMMAND_SERVICE.EXTRA_PENDING_INTENT", resultPendingIntent)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", resultPendingIntent)
         }
         try {
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
