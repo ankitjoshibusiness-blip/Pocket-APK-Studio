@@ -214,40 +214,73 @@ class MainActivity : androidx.activity.ComponentActivity() {
             return
         }
         serverStatus.text = "Checking and preparing Termux, Ubuntu, Java 17 and Android SDK…"
+
+        // Keep the shell payload free of Kotlin interpolation: all SDK paths are absolute.
         val command = """
             set -e
             export DEBIAN_FRONTEND=noninteractive
-            if ! command -v proot-distro >/dev/null 2>&1; then pkg update -y && pkg install -y proot-distro; fi
-            if ! proot-distro list installed 2>/dev/null | grep -qi ubuntu; then proot-distro install ubuntu; fi
+
+            if ! command -v proot-distro >/dev/null 2>&1; then
+                pkg update -y
+                pkg install -y proot-distro
+            fi
+
+            if ! proot-distro list installed 2>/dev/null | grep -qi ubuntu; then
+                proot-distro install ubuntu
+            fi
+
             proot-distro login ubuntu -- bash -lc '
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
-              SDK=/root/Android/Sdk
-              if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q "17" && command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f "${'$' }SDK/platforms/android-35/android.jar" && test -x "${'$' }SDK/build-tools/35.0.0/aapt"; then echo BUILD_SERVER_READY=1; exit 0; fi
-              apt-get update
-              if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then apt-get install -y openjdk-17-jdk; fi
-              apt-get install -y git curl wget unzip zip
-              if [ ! -x /root/Android/cmdline-tools/latest/bin/sdkmanager ]; then
-                mkdir -p /root/Android/cmdline-tools
-                cd /tmp
-                wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-                rm -rf /root/Android/cmdline-tools/latest /tmp/cmdline-tools
-                mkdir -p /tmp/cmdline-tools
-                unzip -q cmdline-tools.zip -d /tmp/cmdline-tools
-                mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
-              fi
-              yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="${'" --licenses >/dev/null || true
-              /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root="\$SDK" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-              test -f "\$SDK/platforms/android-35/android.jar"
-              echo BUILD_SERVER_READY=1
+                set -e
+                export DEBIAN_FRONTEND=noninteractive
+                SDK_DIR=/root/Android/Sdk
+                SDKMANAGER=/root/Android/cmdline-tools/latest/bin/sdkmanager
+
+                if command -v java >/dev/null 2>&1 &&
+                   java -version 2>&1 | grep -q 17 &&
+                   command -v git >/dev/null 2>&1 &&
+                   command -v curl >/dev/null 2>&1 &&
+                   command -v wget >/dev/null 2>&1 &&
+                   command -v unzip >/dev/null 2>&1 &&
+                   command -v zip >/dev/null 2>&1 &&
+                   test -x "$SDKMANAGER" &&
+                   test -f "$SDK_DIR/platforms/android-35/android.jar" &&
+                   test -x "$SDK_DIR/build-tools/35.0.0/aapt"; then
+                    echo BUILD_SERVER_READY=1
+                    exit 0
+                fi
+
+                apt-get update
+                if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q 17; then
+                    apt-get install -y openjdk-17-jdk
+                fi
+                apt-get install -y git curl wget unzip zip
+
+                if [ ! -x "$SDKMANAGER" ]; then
+                    mkdir -p /root/Android/cmdline-tools
+                    cd /tmp
+                    wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+                    rm -rf /root/Android/cmdline-tools/latest /tmp/cmdline-tools
+                    mkdir -p /tmp/cmdline-tools
+                    unzip -q cmdline-tools.zip -d /tmp/cmdline-tools
+                    mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
+                fi
+
+                yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null || true
+                "$SDKMANAGER" --sdk_root="$SDK_DIR" platform-tools platforms;android-35 build-tools;35.0.0
+                test -f "$SDK_DIR/platforms/android-35/android.jar"
+                test -x "$SDK_DIR/build-tools/35.0.0/aapt"
+                echo BUILD_SERVER_READY=1
             '
         """.trimIndent()
+
         val resultIntent = Intent(this, TermuxResultService::class.java).apply {
             putExtra("task_type", "environment_setup")
         }
         val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
-        val flags = PendingIntent.FLAG_ONE_SHOT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val flags = PendingIntent.FLAG_ONE_SHOT or
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
         val callback = PendingIntent.getService(this, requestCode, resultIntent, flags)
+
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
@@ -256,9 +289,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
             putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", callback)
         }
-        try { startService(intent) }
-        catch (e: Exception) {
-            serverStatus.text = "Could not start Termux setup: " + (e.message ?: "check Termux permissions and allow-external-apps setting")
+        try {
+            startService(intent)
+        } catch (e: Exception) {
+            serverStatus.text = "Could not start Termux setup: " +
+                (e.message ?: "check Termux permissions and allow-external-apps setting")
         }
     }
 
