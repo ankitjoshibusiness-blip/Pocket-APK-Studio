@@ -224,24 +224,89 @@ class MainActivity : androidx.activity.ComponentActivity() {
         settingsContent.addView(label("Build environment and device information", 12, 0xFF9EADD0.toInt(), false))
         settingsContent.addView(space(12))
 
-        val welcomeCard = card().apply {
-            background = premiumGradient(0xFF3D6870.toInt(), 0xFF385D70.toInt(), 22)
-            setPadding(dp(18), dp(20), dp(18), dp(18))
+        val welcomeHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(12), dp(18), dp(12), dp(20))
         }
-        welcomeCard.addView(label("WELCOME TO", 10, 0xFFD6E8E8.toInt(), true))
-        welcomeCard.addView(label("Pocket APK Studio", 24, 0xFFFFFFFF.toInt(), true))
-        welcomeCard.addView(label("Your complete Android development toolkit", 13, 0xFFE3ECEC.toInt(), false))
-        welcomeCard.addView(space(14))
-        welcomeCard.addView(actionButton("▶  Quick Start", true) { showQuickStart() })
-        homeContent.addView(welcomeCard)
-        homeContent.addView(space(16))
-        homeContent.addView(label("▥  RECENT PROJECTS", 13, 0xFFEAF0FF.toInt(), true))
-        val recentCard = card()
-        recentCard.addView(label("🤖   Customer Manager", 16, 0xFFFFFFFF.toInt(), true))
-        recentCard.addView(label("Last analyzed • APK recovery available", 11, 0xFFB6C5E8.toInt(), false))
-        homeContent.addView(recentCard)
-        homeContent.addView(space(12))
+        val welcomeLogo = TextView(this).apply {
+            text = "⌘"
+            textSize = 34f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF456F70.toInt())
+            background = premiumGradient(0xFFDCE9E8.toInt(), 0xFFE8EFED.toInt(), 22)
+        }
+        welcomeHeader.addView(welcomeLogo, LinearLayout.LayoutParams(dp(76), dp(76)))
+        welcomeHeader.addView(space(12))
+        welcomeHeader.addView(label("Get started", 23, 0xFFE2E8ED.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
+        welcomeHeader.addView(label("Start your next awesome project!", 13, 0xFFB4C0C8.toInt(), false).apply { gravity = android.view.Gravity.CENTER })
+        homeContent.addView(welcomeHeader)
 
+        fun welcomeMenuItem(symbol: String, title: String, action: () -> Unit): View {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(8), dp(14), dp(8))
+                background = premiumGradient(0xFF2B3742.toInt(), 0xFF2B3742.toInt(), 14)
+                isClickable = true
+                isFocusable = true
+                val icon = label(symbol, 21, 0xFF91B5B5.toInt(), true).apply {
+                    gravity = android.view.Gravity.CENTER
+                }
+                addView(icon, LinearLayout.LayoutParams(dp(38), -1))
+                addView(label(title, 15, 0xFFE2E8ED.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+                addView(label("›", 24, 0xFF91A5B0.toInt(), false))
+                layoutParams = LinearLayout.LayoutParams(-1, dp(58)).apply {
+                    bottomMargin = dp(9)
+                    leftMargin = dp(8)
+                    rightMargin = dp(8)
+                }
+                setOnClickListener { animate().alpha(0.88f).setDuration(70L).withEndAction {
+                    animate().alpha(1f).setDuration(100L).start()
+                    action()
+                }.start() }
+            }
+        }
+        homeContent.addView(welcomeMenuItem("＋", "Create project") { showQuickStart() })
+        homeContent.addView(welcomeMenuItem("▣", "Open existing project") {
+            pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
+        })
+        homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
+            val repoUrl = EditText(this).apply {
+                hint = "https://github.com/owner/repository"
+                setSingleLine(true)
+            }
+            AlertDialog.Builder(this).setTitle("Clone Git Repository")
+                .setMessage("Open the repository on GitHub. You can download its ZIP, then import it using Open existing project.")
+                .setView(repoUrl)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Open GitHub") { _, _ ->
+                    val raw = repoUrl.text.toString().trim()
+                    if (raw.startsWith("https://") || raw.startsWith("http://")) {
+                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(raw))) }
+                        catch (_: Exception) { Toast.makeText(this, "Could not open repository URL.", Toast.LENGTH_SHORT).show() }
+                    } else Toast.makeText(this, "Enter a valid repository URL.", Toast.LENGTH_SHORT).show()
+                }.show()
+        })
+        homeContent.addView(welcomeMenuItem("›_", "Terminal") {
+            val terminal = packageManager.getLaunchIntentForPackage("com.termux")
+            if (terminal != null) startActivity(terminal)
+            else {
+                Toast.makeText(this, "Please install Termux first.", Toast.LENGTH_LONG).show()
+                checkBuildServer()
+            }
+        })
+        homeContent.addView(welcomeMenuItem("⚙", "Preferences") { showPage(4) })
+        homeContent.addView(welcomeMenuItem("☷", "IDE Configurations") { showPage(4) })
+        homeContent.addView(welcomeMenuItem("▤", "Documentation") {
+            AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
+                .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nCode Editor: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
+                .setPositiveButton("Got it", null).show()
+        })
+        homeContent.addView(space(12))
+        homeContent.addView(label("PROJECT & BUILD WORKSPACE", 12, 0xFF91B5B5.toInt(), true))
+        homeContent.addView(label("Build status, recent activity and build logs remain available below.", 12, 0xFFB4C0C8.toInt(), false))
+        homeContent.addView(space(8))
         val importCard = card()
         importCard.addView(label("1. IMPORT PROJECT", 12, 0xFF9AA7FF.toInt(), true))
         importCard.addView(space(10))
