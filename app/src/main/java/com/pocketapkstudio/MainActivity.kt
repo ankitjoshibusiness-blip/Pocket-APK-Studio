@@ -379,9 +379,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val previewScroll = ScrollView(this).apply { visibility = View.GONE }
         previewScroll.addView(previewContent)
         val pages = listOf(homeScroll, editorScroll, toolsScroll, previewScroll, settingsScroll)
-        var activePage = 0
+        lateinit var homeTab: Button
+        lateinit var editorTab: Button
+        lateinit var toolsTab: Button
+        lateinit var previewTab: Button
+        lateinit var settingsTab: Button
         fun showPage(index: Int) {
-            activePage = index
             pages.forEachIndexed { i, view -> view.visibility = if (i == index) View.VISIBLE else View.GONE }
             val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
             buttons.forEachIndexed { i, button ->
@@ -395,11 +398,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(4), dp(8), dp(4), dp(8))
             setBackgroundColor(0xFF171C28.toInt())
         }
-        val homeTab = actionButton("Home") { showPage(0) }
-        val editorTab = actionButton("Editor") { showPage(1) }
-        val toolsTab = actionButton("APK Tools") { showPage(2) }
-        val previewTab = actionButton("Preview") { showPage(3) }
-        val settingsTab = actionButton("Settings") { showPage(4) }
+        homeTab = actionButton("Home") { showPage(0) }
+        editorTab = actionButton("Editor") { showPage(1) }
+        toolsTab = actionButton("APK Tools") { showPage(2) }
+        previewTab = actionButton("Preview") { showPage(3) }
+        settingsTab = actionButton("Settings") { showPage(4) }
         listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach {
             it.textSize = 10f
             it.layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
