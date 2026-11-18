@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -38,6 +39,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var installButton: Button
     private lateinit var shareButton: Button
     private lateinit var serverStatus: TextView
+    private lateinit var previewIcon: ImageView
+    private lateinit var previewName: TextView
+    private lateinit var previewDetails: TextView
+    private lateinit var previewPermissions: TextView
+    private lateinit var previewInstallButton: Button
+    private var previewApkFile: File? = null
     private var selectedUri: Uri? = null
     private var importedZipName: String? = null
     private var projectIsGradle = false
@@ -105,7 +112,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private val pickApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { inspectApk(it) }
+        uri?.let { loadApkPreview(it) }
     }
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -223,7 +230,63 @@ class MainActivity : androidx.activity.ComponentActivity() {
         content.addView(space(18))
         content.addView(label("Version 1.2 • Background local build", 12, 0xFF737B8D.toInt(), false))
 
+        val previewContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        previewContent.addView(label("APK PREVIEW", 13, 0xFF9AA7FF.toInt(), true))
+        previewContent.addView(space(8))
+        previewContent.addView(label("Check an APK before installing", 22, 0xFFFFFFFF.toInt(), true))
+        previewContent.addView(label("View its app icon, package, version, SDK details and requested permissions.", 14, 0xFFB6BBC9.toInt(), false))
+        previewContent.addView(space(16))
+        previewContent.addView(actionButton("Choose APK to preview", true) {
+            pickApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+        })
+        previewContent.addView(space(8))
+        previewContent.addView(actionButton("Preview latest built APK") {
+            val path = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_apk_path", null)
+            val file = path?.let(::File)
+            if (file != null && file.isFile) loadApkPreview(file) else Toast.makeText(this, "No built APK available yet.", Toast.LENGTH_SHORT).show()
+        })
+        previewContent.addView(space(16))
+        val previewCard = card()
+        val previewHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        previewIcon = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(android.R.drawable.sym_def_app_icon)
+        }
+        previewHeader.addView(previewIcon, LinearLayout.LayoutParams(dp(64), dp(64)))
+        previewName = label("No APK selected", 18, 0xFFFFFFFF.toInt(), true)
+        previewHeader.addView(previewName, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(12) })
+        previewCard.addView(previewHeader)
+        previewCard.addView(space(12))
+        previewDetails = label("Select an APK to see its details.", 13, 0xFFB6BBC9.toInt(), false)
+        previewCard.addView(previewDetails)
+        previewCard.addView(space(12))
+        previewCard.addView(label("REQUESTED PERMISSIONS", 11, 0xFF9AA7FF.toInt(), true))
+        previewPermissions = label("No APK loaded.", 12, 0xFFB6BBC9.toInt(), false)
+        previewPermissions.setTextIsSelectable(true)
+        previewCard.addView(previewPermissions)
+        previewCard.addView(space(12))
+        previewInstallButton = actionButton("Install this APK") { installPreviewApk() }.apply { visibility = View.GONE }
+        previewCard.addView(previewInstallButton)
+        previewContent.addView(previewCard)
+
+        val previewScroll = ScrollView(this).apply { visibility = View.GONE }
+        previewScroll.addView(previewContent)
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val buildTab = actionButton("Build", true) { scroll.visibility = View.VISIBLE; previewScroll.visibility = View.GONE }
+        val previewTab = actionButton("APK Preview") { scroll.visibility = View.GONE; previewScroll.visibility = View.VISIBLE }
+        buildTab.layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(6) }
+        previewTab.layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(6) }
+        tabBar.addView(buildTab)
+        tabBar.addView(previewTab)
+        root.addView(tabBar)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
     }
 
@@ -448,30 +511,66 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun inspectApk(uri: Uri) {
+    private fun loadApkPreview(uri: Uri) {
         lifecycleScope.launch {
-            val details = withContext(Dispatchers.IO) {
-                val temp = File(cacheDir, "apk-inspect-${System.currentTimeMillis()}.apk")
-                try {
+            val temp = File(cacheDir, "apk-preview-${System.currentTimeMillis()}.apk")
+            try {
+                withContext(Dispatchers.IO) {
                     contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
                         ?: error("Cannot read selected APK")
-                    val info = packageManager.getPackageArchiveInfo(temp.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
-                        ?: error("Invalid APK or metadata unavailable")
-                    buildString {
-                        append("Package: ${info.packageName}\n")
-                        append("Version: ${info.versionName ?: "Unknown"}\n")
-                        append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
-                        append("Min SDK: ${info.applicationInfo?.minSdkVersion ?: "Unknown"}\n")
-                        append("Target SDK: ${info.applicationInfo?.targetSdkVersion ?: "Unknown"}\n")
-                        append("Size: ${temp.length() / 1024} KB\n\n")
-                        append("Requested permissions:\n")
-                        append(info.requestedPermissions?.joinToString("\n") ?: "None listed")
-                    }
-                } catch (e: Exception) { "APK analysis failed: ${e.message}" }
-                finally { temp.delete() }
+                }
+                loadApkPreview(temp)
+            } catch (e: Exception) {
+                previewName.text = "Preview failed"
+                previewDetails.text = e.message ?: "Could not read APK."
+                previewPermissions.text = "No permissions available."
+                previewInstallButton.visibility = View.GONE
+                temp.delete()
             }
-            android.app.AlertDialog.Builder(this@MainActivity).setTitle("APK Analyzer")
-                .setMessage(details).setPositiveButton("Close", null).show()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun loadApkPreview(file: File) {
+        try {
+            val info = packageManager.getPackageArchiveInfo(file.absolutePath, android.content.pm.PackageManager.GET_PERMISSIONS)
+                ?: error("Invalid APK or metadata unavailable")
+            val appInfo = info.applicationInfo ?: error("App information unavailable")
+            appInfo.sourceDir = file.absolutePath
+            appInfo.publicSourceDir = file.absolutePath
+            previewApkFile = file
+            previewName.text = appInfo.loadLabel(packageManager)?.toString() ?: "Unknown app"
+            previewIcon.setImageDrawable(appInfo.loadIcon(packageManager))
+            previewDetails.text = buildString {
+                append("Package: ${info.packageName}\n")
+                append("Version: ${info.versionName ?: "Unknown"}\n")
+                append("Version code: ${if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()}\n")
+                append("Min SDK: ${appInfo.minSdkVersion}\n")
+                append("Target SDK: ${appInfo.targetSdkVersion}\n")
+                append("APK size: ${file.length() / 1024} KB")
+            }
+            previewPermissions.text = info.requestedPermissions?.joinToString("\n") ?: "None listed"
+            previewInstallButton.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            previewName.text = "Preview failed"
+            previewDetails.text = e.message ?: "Could not analyze APK."
+            previewPermissions.text = "No permissions available."
+            previewInstallButton.visibility = View.GONE
+        }
+    }
+
+    private fun installPreviewApk() {
+        val apk = previewApkFile
+        if (apk == null || !apk.isFile) {
+            Toast.makeText(this, "Please select an APK again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
