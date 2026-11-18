@@ -24,7 +24,7 @@ class TermuxResultService : IntentService("TermuxResultService") {
             return
         }
         val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
-        val verifiedApk = apkPath?.let(::java.io.File)?.takeIf { it.isFile && it.length() > 0L }
+        val verifiedApk = apkPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
         val successful = exitCode == 0 && errCode == -1 && verifiedApk != null
         val combined = buildString {
             append(stdout)
