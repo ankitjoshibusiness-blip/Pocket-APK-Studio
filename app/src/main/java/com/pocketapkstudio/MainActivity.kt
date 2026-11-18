@@ -295,7 +295,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         })
         toolsContent.addView(toolsIntro)
-        content.addView(space(12))
+        toolsContent.addView(space(12))
         analysisCard = card().apply { visibility = View.GONE }
         analysisCard.addView(label("APK ANALYSIS REPORT", 12, 0xFF9AA7FF.toInt(), true))
         analysisStatus = label("Select an APK to begin analysis.", 14, 0xFFB6BBC9.toInt(), false)
