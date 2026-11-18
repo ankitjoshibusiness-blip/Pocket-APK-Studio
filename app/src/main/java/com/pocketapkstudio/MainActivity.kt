@@ -435,12 +435,29 @@ class MainActivity : androidx.activity.ComponentActivity() {
         lateinit var toolsTab: Button
         lateinit var previewTab: Button
         lateinit var settingsTab: Button
+        var selectedPage = 0
         fun showPage(index: Int) {
-            pages.forEachIndexed { i, view -> view.visibility = if (i == index) View.VISIBLE else View.GONE }
+            if (index !in pages.indices || index == selectedPage) return
+            val previous = pages[selectedPage]
+            val next = pages[index]
+            previous.animate().cancel()
+            next.animate().cancel()
+            next.alpha = 0f
+            next.visibility = View.VISIBLE
+            next.animate().alpha(1f).setDuration(230L).start()
+            previous.animate().alpha(0f).setDuration(170L).withEndAction {
+                if (selectedPage != index) previous.visibility = View.GONE
+                previous.alpha = 1f
+            }.start()
+            selectedPage = index
             val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
             buttons.forEachIndexed { i, button ->
-                button.alpha = if (i == index) 1f else 0.72f
+                button.animate().cancel()
+                button.animate().alpha(if (i == index) 1f else 0.72f).setDuration(180L).start()
                 button.background = if (i == index) premiumGradient(0xFF1647F5.toInt(), 0xFF5426D8.toInt(), 13) else premiumGradient(0xFF26365D.toInt(), 0xFF1B2948.toInt(), 13)
+                if (i == index) button.animate().scaleX(1.035f).scaleY(1.035f).setDuration(150L).withEndAction {
+                    button.animate().scaleX(1f).scaleY(1f).setDuration(130L).start()
+                }.start()
             }
         }
         val tabBar = LinearLayout(this).apply {
@@ -464,7 +481,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         root.addView(tabBar)
         listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach { tabBar.addView(it) }
-        showPage(0)
+        pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
+        homeTab.background = premiumGradient(0xFF1647F5.toInt(), 0xFF5426D8.toInt(), 13)
         setContentView(root)
     }
 
@@ -985,6 +1003,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setPadding(dp(14), dp(14), dp(14), dp(14))
         background = premiumGradient(0xFF17213B.toInt(), 0xFF111A30.toInt(), 18)
         elevation = dp(2).toFloat()
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(7)
+            bottomMargin = dp(7)
+        }
     }
 
     private fun navButton(symbol: String, caption: String, action: () -> Unit) = Button(this).apply {
@@ -1019,7 +1041,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setColor(if (primary) 0xFF596BEB.toInt() else 0xFF30394D.toInt())
             cornerRadius = dp(12).toFloat()
         }
+        isFocusable = true
         setOnClickListener { action() }
+        setOnTouchListener { view, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.975f).scaleY(0.975f).setDuration(80L).start()
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+            }
+            false
+        }
         layoutParams = LinearLayout.LayoutParams(-1, dp(46))
     }
 
