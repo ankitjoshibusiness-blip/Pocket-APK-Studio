@@ -180,9 +180,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun buildScreen() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(14))
-            setBackgroundColor(0xFF10131B.toInt())
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(0xFF080D1D.toInt())
         }
+        val appBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(12))
+        }
+        val appLogo = TextView(this).apply {
+            text = "🚀"
+            textSize = 23f
+            gravity = android.view.Gravity.CENTER
+            background = premiumGradient(0xFF4424D8.toInt(), 0xFF078CEB.toInt(), 18)
+        }
+        appBar.addView(appLogo, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val appTitle = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
+        appTitle.addView(label("Pocket APK Studio", 17, 0xFFFFFFFF.toInt(), true))
+        appTitle.addView(label("BUILD  •  ANALYZE  •  RECOVER", 9, 0xFF9AA7D5.toInt(), true))
+        appBar.addView(appTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        val proBadge = label("✦ PRO", 11, 0xFFFFD36A.toInt(), true).apply {
+            setPadding(dp(9), dp(6), dp(9), dp(6))
+            background = premiumGradient(0xFF754000.toInt(), 0xFFBD7800.toInt(), 30)
+        }
+        appBar.addView(proBadge)
+        root.addView(appBar)
         fun page(): Pair<ScrollView, LinearLayout> {
             val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(2), dp(4), dp(2), dp(18)) }
             return ScrollView(this).apply { addView(body) } to body
@@ -192,12 +214,23 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val (toolsScroll, toolsContent) = page()
         val (settingsScroll, settingsContent) = page()
 
-        homeContent.addView(label("Pocket APK Studio", 13, 0xFF9AA7FF.toInt(), true))
-        homeContent.addView(label("Build APKs on your phone", 24, 0xFFFFFFFF.toInt(), true).apply {
-            setPadding(0, dp(10), 0, dp(6))
-        })
-        homeContent.addView(label("Your local Android build workspace.", 14, 0xFFB6BBC9.toInt(), false))
-        homeContent.addView(space(18))
+        val welcomeCard = card().apply {
+            background = premiumGradient(0xFF101B4B.toInt(), 0xFF3320A0.toInt(), 22)
+            setPadding(dp(18), dp(20), dp(18), dp(18))
+        }
+        welcomeCard.addView(label("WELCOME TO", 10, 0xFF9FC5FF.toInt(), true))
+        welcomeCard.addView(label("Pocket APK Studio", 24, 0xFFFFFFFF.toInt(), true))
+        welcomeCard.addView(label("Your complete Android development toolkit", 13, 0xFFD8E2FF.toInt(), false))
+        welcomeCard.addView(space(14))
+        welcomeCard.addView(actionButton("▶  Quick Start", true) { showQuickStart() })
+        homeContent.addView(welcomeCard)
+        homeContent.addView(space(16))
+        homeContent.addView(label("▥  RECENT PROJECTS", 13, 0xFFEAF0FF.toInt(), true))
+        val recentCard = card()
+        recentCard.addView(label("🤖   Customer Manager", 16, 0xFFFFFFFF.toInt(), true))
+        recentCard.addView(label("Last analyzed • APK recovery available", 11, 0xFFB6C5E8.toInt(), false))
+        homeContent.addView(recentCard)
+        homeContent.addView(space(12))
 
         val importCard = card()
         importCard.addView(label("1. IMPORT PROJECT", 12, 0xFF9AA7FF.toInt(), true))
@@ -239,7 +272,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         editorContent.addView(space(14))
 
         val buildCard = card()
-        buildCard.addView(label("3. BUILD", 12, 0xFF9AA7FF.toInt(), true))
+        buildCard.addView(label("✓  BUILD STATUS", 12, 0xFF9AA7FF.toInt(), true))
         buildCard.addView(space(8))
         buildCard.addView(actionButton("Build Android APK", true) { startLocalBuild() })
         buildCard.addView(space(8))
@@ -287,17 +320,29 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         settingsContent.addView(setupCard)
         val toolsIntro = card()
-        toolsIntro.addView(label("APK INSPECTION & RECOVERY", 12, 0xFF9AA7FF.toInt(), true))
+        toolsIntro.addView(label("▣  APK TOOLS", 17, 0xFFFFFFFF.toInt(), true))
         toolsIntro.addView(space(8))
         toolsIntro.addView(label("Inspect an APK, recover readable code with JADX, and export the recovered files.", 13, 0xFFB6BBC9.toInt(), false))
         toolsIntro.addView(space(10))
-        toolsIntro.addView(actionButton("Analyze existing APK", true) {
+        val analyzeAction = actionButton("⌕   Analyze APK     ›", true) {
             pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
-        })
+        }
+        analyzeAction.background = premiumGradient(0xFF0759D9.toInt(), 0xFF087DEB.toInt(), 16)
+        toolsIntro.addView(analyzeAction)
+        toolsIntro.addView(space(8))
+        val decompileAction = actionButton("⟳   Decompile APK with JADX     ›") {
+            pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
+        }
+        decompileAction.background = premiumGradient(0xFF008B69.toInt(), 0xFF00B887.toInt(), 16)
+        toolsIntro.addView(decompileAction)
+        toolsIntro.addView(space(8))
+        val exportAction = actionButton("⇧   Export Recovered ZIP     ›") { shareRecoveredProject() }
+        exportAction.background = premiumGradient(0xFFB64A00.toInt(), 0xFFEB7900.toInt(), 16)
+        toolsIntro.addView(exportAction)
         toolsContent.addView(toolsIntro)
         toolsContent.addView(space(12))
         analysisCard = card().apply { visibility = View.GONE }
-        analysisCard.addView(label("APK ANALYSIS REPORT", 12, 0xFF9AA7FF.toInt(), true))
+        analysisCard.addView(label("◈  APK ANALYSIS REPORT", 13, 0xFF9AA7FF.toInt(), true))
         analysisStatus = label("Select an APK to begin analysis.", 14, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(analysisStatus)
         analysisCard.addView(space(8))
@@ -336,7 +381,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
         val previewContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(4), dp(10), dp(4), dp(16))
         }
         previewContent.addView(label("APK PREVIEW", 13, 0xFF9AA7FF.toInt(), true))
         previewContent.addView(space(8))
@@ -395,17 +440,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val tabBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
-            setPadding(dp(4), dp(8), dp(4), dp(8))
-            setBackgroundColor(0xFF171C28.toInt())
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+            background = premiumGradient(0xFF111B36.toInt(), 0xFF10172C.toInt(), 18)
         }
-        homeTab = actionButton("Home") { showPage(0) }
-        editorTab = actionButton("Editor") { showPage(1) }
-        toolsTab = actionButton("APK Tools") { showPage(2) }
-        previewTab = actionButton("Preview") { showPage(3) }
-        settingsTab = actionButton("Settings") { showPage(4) }
+        homeTab = navButton("⌂", "Home") { showPage(0) }
+        editorTab = navButton("</>", "Editor") { showPage(1) }
+        toolsTab = navButton("⬡", "Tools") { showPage(2) }
+        previewTab = navButton("◉", "Preview") { showPage(3) }
+        settingsTab = navButton("⚙", "Settings") { showPage(4) }
         listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab).forEach {
-            it.textSize = 10f
-            it.layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            it.layoutParams = LinearLayout.LayoutParams(0, dp(58), 1f).apply {
                 leftMargin = dp(2); rightMargin = dp(2)
             }
         }
@@ -924,13 +968,32 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .setMessage(details).setPositiveButton("OK", null).show()
     }
 
+    private fun premiumGradient(start: Int, end: Int, radius: Int) =
+        android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+            intArrayOf(start, end)
+        ).apply { cornerRadius = dp(radius).toFloat() }
+
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(14), dp(14), dp(14), dp(14))
-        background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF1B202C.toInt())
-            cornerRadius = dp(16).toFloat()
-        }
+        background = premiumGradient(0xFF17213B.toInt(), 0xFF111A30.toInt(), 18)
+        elevation = dp(2).toFloat()
+    }
+
+    private fun navButton(symbol: String, caption: String, action: () -> Unit) = Button(this).apply {
+        text = "$symbol\n$caption"
+        isAllCaps = false
+        textSize = 11f
+        setLineSpacing(0f, 0.9f)
+        setTextColor(0xFFE5EBFF.toInt())
+        gravity = android.view.Gravity.CENTER
+        background = premiumGradient(0xFF26365D.toInt(), 0xFF1B2948.toInt(), 13)
+        setOnClickListener { action() }
+    }
+
+    private fun showQuickStart() {
+        Toast.makeText(this, "Choose Editor to import a project, or APK Tools to analyze an APK.", Toast.LENGTH_LONG).show()
     }
 
     private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
