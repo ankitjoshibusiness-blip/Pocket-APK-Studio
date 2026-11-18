@@ -164,7 +164,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(content)
 
-        content.addView(label("POCKET APK STUDIO", 13, 0xFF9AA7FF.toInt(), true))
+        content.addView(label("Pocket Apk Studio", 13, 0xFF9AA7FF.toInt(), true))
         content.addView(label("Build APKs on your phone", 24, 0xFFFFFFFF.toInt(), true).apply {
             setPadding(0, dp(10), 0, dp(6))
         })
