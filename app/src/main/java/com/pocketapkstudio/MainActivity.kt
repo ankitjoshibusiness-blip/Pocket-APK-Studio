@@ -70,6 +70,25 @@ class MainActivity : androidx.activity.ComponentActivity() {
         super.onStop()
     }
 
+    private fun refreshBuildResult() {
+        if (!::status.isInitialized || !::buildProgress.isInitialized ||
+            !::percentText.isInitialized || !::logs.isInitialized ||
+            !::installButton.isInitialized || !::shareButton.isInitialized) return
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        status.text = prefs.getString("last_build_status", "Waiting for a project.")
+        val running = prefs.getBoolean("build_running", false)
+        buildProgress.visibility = if (running) View.VISIBLE else View.GONE
+        buildProgress.isIndeterminate = running
+        val progress = prefs.getInt("last_build_percent", 0)
+        if (!running) buildProgress.progress = progress
+        percentText.text = if (running) "BUILD RUNNING" else "$progress%"
+        logs.text = prefs.getString("last_build_log", "Build output will appear here.")
+        val apk = prefs.getString("last_apk_path", null)?.let(::File)
+        val available = apk?.isFile == true
+        installButton.visibility = if (available) View.VISIBLE else View.GONE
+        shareButton.visibility = if (available) View.VISIBLE else View.GONE
+    }
+
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             selectedUri = it
