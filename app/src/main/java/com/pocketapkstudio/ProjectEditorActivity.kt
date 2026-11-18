@@ -88,11 +88,14 @@ class ProjectEditorActivity : Activity() {
         }
         applyTheme()
         val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE7ECF7.toInt(),14) }
-        explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; toolbar.addView(explorerToggle)
-        toolbar.addView(smallButton("＋ File") { showFileActions() })
-        toolbar.addView(smallButton("⌕ Find") { showFindReplace(false) })
-        toolbar.addView(smallButton("⇄ Replace") { showFindReplace(true) })
-        toolbar.addView(smallButton("✓ Save") { saveCurrent(true) })
+        fun addToolbarTile(tile: Button) {
+            toolbar.addView(tile, LinearLayout.LayoutParams(-2, dp(42)).apply { rightMargin = dp(6) })
+        }
+        explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; addToolbarTile(explorerToggle)
+        addToolbarTile(smallButton("＋ File") { showFileActions() })
+        addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
+        addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
+        addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
         root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
         root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
@@ -199,7 +202,7 @@ class ProjectEditorActivity : Activity() {
             item.gravity = Gravity.START or Gravity.CENTER_VERTICAL
             item.maxLines = 1
             item.setOnLongClickListener { showFileContextMenu(file); true }
-            list.addView(item, LinearLayout.LayoutParams(-1, dp(38)))
+            list.addView(item, LinearLayout.LayoutParams(-1, dp(38)).apply { bottomMargin = dp(6) })
         }
     }
 
