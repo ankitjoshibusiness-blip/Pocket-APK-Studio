@@ -437,20 +437,57 @@ class MainActivity : androidx.activity.ComponentActivity() {
         lateinit var previewTab: Button
         lateinit var settingsTab: Button
         var selectedPage = 0
+        var pageTransitionRunning = false
         fun showPage(index: Int) {
-            if (index !in pages.indices || index == selectedPage) return
-            // Keep exactly one page visible. Fade only the incoming page so pages
-            // never occupy separate vertical slots or remain layered accidentally.
+            if (index !in pages.indices || index == selectedPage || pageTransitionRunning) return
+            pageTransitionRunning = true
+            val previous = pages[selectedPage]
+            val next = pages[index]
             pages.forEach { page ->
                 page.animate().cancel()
-                page.visibility = View.GONE
-                page.alpha = 1f
+                if (page !== previous && page !== next) {
+                    page.visibility = View.GONE
+                    page.alpha = 1f
+                    page.translationX = 0f
+                    page.scaleX = 1f
+                    page.scaleY = 1f
+                }
             }
-            val next = pages[index]
+            // Layer-slide: the incoming page rises above the outgoing page,
+            // while the old page subtly recedes to create a stacked-card effect.
+            val slideDistance = dp(42).toFloat()
             next.visibility = View.VISIBLE
+            next.bringToFront()
             next.alpha = 0f
-            next.animate().alpha(1f).setDuration(220L).start()
+            next.translationX = slideDistance
+            next.scaleX = 0.965f
+            next.scaleY = 0.965f
+            previous.visibility = View.VISIBLE
+            previous.alpha = 1f
+            previous.translationX = 0f
+            previous.scaleX = 1f
+            previous.scaleY = 1f
             selectedPage = index
+            val interpolator = android.view.animation.DecelerateInterpolator(1.7f)
+            previous.animate()
+                .translationX(-dp(12).toFloat())
+                .scaleX(0.975f).scaleY(0.975f).alpha(0.48f)
+                .setDuration(280L).setInterpolator(interpolator).start()
+            next.animate()
+                .translationX(0f).scaleX(1f).scaleY(1f).alpha(1f)
+                .setDuration(280L).setInterpolator(interpolator)
+                .withEndAction {
+                    previous.visibility = View.GONE
+                    previous.alpha = 1f
+                    previous.translationX = 0f
+                    previous.scaleX = 1f
+                    previous.scaleY = 1f
+                    next.alpha = 1f
+                    next.translationX = 0f
+                    next.scaleX = 1f
+                    next.scaleY = 1f
+                    pageTransitionRunning = false
+                }.start()
             val buttons = listOf(homeTab, editorTab, toolsTab, previewTab, settingsTab)
             buttons.forEachIndexed { i, button ->
                 button.animate().cancel()
