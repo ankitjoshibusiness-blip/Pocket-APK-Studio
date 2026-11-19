@@ -885,52 +885,52 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
               set -e
               command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
-              test -n "${'$'}ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
-              test -f "${'$'}ANDROID_HOME/platforms/android-35/android.jar" || { echo "ERROR: Android 35 SDK platform is missing"; exit 15; }
-              AAPT2_DIR="${'$'}HOME/.local/bin"
-              AAPT2="${'$'}AAPT2_DIR/aapt2"
-              mkdir -p "${'$'}AAPT2_DIR"
-              if [ ! -x "${'$'}AAPT2" ] || ! "${'$'}AAPT2" version >/dev/null 2>&1; then
+              test -n "@D@ANDROID_HOME" || { echo "ERROR: ANDROID_HOME is not configured in Ubuntu"; exit 13; }
+              test -f "@D@ANDROID_HOME/platforms/android-35/android.jar" || { echo "ERROR: Android 35 SDK platform is missing"; exit 15; }
+              AAPT2_DIR="@D@HOME/.local/bin"
+              AAPT2="@D@AAPT2_DIR/aapt2"
+              mkdir -p "@D@AAPT2_DIR"
+              if [ ! -x "@D@AAPT2" ] || ! "@D@AAPT2" version >/dev/null 2>&1; then
                 echo "Installing ARM64 AAPT2..."
                 if command -v curl >/dev/null 2>&1; then
-                  curl -L --fail --silent --show-error "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -o "${'$'}AAPT2"
+                  curl -L --fail --silent --show-error "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -o "@D@AAPT2"
                 elif command -v wget >/dev/null 2>&1; then
-                  wget -q "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -O "${'$'}AAPT2"
+                  wget -q "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -O "@D@AAPT2"
                 else
                   echo "ERROR: curl or wget is required to install ARM64 AAPT2"
                   exit 17
                 fi
               fi
-              echo "7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b  ${'$'}AAPT2" | sha256sum -c - || { echo "ERROR: ARM64 AAPT2 checksum verification failed"; exit 18; }
-              chmod 755 "${'$'}AAPT2"
-              "${'$'}AAPT2" version
-              mkdir -p "${'$'}HOME/.gradle"
-              touch "${'$'}HOME/.gradle/gradle.properties"
-              if grep -q '^android.aapt2FromMavenOverride=' "${'$'}HOME/.gradle/gradle.properties"; then
-                sed -i "s|^android.aapt2FromMavenOverride=.*|android.aapt2FromMavenOverride=${'$'}AAPT2|" "${'$'}HOME/.gradle/gradle.properties"
+              echo "7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b  @D@AAPT2" | sha256sum -c - || { echo "ERROR: ARM64 AAPT2 checksum verification failed"; exit 18; }
+              chmod 755 "@D@AAPT2"
+              "@D@AAPT2" version
+              mkdir -p "@D@HOME/.gradle"
+              touch "@D@HOME/.gradle/gradle.properties"
+              if grep -q '^android.aapt2FromMavenOverride=' "@D@HOME/.gradle/gradle.properties"; then
+                sed -i "s|^android.aapt2FromMavenOverride=.*|android.aapt2FromMavenOverride=@D@AAPT2|" "@D@HOME/.gradle/gradle.properties"
               else
-                echo "android.aapt2FromMavenOverride=${'$'}AAPT2" >> "${'$'}HOME/.gradle/gradle.properties"
+                echo "android.aapt2FromMavenOverride=@D@AAPT2" >> "@D@HOME/.gradle/gradle.properties"
               fi
-              PROJECT="${'$'}HOME/pocket-apk-studio/project"
-              mkdir -p "${'$'}PROJECT"
-              rm -rf "${'$'}PROJECT"/*
-              unzip -q -o "$sharedZip" -d "${'$'}PROJECT"
-              SETTINGS=${'$'}(find "${'$'}PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
-              test -n "${'$'}SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
-              cd "${'$'}(dirname "${'$'}SETTINGS")"
+              PROJECT="@D@HOME/pocket-apk-studio/project"
+              mkdir -p "@D@PROJECT"
+              rm -rf "@D@PROJECT"/*
+              unzip -q -o "@SHARED_ZIP@" -d "@D@PROJECT"
+              SETTINGS=@D@(find "@D@PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+              test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
+              cd "@D@(dirname "@D@SETTINGS")"
               if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew --no-daemon --max-workers=2 assembleDebug; else command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }; gradle --no-daemon --max-workers=2 assembleDebug; fi
               mkdir -p /sdcard/Download/PocketAPKStudio/Builds
               APK_COUNT=0
               while IFS= read -r APK; do
-                [ -n "${'$'}APK" ] || continue
-                cp "${'$'}APK" /sdcard/Download/PocketAPKStudio/Builds/
-                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/${'$'}(basename "${'$'}APK")"
-                APK_COUNT=${'$'}((APK_COUNT + 1))
+                [ -n "@D@APK" ] || continue
+                cp "@D@APK" /sdcard/Download/PocketAPKStudio/Builds/
+                echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/@D@(basename "@D@APK")"
+                APK_COUNT=@D@$((APK_COUNT + 1))
               done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
-              test "${'$'}APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
-              echo "BUILD SUCCESS: ${'$'}APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
+              test "@D@APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
+              echo "BUILD SUCCESS: @D@APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
             '
-        """.trimIndent()
+        """.trimIndent().replace("@D@", "$").replace("@SHARED_ZIP@", sharedZip)
 
         val resultIntent = Intent(this, TermuxResultService::class.java)
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
