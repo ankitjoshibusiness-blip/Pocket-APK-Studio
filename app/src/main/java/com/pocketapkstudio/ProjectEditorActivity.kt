@@ -95,9 +95,14 @@ class ProjectEditorActivity : Activity() {
         addToolbarTile(smallButton("＋ File") { showFileActions() })
         addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
         addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
-        addToolbarTile(smallButton("▶ Preview") { openLivePreview() })
         addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
         root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
+        val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
+            textSize = 14f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF2563EB.toInt(), 12)
+        }
+        root.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
         root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
