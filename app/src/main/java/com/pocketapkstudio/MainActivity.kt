@@ -642,7 +642,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 background = premiumGradient(0xFF405968.toInt(), 0xFF344B59.toInt(), 14)
                 alpha = 0f
                 scaleY = 0.92f
-                transformPivotY = 0f
             }
             val popup = android.widget.PopupWindow(popupContent, modeSelector.width.takeIf { it > 0 } ?: -1, -2, true).apply {
                 elevation = dp(12).toFloat()
