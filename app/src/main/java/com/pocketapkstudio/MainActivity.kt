@@ -728,12 +728,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val fullLog = prefs.getString("log", "").orEmpty()
             val liveLog = prefs.getString("live_log", "").orEmpty()
             val report = buildString {
-                append("POCKET APK STUDIO — JADX DECOMPILE LOGS\\n")
-                append("Status: ").append(statusText).append("\\n")
-                append("Stage: ").append(stageText).append("\\n")
-                append("Progress: ").append(prefs.getInt("percent", 0)).append("%\\n\\n")
-                append("FULL TERMUX OUTPUT:\\n").append(fullLog.ifBlank { "No final output captured." })
-                append("\\n\\nLIVE PROCESS LOG:\\n").append(liveLog.ifBlank { recoveryLogText.text })
+                append("POCKET APK STUDIO — JADX DECOMPILE LOGS\n")
+                append("Status: ").append(statusText).append("\n")
+                append("Stage: ").append(stageText).append("\n")
+                append("Progress: ").append(prefs.getInt("percent", 0)).append("%\n\n")
+                append("FULL TERMUX OUTPUT:\n").append(fullLog.ifBlank { "No final output captured." })
+                append("\n\nLIVE PROCESS LOG:\n").append(liveLog.ifBlank { recoveryLogText.text })
             }
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JADX Decompile Logs", report))
