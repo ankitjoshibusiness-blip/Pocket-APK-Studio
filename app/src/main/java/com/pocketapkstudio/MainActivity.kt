@@ -270,9 +270,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
             set -e
             echo "SCAN_TERMUX=INSTALLED"
             export DEBIAN_FRONTEND=noninteractive
+            if ! command -v proot-distro >/dev/null 2>&1; then
+                pkg update -y
+                pkg install -y proot-distro
+            fi
             ROOTFS="@D@PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu"
-            pkg update -y
-            pkg install -y proot-distro
             if proot-distro login ubuntu -- true >/dev/null 2>&1; then
                 echo "SCAN_UBUNTU=INSTALLED"
             elif [ -d "@D@ROOTFS" ]; then
@@ -286,15 +288,22 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
                 set -e
                 export DEBIAN_FRONTEND=noninteractive
-                apt-get update
+                NEED_APT=0
+                if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then NEED_APT=1; fi
+                if ! command -v curl >/dev/null 2>&1 || ! command -v wget >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v zip >/dev/null 2>&1; then NEED_APT=1; fi
+                if [ "$NEED_APT" = "1" ]; then apt-get update; fi
                 if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then
                     apt-get install -y openjdk-17-jdk
                 fi
                 java -version 2>&1 | grep -q "17"
                 echo "SCAN_JAVA17=INSTALLED"
-                apt-get install -y git curl wget unzip zip
+                for package in curl wget unzip zip; do
+                    if ! command -v "$package" >/dev/null 2>&1; then apt-get install -y "$package"; fi
+                done
                 mkdir -p /root/Android/cmdline-tools
                 if [ ! -x /root/Android/cmdline-tools/latest/bin/sdkmanager ]; then
+                    if [ "$NEED_APT" = "0" ] && ! command -v wget >/dev/null 2>&1; then apt-get update; fi
+                    apt-get install -y wget unzip
                     cd /tmp
                     wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
                     rm -rf /tmp/cmdline-tools
@@ -304,8 +313,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
                 fi
                 echo "SCAN_ANDROID_SDK=INSTALLED"
-                yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk --licenses >/dev/null || true
-                /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+                NEED_SDK=0
+                [ -f /root/Android/Sdk/platforms/android-35/android.jar ] || NEED_SDK=1
+                [ -x /root/Android/Sdk/platform-tools/adb ] || NEED_SDK=1
+                [ -x /root/Android/Sdk/build-tools/35.0.0/aapt ] || NEED_SDK=1
+                if [ "$NEED_SDK" = "1" ]; then
+                    yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk --licenses >/dev/null || true
+                    /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+                fi
                 test -f /root/Android/Sdk/platforms/android-35/android.jar
                 echo "SCAN_ANDROID_SDK=INSTALLED"
                 test -x /root/Android/Sdk/platform-tools/adb
