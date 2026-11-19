@@ -610,7 +610,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(space(8))
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         settingsContent.addView(setupCard)
-        settingsContent.addView(setupCard)
         val toolsIntro = card().apply {
             setPadding(dp(16), dp(16), dp(16), dp(16))
             background = premiumGradient(0xFF405968.toInt(), 0xFF3A5260.toInt(), 2)
