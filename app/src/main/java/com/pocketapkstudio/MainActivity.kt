@@ -1287,70 +1287,70 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
               set -e
               PROGRESS="/sdcard/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
-              progress() { printf "P|%s|%s\n" "$1" "$2" >> "$PROGRESS"; }
-              logline() { printf "L|%s\n" "$*" >> "$PROGRESS"; }
+              progress() { printf "P|%s|%s\n" "@D@1" "@D@2" >> "@D@PROGRESS"; }
+              logline() { printf "L|%s\n" "@D@*" >> "@D@PROGRESS"; }
               progress 5 "Connecting to Ubuntu"
               logline "Ubuntu session started."
               command -v java >/dev/null || { logline "ERROR: Java is required in Ubuntu"; exit 21; }
               progress 10 "Checking JADX and required tools"
               for tool in curl unzip zip; do
-                if ! command -v "$tool" >/dev/null 2>&1; then
-                  logline "Installing missing tool: $tool"
+                if ! command -v "@D@tool" >/dev/null 2>&1; then
+                  logline "Installing missing tool: @D@tool"
                   apt-get update
-                  apt-get install -y "$tool"
+                  apt-get install -y "@D@tool"
                 fi
               done
-              JADXD="$HOME/.local/share/jadx-1.5.1"
-              if [ ! -x "$JADXD/bin/jadx" ]; then
+              JADXD="@D@HOME/.local/share/jadx-1.5.1"
+              if [ ! -x "@D@JADXD/bin/jadx" ]; then
                 progress 18 "Downloading JADX 1.5.1"
                 logline "Downloading JADX from official GitHub release."
-                mkdir -p "$JADXD"
+                mkdir -p "@D@JADXD"
                 curl -L --fail --show-error "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/jadx-1.5.1.zip
                 progress 28 "Extracting JADX tools"
-                unzip -q -o /tmp/jadx-1.5.1.zip -d "$JADXD"
+                unzip -q -o /tmp/jadx-1.5.1.zip -d "@D@JADXD"
               else
                 progress 28 "JADX already installed"
                 logline "Using existing JADX installation."
               fi
               INPUT="/sdcard/Download/PocketAPKStudio/Recovery/customer-manager.apk"
-              test -s "$INPUT" || { logline "ERROR: selected APK not found"; exit 22; }
+              test -s "@D@INPUT" || { logline "ERROR: selected APK not found"; exit 22; }
               progress 35 "Validating selected APK"
               logline "APK input validated."
-              OUT="$HOME/pocket-apk-studio/recovered_customer_manager"
-              rm -rf "$OUT"
-              mkdir -p "$OUT"
+              OUT="@D@HOME/pocket-apk-studio/recovered_customer_manager"
+              rm -rf "@D@OUT"
+              mkdir -p "@D@OUT"
               progress 42 "Decompiling DEX and resources with JADX"
               logline "JADX started. Live tool output follows."
               rm -f /tmp/pocket-jadx.log
-              "$JADXD/bin/jadx" --show-bad-code -d "$OUT" "$INPUT" > /tmp/pocket-jadx.log 2>&1 &
-              JAD_PID=$!
-              tail -n 0 -f /tmp/pocket-jadx.log >> "$PROGRESS" &
-              TAIL_PID=$!
+              "@D@JADXD/bin/jadx" --show-bad-code -d "@D@OUT" "@D@INPUT" > /tmp/pocket-jadx.log 2>&1 &
+              JAD_PID=@D@!
+              tail -n 0 -f /tmp/pocket-jadx.log >> "@D@PROGRESS" &
+              TAIL_PID=@D@!
               set +e
-              wait "$JAD_PID"
-              JAD_EXIT=$?
-              kill "$TAIL_PID" >/dev/null 2>&1
+              wait "@D@JAD_PID"
+              JAD_EXIT=@D@?
+              kill "@D@TAIL_PID" >/dev/null 2>&1
               set -e
-              if [ "$JAD_EXIT" -ne 0 ]; then
-                logline "JADX failed with exit code $JAD_EXIT"
+              if [ "@D@JAD_EXIT" -ne 0 ]; then
+                logline "JADX failed with exit code @D@JAD_EXIT"
                 cat /tmp/pocket-jadx.log
-                exit "$JAD_EXIT"
+                exit "@D@JAD_EXIT"
               fi
               progress 82 "Decompilation complete. Preparing ZIP archive"
               logline "JADX finished successfully."
               OUTPUT="/sdcard/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
-              rm -f "$OUTPUT"
-              cd "$(dirname "$OUT")"
-              zip -qr "$OUTPUT" "$(basename "$OUT")"
+              rm -f "@D@OUTPUT"
+              cd "@D@(dirname "@D@OUT")"
+              zip -qr "@D@OUTPUT" "@D@(basename "@D@OUT")"
               progress 95 "Verifying recovered ZIP"
-              test -s "$OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
+              test -s "@D@OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
               logline "Recovered ZIP verified."
-              echo "RECOVERY_SAVED=$OUTPUT"
+              echo "RECOVERY_SAVED=@D@OUTPUT"
               echo "JADX_DECOMPILE_SUCCESS=1"
               progress 100 "Decompilation successful"
               logline "SUCCESS: recovered source ZIP is ready."
             '
-        """.trimIndent()
+        """.trimIndent().replace("@D@", "$")
         val resultIntent = Intent(this, TermuxResultService::class.java).putExtra("task_type", "apk_decompile")
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
         val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
