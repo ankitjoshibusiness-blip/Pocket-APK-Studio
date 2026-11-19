@@ -103,7 +103,7 @@ class LivePreviewActivity : Activity() {
             "ProgressBar" -> ProgressBar(this)
             "ImageView", "ImageButton" -> TextView(this).apply { text = "▧ Image placeholder"; gravity = Gravity.CENTER }
             "Space" -> Space(this)
-            else -> LinearLayout(this).apply { orientation = VERTICAL }
+            else -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         }
         val txt = attr(p, "text")
         if (v is TextView) {
@@ -134,7 +134,7 @@ class LivePreviewActivity : Activity() {
         if (s.startsWith("@string/")) {
             val key = s.substringAfter('/')
             val f = File(projectRoot, "app/src/main/res/values/strings.xml")
-            if (f.isFile) Regex("<string\\\\s+name=\\\"" + Regex.escape(key) + "\\\"[^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL)).find(f.readText())?.let { return it.groupValues[1] }
+            if (f.isFile) Regex("<string\\s+name=\"" + Regex.escape(key) + "\"[^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL)).find(f.readText())?.let { return it.groupValues[1] }
         }
         return s
     }
