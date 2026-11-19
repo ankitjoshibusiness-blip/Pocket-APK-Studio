@@ -140,6 +140,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     override fun onStop() {
+        recoveryHandler.removeCallbacks(recoveryPollTask)
         try { unregisterReceiver(buildResultReceiver) } catch (_: Exception) { }
         super.onStop()
     }
@@ -1146,6 +1147,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
         recoveryStatus.text = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
         val running = prefs.getBoolean("running", false)
+        val failed = prefs.getBoolean("failed", false)
+        recoveryStatus.setTextColor(when {
+            running -> 0xFF78A5A8.toInt()
+            failed -> 0xFFFF7777.toInt()
+            prefs.getString("zip_path", null) != null -> 0xFF72C995.toInt()
+            else -> 0xFFB6BBC9.toInt()
+        })
         recoveryProgress.visibility = if (running) View.VISIBLE else View.GONE
         recoveryProgress.progress = prefs.getInt("percent", 0)
         recoveryPercentText.text = "${recoveryProgress.progress}%"
