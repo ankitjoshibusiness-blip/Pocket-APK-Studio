@@ -16,7 +16,9 @@ class TermuxResultService : IntentService("TermuxResultService") {
         if (intent.getStringExtra("task_type") == "apk_decompile") {
             val outputPath = Regex("RECOVERY_SAVED=([^\\r\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
             val outputFile = outputPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
-            val successful = exitCode == 0 && errCode == -1 && outputFile != null
+            val successful = exitCode == 0 && errCode == -1 && outputFile != null && stdout.contains("JADX_DECOMPILE_SUCCESS=1")
+            val partial = exitCode == 0 && errCode == -1 && outputFile != null && stdout.contains("JADX_PARTIAL=1")
+            val hasRecovery = successful || partial
             val combined = buildString {
                 append(stdout)
                 if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
@@ -24,16 +26,18 @@ class TermuxResultService : IntentService("TermuxResultService") {
             }
             val status = when {
                 successful -> "JADX decompilation completed. Recovered ZIP: " + outputFile!!.name
+                partial -> "Partial recovery created. JADX reported errors, but generated files were saved in: " + outputFile!!.name
                 errCode != -1 -> "Termux could not run JADX: $errMessage"
                 else -> "Decompilation failed (exit code $exitCode).\n" + combined.takeLast(2500)
             }
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
                 .putString("status", status)
                 .putBoolean("running", false)
-                .putBoolean("failed", !successful)
-                .putInt("percent", if (successful) 100 else 0)
-                .putString("stage", if (successful) "Decompilation successful" else "Decompilation failed — exit code $exitCode")
-                .putString("zip_path", if (successful) outputFile!!.absolutePath else null)
+                .putBoolean("failed", !hasRecovery)
+                .putBoolean("partial", partial)
+                .putInt("percent", if (hasRecovery) 100 else 0)
+                .putString("stage", when { successful -> "Decompilation successful"; partial -> "Partial recovery ZIP created"; else -> "Decompilation failed — exit code $exitCode" })
+                .putString("zip_path", if (hasRecovery) outputFile!!.absolutePath else null)
                 .putString("log", combined.takeLast(30000))
                 .putString("live_log", combined.takeLast(12000))
                 .apply()
