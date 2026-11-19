@@ -671,22 +671,20 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisCard.addView(recoveryStageText)
         analysisCard.addView(space(5))
         analysisCard.addView(label("LIVE PROCESS LOG", 11, 0xFF9AA7FF.toInt(), true))
-        recoveryLogText = label("No process logs yet.", 11, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        recoveryLogText = label("No process logs yet.", 11, 0xFFB6BBC9.toInt(), false).apply {
+            setTextIsSelectable(false)
+            setOnLongClickListener { false }
+        }
         val recoveryLogScroll = ScrollView(this).apply {
             addView(recoveryLogText)
             layoutParams = LinearLayout.LayoutParams(-1, dp(112))
-            isFillViewport = true
+            isFillViewport = false
+            isSmoothScrollingEnabled = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            // Native touch-drag scrolling; no extra up/down buttons.
         }
         analysisCard.addView(recoveryLogScroll)
-        val logControls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.END
-        }
-        val logUp = actionButton("↑  Scroll up") { recoveryLogScroll.post { recoveryLogScroll.fullScroll(View.FOCUS_UP) } }
-        val logDown = actionButton("↓  Scroll down") { recoveryLogScroll.post { recoveryLogScroll.fullScroll(View.FOCUS_DOWN) } }
-        logControls.addView(logUp, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(5) })
-        logControls.addView(logDown, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5) })
-        analysisCard.addView(logControls)
         exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
         analysisCard.addView(space(6))
         analysisCard.addView(exportRecoveryButton)
