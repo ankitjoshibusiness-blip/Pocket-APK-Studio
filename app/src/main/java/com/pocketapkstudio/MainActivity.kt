@@ -271,15 +271,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
             echo "SCAN_TERMUX=INSTALLED"
             export DEBIAN_FRONTEND=noninteractive
             ROOTFS="@D@PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu"
-            if [ ! -d "@D@ROOTFS" ]; then
-                pkg update -y
-                pkg install -y proot-distro
-                if [ ! -d "@D@ROOTFS" ]; then
-                    proot-distro install ubuntu
-                fi
+            pkg update -y
+            pkg install -y proot-distro
+            if proot-distro login ubuntu -- true >/dev/null 2>&1; then
+                echo "SCAN_UBUNTU=INSTALLED"
+            elif [ -d "@D@ROOTFS" ]; then
+                echo "ERROR_UBUNTU_EXISTS_BUT_LOGIN_FAILED"
+                exit 1
+            else
+                proot-distro install ubuntu
+                proot-distro login ubuntu -- true
+                echo "SCAN_UBUNTU=INSTALLED"
             fi
-            [ -d "@D@ROOTFS" ]
-            echo "SCAN_UBUNTU=INSTALLED"
             proot-distro login ubuntu -- bash -lc '
                 set -e
                 export DEBIAN_FRONTEND=noninteractive
