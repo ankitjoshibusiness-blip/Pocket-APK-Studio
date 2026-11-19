@@ -56,6 +56,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var analysisDetails: TextView
     private lateinit var analysisComponents: TextView
     private lateinit var analysisPermissions: TextView
+    private lateinit var analysisComponentsTitle: TextView
+    private lateinit var analysisPermissionsTitle: TextView
     private lateinit var recoveryStatus: TextView
     private lateinit var recoveryProgress: ProgressBar
     private lateinit var recoveryPercentText: TextView
@@ -629,29 +631,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
         toolsIntro.addView(exportAction)
         toolsContent.addView(toolsIntro)
         toolsContent.addView(space(12))
-        analysisCard = card().apply { visibility = View.GONE }
+        analysisCard = card().apply {
+            visibility = View.GONE
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
         analysisCard.addView(label("◈  APK ANALYSIS REPORT", 13, 0xFF9AA7FF.toInt(), true))
-        analysisStatus = label("Select an APK to begin analysis.", 14, 0xFFB6BBC9.toInt(), false)
+        analysisCard.addView(space(5))
+        analysisStatus = label("Select an APK to begin analysis.", 13, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(analysisStatus)
-        analysisCard.addView(space(8))
-        analysisDetails = label("", 13, 0xFFFFFFFF.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisDetails = label("", 12, 0xFFFFFFFF.toInt(), false).apply { setTextIsSelectable(true) }
         analysisCard.addView(analysisDetails)
-        analysisCard.addView(space(10))
-        analysisCard.addView(label("APK CONTENTS", 11, 0xFF9AA7FF.toInt(), true))
-        analysisComponents = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisComponentsTitle = label("APK CONTENTS", 11, 0xFF9AA7FF.toInt(), true).apply { visibility = View.GONE }
+        analysisCard.addView(analysisComponentsTitle)
+        analysisComponents = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
         analysisCard.addView(analysisComponents)
-        analysisCard.addView(space(10))
-        analysisCard.addView(label("REQUESTED PERMISSIONS", 11, 0xFF9AA7FF.toInt(), true))
-        analysisPermissions = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisPermissionsTitle = label("REQUESTED PERMISSIONS", 11, 0xFF9AA7FF.toInt(), true).apply { visibility = View.GONE }
+        analysisCard.addView(analysisPermissionsTitle)
+        analysisPermissions = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
         analysisCard.addView(analysisPermissions)
-        analysisCard.addView(space(10))
+        analysisCard.addView(space(5))
         analysisCard.addView(label("SOURCE CODE RECOVERY", 11, 0xFF9AA7FF.toInt(), true))
-        analysisCard.addView(label("APK analysis does not decompile DEX bytecode. JADX decompilation is a separate step and has not been run.", 12, 0xFFB6BBC9.toInt(), false))
-        analysisCard.addView(space(8))
+        analysisCard.addView(label("JADX decompiles DEX bytecode and exports the recovered project.", 12, 0xFFB6BBC9.toInt(), false))
+        analysisCard.addView(space(5))
         analysisCard.addView(actionButton("Decompile APK with JADX", true) {
             pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         })
-        analysisCard.addView(space(8))
         recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(recoveryStatus)
         recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -660,20 +664,29 @@ class MainActivity : androidx.activity.ComponentActivity() {
             visibility = View.GONE
             progressTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
         }
-        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(8)))
-        recoveryPercentText = label("0%", 12, 0xFF78A5A8.toInt(), true)
+        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(6)))
+        recoveryPercentText = label("0%", 11, 0xFF78A5A8.toInt(), true)
         analysisCard.addView(recoveryPercentText)
-        recoveryStageText = label("Waiting for decompilation…", 12, 0xFFB6BBC9.toInt(), false)
+        recoveryStageText = label("Waiting for decompilation…", 11, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(recoveryStageText)
-        analysisCard.addView(space(8))
+        analysisCard.addView(space(5))
         analysisCard.addView(label("LIVE PROCESS LOG", 11, 0xFF9AA7FF.toInt(), true))
         recoveryLogText = label("No process logs yet.", 11, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
         val recoveryLogScroll = ScrollView(this).apply {
             addView(recoveryLogText)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(150))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(112))
             isFillViewport = true
         }
         analysisCard.addView(recoveryLogScroll)
+        val logControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.END
+        }
+        val logUp = actionButton("↑  Scroll up") { recoveryLogScroll.post { recoveryLogScroll.fullScroll(View.FOCUS_UP) } }
+        val logDown = actionButton("↓  Scroll down") { recoveryLogScroll.post { recoveryLogScroll.fullScroll(View.FOCUS_DOWN) } }
+        logControls.addView(logUp, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(5) })
+        logControls.addView(logDown, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5) })
+        analysisCard.addView(logControls)
         exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
         analysisCard.addView(space(6))
         analysisCard.addView(exportRecoveryButton)
@@ -1446,6 +1459,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisDetails.text = "Reading package metadata and APK contents."
         analysisComponents.text = ""
         analysisPermissions.text = ""
+        analysisComponentsTitle.visibility = View.GONE
+        analysisComponents.visibility = View.GONE
+        analysisPermissionsTitle.visibility = View.GONE
+        analysisPermissions.visibility = View.GONE
         lifecycleScope.launch {
             try {
                 val report = withContext(Dispatchers.IO) {
@@ -1499,12 +1516,20 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 analysisDetails.text = mainParts[0]
                 analysisComponents.text = if (mainParts.size > 1) mainParts[1] else "No content details"
                 analysisPermissions.text = if (parts.size > 1) parts[1] else "None listed"
+                analysisComponentsTitle.visibility = View.VISIBLE
+                analysisComponents.visibility = View.VISIBLE
+                analysisPermissionsTitle.visibility = View.VISIBLE
+                analysisPermissions.visibility = View.VISIBLE
                 analysisStatus.text = "Analysis completed successfully."
             } catch (e: Exception) {
                 analysisStatus.text = "Analysis failed."
                 analysisDetails.text = e.message ?: "Could not analyze APK."
                 analysisComponents.text = "No APK content data available."
                 analysisPermissions.text = "No permissions available."
+                analysisComponentsTitle.visibility = View.VISIBLE
+                analysisComponents.visibility = View.VISIBLE
+                analysisPermissionsTitle.visibility = View.VISIBLE
+                analysisPermissions.visibility = View.VISIBLE
                 analysisReportText = "APK analysis failed: " + (e.message ?: "Unknown error")
             }
         }
