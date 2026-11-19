@@ -95,6 +95,7 @@ class ProjectEditorActivity : Activity() {
         addToolbarTile(smallButton("＋ File") { showFileActions() })
         addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
         addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
+        addToolbarTile(smallButton("▶ Preview") { openLivePreview() })
         addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
         root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
@@ -170,6 +171,11 @@ class ProjectEditorActivity : Activity() {
             override fun afterTextChanged(s:Editable?) {}
         })
         updateBuildErrors(); renderTabs()
+    }
+
+    private fun openLivePreview() {
+        saveCurrent(false)
+        startActivity(Intent(this, LivePreviewActivity::class.java).putExtra("project_root", rootDir.absolutePath))
     }
 
     private fun toggleExplorer() {
