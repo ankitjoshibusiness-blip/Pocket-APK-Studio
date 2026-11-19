@@ -1296,7 +1296,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             set -e
             SHARED="/storage/emulated/0"
             RECOVERY="@D@SHARED/Download/PocketAPKStudio/Recovery"
-            if [ ! -d "$RECOVERY" ] || [ ! -r "$RECOVERY/customer-manager.apk" ]; then
+            if [ ! -d "@D@RECOVERY" ] || [ ! -r "@D@RECOVERY/customer-manager.apk" ]; then
               echo "ERROR: Termux cannot access shared Downloads. Open Termux and run: termux-setup-storage, then allow storage permission and retry."
               exit 24
             fi
