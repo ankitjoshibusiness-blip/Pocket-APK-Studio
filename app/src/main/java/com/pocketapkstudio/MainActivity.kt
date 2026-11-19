@@ -1295,12 +1295,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val command = """
             set -e
             SHARED="/storage/emulated/0"
-            RECOVERY="$SHARED/Download/PocketAPKStudio/Recovery"
+            RECOVERY="@D@SHARED/Download/PocketAPKStudio/Recovery"
             if [ ! -d "$RECOVERY" ] || [ ! -r "$RECOVERY/customer-manager.apk" ]; then
               echo "ERROR: Termux cannot access shared Downloads. Open Termux and run: termux-setup-storage, then allow storage permission and retry."
               exit 24
             fi
-            proot-distro login --bind "$SHARED:/mnt/shared" ubuntu -- bash -lc '
+            proot-distro login --bind "@D@SHARED:/mnt/shared" ubuntu -- bash -lc '
               set -e
               PROGRESS="/mnt/shared/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
               progress() { printf "P|%s|%s\n" "@D@1" "@D@2" >> "@D@PROGRESS"; }
