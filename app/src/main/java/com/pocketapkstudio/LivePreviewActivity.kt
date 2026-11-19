@@ -92,8 +92,8 @@ class LivePreviewActivity : Activity() {
 
     private fun makeView(tag: String, p: XmlPullParser): View {
         val v: View = when (tag) {
-            "LinearLayout" -> LinearLayout(this).apply { orientation = if (attr(p, "orientation") == "horizontal") HORIZONTAL else VERTICAL }
-            "FrameLayout", "ConstraintLayout", "CoordinatorLayout", "RelativeLayout", "ScrollView", "NestedScrollView" -> LinearLayout(this).apply { orientation = VERTICAL }
+            "LinearLayout" -> LinearLayout(this).apply { orientation = if (attr(p, "orientation") == "horizontal") LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
+            "FrameLayout", "ConstraintLayout", "CoordinatorLayout", "RelativeLayout", "ScrollView", "NestedScrollView" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             "TextView", "CheckedTextView" -> TextView(this)
             "Button", "MaterialButton" -> Button(this).apply { isAllCaps = false }
             "EditText", "TextInputEditText" -> EditText(this)
@@ -134,7 +134,7 @@ class LivePreviewActivity : Activity() {
         if (s.startsWith("@string/")) {
             val key = s.substringAfter('/')
             val f = File(projectRoot, "app/src/main/res/values/strings.xml")
-            if (f.isFile) Regex("<string\\s+name=[\\"']" + Regex.escape(key) + "[\\"'][^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL)).find(f.readText())?.let { return it.groupValues[1] }
+            if (f.isFile) Regex("<string\\\\s+name=\\\"" + Regex.escape(key) + "\\\"[^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL)).find(f.readText())?.let { return it.groupValues[1] }
         }
         return s
     }
