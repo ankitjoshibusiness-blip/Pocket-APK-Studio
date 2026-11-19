@@ -610,53 +610,65 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(space(8))
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         settingsContent.addView(setupCard)
-        val toolsIntro = card()
-        toolsIntro.addView(space(8))
-        toolsIntro.addView(label("Inspect an APK, recover readable code with JADX, and export the recovered files.", 13, 0xFFB6BBC9.toInt(), false))
-        toolsIntro.addView(space(10))
-        val analyzeAction = actionButton("⌕   Analyze APK     ›", true) {
+        val toolsIntro = card().apply {
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = premiumGradient(0xFF405968.toInt(), 0xFF3A5260.toInt(), 2)
+            elevation = dp(0).toFloat()
+        }
+        val toolsHeading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        val toolsBack = TextView(this).apply {
+            text = "‹"
+            textSize = 30f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF405968.toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(0xFFF4F6F7.toInt())
+                setStroke(dp(1), 0xFFD6DDE1.toInt())
+            }
+        }
+        toolsHeading.addView(toolsBack, LinearLayout.LayoutParams(dp(44), dp(44)))
+        toolsHeading.addView(label("  Apk Tool", 22, 0xFFFFFFFF.toInt(), true))
+        toolsIntro.addView(toolsHeading)
+        toolsIntro.addView(space(14))
+        val toolsMenuPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = premiumGradient(0xFFBFCBD2.toInt(), 0xFFB7C4CC.toInt(), 18)
+        }
+        val menuHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        menuHeader.addView(label("•  Live Process Logs", 15, 0xFF111820.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
+        val menuToggle = actionButton("⌄", false) {}.apply {
+            textSize = 20f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 24)
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(36))
+        }
+        menuHeader.addView(menuToggle)
+        toolsMenuPanel.addView(menuHeader)
+        val toolActions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 16)
+        }
+        val analyzeAction = actionButton("⌕   Analyze Apk", false) {
             pickAnalyzeApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         }
-        analyzeAction.background = premiumGradient(0xFF587F9D.toInt(), 0xFF4C718D.toInt(), 16)
-        toolsIntro.addView(analyzeAction)
-        toolsIntro.addView(space(8))
-        val decompileAction = actionButton("⟳   Decompile APK with JADX     ›") {
+        analyzeAction.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+        analyzeAction.background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 12)
+        toolActions.addView(analyzeAction)
+        val decompileAction = actionButton("⟳   Decompile Apk", false) {
             pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         }
-        decompileAction.background = premiumGradient(0xFF568B78.toInt(), 0xFF4D806E.toInt(), 16)
-        toolsIntro.addView(decompileAction)
-        toolsIntro.addView(space(8))
-        val exportAction = actionButton("⇧   Export Recovered ZIP     ›") { shareRecoveredProject() }
-        exportAction.background = premiumGradient(0xFF8A7860.toInt(), 0xFF796B58.toInt(), 16)
-        toolsIntro.addView(exportAction)
-        toolsContent.addView(toolsIntro)
-        toolsContent.addView(space(12))
-        analysisCard = card().apply {
-            visibility = View.GONE
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-        }
-        analysisCard.addView(label("◈  APK ANALYSIS REPORT", 13, 0xFF9AA7FF.toInt(), true))
-        analysisCard.addView(space(5))
-        analysisStatus = label("Select an APK to begin analysis.", 13, 0xFFB6BBC9.toInt(), false)
-        analysisCard.addView(analysisStatus)
-        analysisDetails = label("", 12, 0xFFFFFFFF.toInt(), false).apply { setTextIsSelectable(true) }
-        analysisCard.addView(analysisDetails)
-        analysisComponentsTitle = label("APK CONTENTS", 11, 0xFF9AA7FF.toInt(), true).apply { visibility = View.GONE }
-        analysisCard.addView(analysisComponentsTitle)
-        analysisComponents = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
-        analysisCard.addView(analysisComponents)
-        analysisPermissionsTitle = label("REQUESTED PERMISSIONS", 11, 0xFF9AA7FF.toInt(), true).apply { visibility = View.GONE }
-        analysisCard.addView(analysisPermissionsTitle)
-        analysisPermissions = label("", 12, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
-        analysisCard.addView(analysisPermissions)
-        analysisCard.addView(space(5))
-        analysisCard.addView(label("SOURCE CODE RECOVERY", 11, 0xFF9AA7FF.toInt(), true))
-        analysisCard.addView(label("JADX decompiles DEX bytecode and exports the recovered project.", 12, 0xFFB6BBC9.toInt(), false))
-        analysisCard.addView(space(5))
-        analysisCard.addView(actionButton("Decompile APK with JADX", true) {
-            pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
-        })
-        analysisCard.addView(label("DECOMPILE MODE", 10, 0xFF9AA7FF.toInt(), true))
+        decompileAction.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+        decompileAction.background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 12)
+        toolActions.addView(decompileAction)
         val modePrefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
         val decompileModeSpinner = android.widget.Spinner(this).apply {
             val modes = listOf("Balanced • Full source + resources", "Fast • Skip resources", "Full Recovery • Maximum detail")
@@ -670,34 +682,81 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }
             })
         }
-        analysisCard.addView(decompileModeSpinner, LinearLayout.LayoutParams(-1, dp(42)))
-        recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
-        analysisCard.addView(recoveryStatus)
-        recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            isIndeterminate = false
-            visibility = View.GONE
-            progressTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
+        toolActions.addView(label("DECOMPILE MODE", 10, 0xFFE1E8EC.toInt(), true))
+        toolActions.addView(decompileModeSpinner, LinearLayout.LayoutParams(-1, dp(42)))
+        toolsMenuPanel.addView(toolActions)
+        var menuExpanded = true
+        menuToggle.setOnClickListener {
+            menuExpanded = !menuExpanded
+            toolActions.visibility = if (menuExpanded) View.VISIBLE else View.GONE
+            menuToggle.text = if (menuExpanded) "⌃" else "⌄"
         }
-        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(6)))
-        recoveryPercentText = label("0%", 11, 0xFF78A5A8.toInt(), true)
-        analysisCard.addView(recoveryPercentText)
-        recoveryStageText = label("Waiting for decompilation…", 11, 0xFFB6BBC9.toInt(), false)
-        analysisCard.addView(recoveryStageText)
+        toolsIntro.addView(toolsMenuPanel)
+        toolsContent.addView(toolsIntro)
+        toolsContent.addView(space(10))
+        analysisCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = premiumGradient(0xFFBFCBD2.toInt(), 0xFFB7C4CC.toInt(), 18)
+            visibility = View.GONE
+        }
+        analysisCard.addView(label("◈  APK ANALYSIS REPORT", 13, 0xFF405968.toInt(), true))
         analysisCard.addView(space(5))
-        analysisCard.addView(label("LIVE PROCESS LOG", 11, 0xFF9AA7FF.toInt(), true))
-        recoveryLogText = label("No process logs yet.", 11, 0xFFB6BBC9.toInt(), false).apply {
+        analysisStatus = label("Select an APK to begin analysis.", 13, 0xFF25343D.toInt(), false)
+        analysisCard.addView(analysisStatus)
+        analysisDetails = label("", 12, 0xFF17232B.toInt(), false).apply { setTextIsSelectable(true) }
+        analysisCard.addView(analysisDetails)
+        analysisComponentsTitle = label("APK CONTENTS", 11, 0xFF405968.toInt(), true).apply { visibility = View.GONE }
+        analysisCard.addView(analysisComponentsTitle)
+        analysisComponents = label("", 12, 0xFF25343D.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
+        analysisCard.addView(analysisComponents)
+        analysisPermissionsTitle = label("REQUESTED PERMISSIONS", 11, 0xFF405968.toInt(), true).apply { visibility = View.GONE }
+        analysisCard.addView(analysisPermissionsTitle)
+        analysisPermissions = label("", 12, 0xFF25343D.toInt(), false).apply { setTextIsSelectable(true); visibility = View.GONE }
+        analysisCard.addView(analysisPermissions)
+        analysisCard.addView(space(8))
+        analysisCard.addView(label("LIVE PROCESS LOGS", 13, 0xFF17232B.toInt(), true))
+        val logToolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        logToolbar.addView(label("Current operation output", 11, 0xFF405968.toInt(), false), LinearLayout.LayoutParams(0, -2, 1f))
+        logToolbar.addView(actionButton("Copy Logs  ▢", false) {
+            val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+            val statusText = prefs.getString("status", "").orEmpty()
+            val stageText = prefs.getString("stage", "").orEmpty()
+            val fullLog = prefs.getString("log", "").orEmpty()
+            val liveLog = prefs.getString("live_log", "").orEmpty()
+            val report = buildString {
+                append("POCKET APK STUDIO — JADX DECOMPILE LOGS\\n")
+                append("Status: ").append(statusText).append("\\n")
+                append("Stage: ").append(stageText).append("\\n")
+                append("Progress: ").append(prefs.getInt("percent", 0)).append("%\\n\\n")
+                append("FULL TERMUX OUTPUT:\\n").append(fullLog.ifBlank { "No final output captured." })
+                append("\\n\\nLIVE PROCESS LOG:\\n").append(liveLog.ifBlank { recoveryLogText.text })
+            }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JADX Decompile Logs", report))
+            Toast.makeText(this, "Decompile logs copied.", Toast.LENGTH_SHORT).show()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, dp(38))
+            textSize = 12f
+            setTextColor(0xFF17232B.toInt())
+            background = premiumGradient(0xFFAEBBC3.toInt(), 0xFFAEBBC3.toInt(), 10)
+        })
+        analysisCard.addView(logToolbar)
+        recoveryLogText = label("No process logs yet.", 11, 0xFF17232B.toInt(), false).apply {
             setTextIsSelectable(false)
-            setOnLongClickListener { false }
+            setPadding(dp(8), dp(8), dp(8), dp(8))
         }
         val recoveryLogScroll = ScrollView(this).apply {
             addView(recoveryLogText)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(112))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(270))
             isFillViewport = false
             isSmoothScrollingEnabled = true
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            // Keep swipe gestures inside this log instead of letting the outer page consume them.
+            setBackgroundColor(0xFFBFCBD2.toInt())
             setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     android.view.MotionEvent.ACTION_DOWN,
@@ -709,28 +768,32 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         }
         analysisCard.addView(recoveryLogScroll)
-        exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
-        analysisCard.addView(space(6))
-        analysisCard.addView(exportRecoveryButton)
         analysisCard.addView(space(8))
-        analysisCard.addView(actionButton("Copy decompile logs") {
-            val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
-            val statusText = prefs.getString("status", "").orEmpty()
-            val stageText = prefs.getString("stage", "").orEmpty()
-            val fullLog = prefs.getString("log", "").orEmpty()
-            val liveLog = prefs.getString("live_log", "").orEmpty()
-            val report = buildString {
-                append("POCKET APK STUDIO — JADX DECOMPILE LOGS\n")
-                append("Status: ").append(statusText).append("\n")
-                append("Stage: ").append(stageText).append("\n")
-                append("Progress: ").append(prefs.getInt("percent", 0)).append("%\n\n")
-                append("FULL TERMUX OUTPUT:\n").append(fullLog.ifBlank { "No final output captured." })
-                append("\n\nLIVE PROCESS LOG:\n").append(liveLog.ifBlank { recoveryLogText.text })
-            }
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JADX Decompile Logs", report))
-            Toast.makeText(this, "Decompile logs copied.", Toast.LENGTH_SHORT).show()
-        })
+        recoveryStatus = label("Decompilation has not started.", 12, 0xFF25343D.toInt(), false)
+        analysisCard.addView(recoveryStatus)
+        recoveryStageText = label("Waiting for decompilation…", 11, 0xFF405968.toInt(), false)
+        analysisCard.addView(recoveryStageText)
+        val progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            isIndeterminate = false
+            visibility = View.VISIBLE
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF3D8064.toInt())
+        }
+        progressRow.addView(recoveryProgress, LinearLayout.LayoutParams(0, dp(7), 1f))
+        recoveryPercentText = label("0%", 15, 0xFF405968.toInt(), true)
+        progressRow.addView(recoveryPercentText)
+        analysisCard.addView(progressRow)
+        exportRecoveryButton = actionButton("⇧   Export Recovery File", true) { shareRecoveredProject() }.apply {
+            visibility = View.GONE
+            background = premiumGradient(0xFFAEBBC3.toInt(), 0xFFAEBBC3.toInt(), 24)
+            setTextColor(0xFF17232B.toInt())
+        }
+        analysisCard.addView(space(8))
+        analysisCard.addView(exportRecoveryButton)
         analysisCard.addView(space(6))
         analysisCard.addView(actionButton("Copy analysis report") {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
