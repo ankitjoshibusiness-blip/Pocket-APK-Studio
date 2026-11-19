@@ -1336,7 +1336,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
               rm -rf "@D@OUT"
               mkdir -p "@D@OUT"
               CPU_THREADS=@D@(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
-              MEM_AVAILABLE_MB=@D@(awk '/MemAvailable/ {print int(@D@2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
+              MEM_AVAILABLE_KB=@D@(grep MemAvailable /proc/meminfo 2>/dev/null | tr -s " " | cut -d " " -f 2)
+              MEM_AVAILABLE_MB=@D@((MEM_AVAILABLE_KB / 1024))
               if [ "@D@MEM_AVAILABLE_MB" -lt 2048 ]; then
                 THREADS=1
               elif [ "@D@MEM_AVAILABLE_MB" -lt 4096 ]; then
@@ -1359,8 +1360,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
                   sleep 15
                   kill -0 "@D@JAD_PID" 2>/dev/null || break
                   FILE_COUNT=@D@(find "@D@OUT" -type f 2>/dev/null | wc -l | tr -d ' ')
-                  MEM_AVAILABLE_MB=@D@(awk '/MemAvailable/ {print int(@D@2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-                  LOAD_AVG=@D@(cut -d ' ' -f 1-3 /proc/loadavg 2>/dev/null || echo unavailable)
+                  MEM_AVAILABLE_KB=@D@(grep MemAvailable /proc/meminfo 2>/dev/null | tr -s " " | cut -d " " -f 2)
+                  MEM_AVAILABLE_MB=@D@((MEM_AVAILABLE_KB / 1024))
+                  LOAD_AVG=@D@(tr " " "\n" < /proc/loadavg 2>/dev/null | head -n 3 | paste -sd "," - || echo unavailable)
                   logline "Live monitor: @D@FILE_COUNT files generated; @D@MEM_AVAILABLE_MB MB RAM available; CPU load @D@LOAD_AVG."
                 done
               ) &
