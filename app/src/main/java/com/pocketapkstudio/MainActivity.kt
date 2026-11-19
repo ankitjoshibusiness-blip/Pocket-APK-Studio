@@ -239,9 +239,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun startAutomaticEnvironmentSetup() {
         if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
-            showEnvironmentSetupWizard()
+            updateTermuxInstallStatus()
             return
         }
+        setupStatus.text = "Scanning and preparing Termux, Ubuntu and Android build tools…"
+        setupResults.text = "Termux: INSTALLED\nUbuntu: Scanning…\nJava 17: Scanning…\nAndroid SDK: Scanning…\nPlatform Tools: Scanning…\nBuild Tools: Scanning…"
+        setupProgress.visibility = View.VISIBLE
+        setupNextButton.isEnabled = false
+        setupNextButton.alpha = 0.45f
         serverStatus.text = "Checking and preparing Termux, Ubuntu, Java 17 and Android SDK…"
         val command = """
             set -e
@@ -308,6 +313,28 @@ class MainActivity : androidx.activity.ComponentActivity() {
             serverStatus.text = "Could not start Termux setup: " +
                 (e.message ?: "check Termux permissions and allow-external-apps setting")
         }
+    }
+
+    private fun startAutomaticEnvironmentCheck() {
+        if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
+            serverStatus.text = "Termux is not installed. Reinstall it to connect the build server."
+            return
+        }
+        val command = "proot-distro login ubuntu -- bash -lc 'if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q 17 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f /root/Android/Sdk/platforms/android-35/android.jar && test -x /root/Android/Sdk/platform-tools/adb && test -x /root/Android/Sdk/build-tools/35.0.0/aapt; then echo BUILD_SERVER_READY=1; else echo BUILD_SERVER_FAILED=Ubuntu or Android SDK components are missing; exit 1; fi'"
+        val callbackIntent = Intent(this, TermuxResultService::class.java).apply { putExtra("task_type", "server_check") }
+        val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
+        val flags = PendingIntent.FLAG_ONE_SHOT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        val callback = PendingIntent.getService(this, requestCode, callbackIntent, flags)
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", command))
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+            putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", callback)
+        }
+        try { serverStatus.text = "Connecting to Termux + Ubuntu…"; startService(intent) }
+        catch (e: Exception) { serverStatus.text = "Automatic connection failed: " + (e.message ?: "Check Termux settings.") }
     }
 
     private fun clearLegacyAiData() {
@@ -765,11 +792,57 @@ class MainActivity : androidx.activity.ComponentActivity() {
         pages.forEach { page ->
             pageContainer.addView(page, FrameLayout.LayoutParams(-1, -1))
         }
+        setupScreen = buildEnvironmentSetupPage()
+        pageContainer.addView(setupScreen, FrameLayout.LayoutParams(-1, -1))
         root.addView(pageContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         // Bottom navigation removed; navigation is available from the Welcome screen and page back controls.
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
         homeTab.background = premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13)
         setContentView(root)
+    }
+
+    private fun buildEnvironmentSetupPage(): ScrollView {
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(22), dp(18), dp(24))
+            background = premiumGradient(0xFF202A33.toInt(), 0xFF18232C.toInt(), 0)
+        }
+        body.addView(label("⚙", 36, 0xFF9CC5C3.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
+        body.addView(label("Environment Setup", 24, 0xFFFFFFFF.toInt(), true).apply { gravity = android.view.Gravity.CENTER })
+        body.addView(label("Prepare your local Android build engine", 13, 0xFFB6C5CE.toInt(), false).apply { gravity = android.view.Gravity.CENTER })
+        body.addView(space(14))
+        val scanCard = card()
+        scanCard.addView(label("AUTOMATIC DEVICE SCAN", 12, 0xFF9AA7FF.toInt(), true))
+        setupStatus = label("Checking Termux…", 14, 0xFFE2E8ED.toInt(), true)
+        scanCard.addView(setupStatus)
+        setupProgress = ProgressBar(this).apply { isIndeterminate = true; visibility = View.GONE }
+        scanCard.addView(setupProgress, LinearLayout.LayoutParams(-1, dp(5)))
+        scanCard.addView(space(8))
+        setupResults = label("Termux: Waiting\nUbuntu: Waiting\nJava 17: Waiting\nAndroid SDK: Waiting\nPlatform Tools: Waiting\nBuild Tools: Waiting", 13, 0xFFB6C5CE.toInt(), false).apply {
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = premiumGradient(0xFF1A252D.toInt(), 0xFF1A252D.toInt(), 12)
+            setTextIsSelectable(true)
+        }
+        scanCard.addView(setupResults)
+        body.addView(scanCard)
+        body.addView(space(10))
+        val info = card()
+        info.addView(label("ONE-TIME INSTALLATION", 12, 0xFF9AA7FF.toInt(), true))
+        info.addView(label("Missing Ubuntu, Java 17 and Android SDK components will be installed automatically. Existing components will be reused. Internet connection is required.", 13, 0xFFB6C5CE.toInt(), false))
+        info.addView(space(8))
+        info.addView(actionButton("Install Termux") { openTermuxDownloadPage() })
+        body.addView(info)
+        body.addView(space(10))
+        body.addView(actionButton("Scan & Setup", true) { beginEnvironmentSetup() })
+        body.addView(space(8))
+        setupNextButton = actionButton("Next  →", true) {
+            setupScreen.visibility = View.GONE
+            Toast.makeText(this, "Welcome to Pocket APK Studio.", Toast.LENGTH_SHORT).show()
+        }.apply { isEnabled = false; alpha = 0.45f }
+        body.addView(setupNextButton)
+        body.addView(space(10))
+        body.addView(label("Android requires manual Termux installation and permission approval. Enable allow-external-apps in Termux settings.", 11, 0xFF8999A3.toInt(), false))
+        return ScrollView(this).apply { isFillViewport = true; addView(body); visibility = View.GONE }
     }
 
     private fun openProjectEditor(uri: Uri) {
