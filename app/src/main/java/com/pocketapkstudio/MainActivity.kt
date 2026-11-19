@@ -268,60 +268,49 @@ class MainActivity : androidx.activity.ComponentActivity() {
         serverStatus.text = "Checking and preparing Termux, Ubuntu, Java 17 and Android SDK…"
         val command = """
             set -e
+            echo "SCAN_TERMUX=INSTALLED"
             export DEBIAN_FRONTEND=noninteractive
-            if ! command -v proot-distro >/dev/null 2>&1; then
+            ROOTFS="$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu"
+            if [ ! -d "$ROOTFS" ]; then
                 pkg update -y
                 pkg install -y proot-distro
+                if [ ! -d "$ROOTFS" ]; then
+                    proot-distro install ubuntu
+                fi
             fi
-            if ! proot-distro list installed 2>/dev/null | grep -qi ubuntu; then
-                proot-distro install ubuntu
-            fi
+            [ -d "$ROOTFS" ]
+            echo "SCAN_UBUNTU=INSTALLED"
             proot-distro login ubuntu -- bash -lc '
                 set -e
                 export DEBIAN_FRONTEND=noninteractive
-                if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q 17 &&
-                   command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 &&
-                   command -v wget >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 &&
-                   command -v zip >/dev/null 2>&1 &&
-                   test -x /root/Android/cmdline-tools/latest/bin/sdkmanager &&
-                   test -f /root/Android/Sdk/platforms/android-35/android.jar &&
-                   test -x /root/Android/Sdk/platform-tools/adb &&
-                   test -x /root/Android/Sdk/build-tools/35.0.0/aapt; then
-                    echo "SCAN_UBUNTU=INSTALLED"
-                    echo "SCAN_JAVA17=INSTALLED"
-                    echo "SCAN_ANDROID_SDK=INSTALLED"
-                    echo "SCAN_PLATFORM_TOOLS=INSTALLED"
-                    echo "SCAN_BUILD_TOOLS=INSTALLED"
-                    echo BUILD_SERVER_READY=1
-                    exit 0
-                fi
                 apt-get update
-                if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q 17; then
+                if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q "17"; then
                     apt-get install -y openjdk-17-jdk
                 fi
+                java -version 2>&1 | grep -q "17"
+                echo "SCAN_JAVA17=INSTALLED"
                 apt-get install -y git curl wget unzip zip
+                mkdir -p /root/Android/cmdline-tools
                 if [ ! -x /root/Android/cmdline-tools/latest/bin/sdkmanager ]; then
-                    mkdir -p /root/Android/cmdline-tools
                     cd /tmp
                     wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-                    rm -rf /root/Android/cmdline-tools/latest /tmp/cmdline-tools
+                    rm -rf /tmp/cmdline-tools
                     mkdir -p /tmp/cmdline-tools
                     unzip -q cmdline-tools.zip -d /tmp/cmdline-tools
+                    rm -rf /root/Android/cmdline-tools/latest
                     mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
                 fi
+                echo "SCAN_ANDROID_SDK=INSTALLED"
                 yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk --licenses >/dev/null || true
                 /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
                 test -f /root/Android/Sdk/platforms/android-35/android.jar
-                test -x /root/Android/Sdk/platform-tools/adb
-                test -x /root/Android/Sdk/build-tools/35.0.0/aapt
-                echo "SCAN_UBUNTU=INSTALLED"
-                echo "SCAN_JAVA17=INSTALLED"
                 echo "SCAN_ANDROID_SDK=INSTALLED"
+                test -x /root/Android/Sdk/platform-tools/adb
                 echo "SCAN_PLATFORM_TOOLS=INSTALLED"
+                test -x /root/Android/Sdk/build-tools/35.0.0/aapt
                 echo "SCAN_BUILD_TOOLS=INSTALLED"
                 echo BUILD_SERVER_READY=1
             '
-            echo "SCAN_TERMUX=INSTALLED"
         """.trimIndent()
         val resultIntent = Intent(this, TermuxResultService::class.java).apply {
             putExtra("task_type", "environment_setup")
