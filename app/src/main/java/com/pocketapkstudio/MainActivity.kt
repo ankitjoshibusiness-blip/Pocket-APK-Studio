@@ -199,6 +199,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         } else {
             setupScreen.visibility = View.VISIBLE
             updateTermuxInstallStatus()
+            if (packageManager.getLaunchIntentForPackage("com.termux") != null) beginEnvironmentSetup()
         }
     }
 
@@ -267,7 +268,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
                    command -v zip >/dev/null 2>&1 &&
                    test -x /root/Android/cmdline-tools/latest/bin/sdkmanager &&
                    test -f /root/Android/Sdk/platforms/android-35/android.jar &&
+                   test -x /root/Android/Sdk/platform-tools/adb &&
                    test -x /root/Android/Sdk/build-tools/35.0.0/aapt; then
+                    echo "SCAN_UBUNTU=INSTALLED"
+                    echo "SCAN_JAVA17=INSTALLED"
+                    echo "SCAN_ANDROID_SDK=INSTALLED"
+                    echo "SCAN_PLATFORM_TOOLS=INSTALLED"
+                    echo "SCAN_BUILD_TOOLS=INSTALLED"
                     echo BUILD_SERVER_READY=1
                     exit 0
                 fi
@@ -288,9 +295,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 yes | /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk --licenses >/dev/null || true
                 /root/Android/cmdline-tools/latest/bin/sdkmanager --sdk_root=/root/Android/Sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
                 test -f /root/Android/Sdk/platforms/android-35/android.jar
+                test -x /root/Android/Sdk/platform-tools/adb
                 test -x /root/Android/Sdk/build-tools/35.0.0/aapt
+                echo "SCAN_UBUNTU=INSTALLED"
+                echo "SCAN_JAVA17=INSTALLED"
+                echo "SCAN_ANDROID_SDK=INSTALLED"
+                echo "SCAN_PLATFORM_TOOLS=INSTALLED"
+                echo "SCAN_BUILD_TOOLS=INSTALLED"
                 echo BUILD_SERVER_READY=1
             '
+            echo "SCAN_TERMUX=INSTALLED"
         """.trimIndent()
         val resultIntent = Intent(this, TermuxResultService::class.java).apply {
             putExtra("task_type", "environment_setup")
