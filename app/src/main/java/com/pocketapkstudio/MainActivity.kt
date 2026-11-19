@@ -517,7 +517,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { openPage?.invoke(2) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
-                .setMessage("Create project: start a Kotlin or Java Android project.\\n\\nOpen existing project: import an Android Gradle project ZIP.\\n\\nWorkspace: edit project files and save the updated ZIP.\\n\\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\\n\\nAPK Tools: inspect APK details and recover source files with JADX.")
+                .setMessage("Create project: start a Kotlin or Java Android project.\n\nOpen existing project: import an Android Gradle project ZIP.\n\nWorkspace: edit project files and save the updated ZIP.\n\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\n\nAPK Tools: inspect APK details and recover source files with JADX.")
                 .setPositiveButton("Got it", null).show()
         })
         homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
@@ -1179,7 +1179,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 recoveryStatus.text = message
                 recoveryProgress.visibility = View.GONE
                 getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
-                    .putString("status", message).putBoolean("running", false).apply()
+                    .putString("status", message).putString("stage", "Failed while preparing APK")
+                    .putBoolean("running", false).putBoolean("failed", true).apply()
             }
         }
     }
@@ -1226,7 +1227,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: error("Could not create live decompilation progress file")
         contentResolver.openOutputStream(uri).use { output ->
-            requireNotNull(output).write("P|1|Starting decompilation…\\n".toByteArray())
+            requireNotNull(output).write("P|1|Starting decompilation…\n".toByteArray())
         }
         getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
             .putString("progress_uri", uri.toString()).putInt("percent", 1)
@@ -1261,7 +1262,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     line.isNotBlank() -> logLines.add(line)
                 }
             }
-            val log = logLines.takeLast(100).joinToString("\\n").ifBlank { "Waiting for JADX output…" }
+            val log = logLines.takeLast(100).joinToString("\n").ifBlank { "Waiting for JADX output…" }
             recoveryProgress.progress = percent
             recoveryPercentText.text = "$percent%"
             recoveryStageText.text = stage
@@ -1278,8 +1279,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             proot-distro login ubuntu -- bash -lc '
               set -e
               PROGRESS="/sdcard/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
-              progress() { printf "P|%s|%s\\n" "$1" "$2" >> "$PROGRESS"; }
-              logline() { printf "L|%s\\n" "$*" >> "$PROGRESS"; }
+              progress() { printf "P|%s|%s\n" "$1" "$2" >> "$PROGRESS"; }
+              logline() { printf "L|%s\n" "$*" >> "$PROGRESS"; }
               progress 5 "Connecting to Ubuntu"
               logline "Ubuntu session started."
               command -v java >/dev/null || { logline "ERROR: Java is required in Ubuntu"; exit 21; }
