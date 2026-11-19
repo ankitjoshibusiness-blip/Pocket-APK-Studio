@@ -270,15 +270,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
             set -e
             echo "SCAN_TERMUX=INSTALLED"
             export DEBIAN_FRONTEND=noninteractive
-            ROOTFS="$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu"
-            if [ ! -d "$ROOTFS" ]; then
+            ROOTFS="@D@PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu"
+            if [ ! -d "@D@ROOTFS" ]; then
                 pkg update -y
                 pkg install -y proot-distro
-                if [ ! -d "$ROOTFS" ]; then
+                if [ ! -d "@D@ROOTFS" ]; then
                     proot-distro install ubuntu
                 fi
             fi
-            [ -d "$ROOTFS" ]
+            [ -d "@D@ROOTFS" ]
             echo "SCAN_UBUNTU=INSTALLED"
             proot-distro login ubuntu -- bash -lc '
                 set -e
@@ -311,7 +311,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 echo "SCAN_BUILD_TOOLS=INSTALLED"
                 echo BUILD_SERVER_READY=1
             '
-        """.trimIndent()
+        """.trimIndent().replace("@D@", "$")
         val resultIntent = Intent(this, TermuxResultService::class.java).apply {
             putExtra("task_type", "environment_setup")
         }
