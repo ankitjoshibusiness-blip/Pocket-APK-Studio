@@ -656,6 +656,21 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisCard.addView(actionButton("Decompile APK with JADX", true) {
             pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         })
+        analysisCard.addView(label("DECOMPILE MODE", 10, 0xFF9AA7FF.toInt(), true))
+        val modePrefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+        val decompileModeSpinner = android.widget.Spinner(this).apply {
+            val modes = listOf("Balanced • Full source + resources", "Fast • Skip resources", "Full Recovery • Maximum detail")
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, modes)
+            val savedMode = modePrefs.getString("decompile_mode", "balanced")
+            setSelection(when (savedMode) { "fast" -> 1; "full" -> 2; else -> 0 })
+            setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    modePrefs.edit().putString("decompile_mode", when (position) { 1 -> "fast"; 2 -> "full"; else -> "balanced" }).apply()
+                }
+            })
+        }
+        analysisCard.addView(decompileModeSpinner, LinearLayout.LayoutParams(-1, dp(42)))
         recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(recoveryStatus)
         recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -1312,6 +1327,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun launchTermuxDecompile() {
+        val selectedMode = getSharedPreferences("recovery_state", MODE_PRIVATE).getString("decompile_mode", "balanced") ?: "balanced"
+        val modeArgs = if (selectedMode == "fast") "--no-res" else ""
+        val zipLevel = when (selectedMode) { "fast" -> "-0"; "full" -> "-9"; else -> "-1" }
         val command = """
             set -e
             SHARED="/storage/emulated/0"
@@ -1371,7 +1389,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
               progress 42 "Decompiling DEX and resources with JADX"
               logline "JADX started. Live tool output and resource monitoring follow."
               rm -f /tmp/pocket-jadx.log
-              "@D@JADXD/bin/jadx" --show-bad-code --threads-count "@D@THREADS" -d "@D@OUT" "@D@INPUT" > /tmp/pocket-jadx.log 2>&1 &
+              logline "Selected mode: ${selectedMode}; fast mode skips resource decoding."
+              "@D@JADXD/bin/jadx" --show-bad-code --threads-count "@D@THREADS" ${modeArgs} -d "@D@OUT" "@D@INPUT" > /tmp/pocket-jadx.log 2>&1 &
               JAD_PID=@D@!
               tail -n 0 -f /tmp/pocket-jadx.log >> "@D@PROGRESS" &
               TAIL_PID=@D@!
@@ -1402,7 +1421,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
               OUTPUT="/mnt/shared/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
               rm -f "@D@OUTPUT"
               cd "@D@(dirname "@D@OUT")"
-              zip -qr "@D@OUTPUT" "@D@(basename "@D@OUT")"
+              zip ${zipLevel} -qr "@D@OUTPUT" "@D@(basename "@D@OUT")"
               progress 95 "Verifying recovered ZIP"
               test -s "@D@OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
               logline "Recovered ZIP verified."
