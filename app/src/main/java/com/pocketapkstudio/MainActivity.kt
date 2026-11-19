@@ -112,6 +112,19 @@ class MainActivity : androidx.activity.ComponentActivity() {
         else @Suppress("DEPRECATION") registerReceiver(buildResultReceiver, filter)
         refreshBuildResult()
         refreshRecoveryResult()
+        refreshEnvironmentSetupResult()
+    }
+
+    private fun refreshEnvironmentSetupResult() {
+        if (!::setupScreen.isInitialized || setupScreen.visibility != View.VISIBLE) return
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val result = prefs.getString("environment_setup_result", null) ?: return
+        val ready = prefs.getBoolean("environment_setup_complete", false)
+        setupProgress.visibility = View.GONE
+        setupResults.text = result
+        setupStatus.text = prefs.getString("server_status", if (ready) "Environment setup complete." else "Setup needs attention.")
+        setupNextButton.isEnabled = ready
+        setupNextButton.alpha = if (ready) 1f else 0.45f
     }
 
     override fun onStop() {
@@ -248,6 +261,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupProgress.visibility = View.VISIBLE
         setupNextButton.isEnabled = false
         setupNextButton.alpha = 0.45f
+        getSharedPreferences("build_state", MODE_PRIVATE).edit()
+            .putBoolean("environment_setup_complete", false)
+            .remove("environment_setup_result")
+            .apply()
         serverStatus.text = "Checking and preparing Termux, Ubuntu, Java 17 and Android SDK…"
         val command = """
             set -e
