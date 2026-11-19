@@ -49,8 +49,20 @@ class TermuxResultService : IntentService("TermuxResultService") {
             } else {
                 "Automatic setup did not finish. Check Termux permission, allow-external-apps setting and internet connection.\n" + combined.takeLast(1800)
             }
+            val scanSummary = listOf(
+                "Termux" to "SCAN_TERMUX",
+                "Ubuntu" to "SCAN_UBUNTU",
+                "Java 17" to "SCAN_JAVA17",
+                "Android SDK" to "SCAN_ANDROID_SDK",
+                "Platform Tools" to "SCAN_PLATFORM_TOOLS",
+                "Build Tools" to "SCAN_BUILD_TOOLS"
+            ).joinToString("\\n") { item ->
+                item.first + ": " + if (stdout.contains(item.second + "=INSTALLED")) "INSTALLED" else "MISSING / NOT VERIFIED"
+            }
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
                 .putString("server_status", message)
+                .putString("environment_setup_result", scanSummary + if (successful) "\\n\\nAll components are ready." else "\\n\\nSetup incomplete. Review the error and retry.")
+                .putBoolean("environment_setup_complete", successful)
                 .apply()
             sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
             Log.i("PocketAPKStudio", "Environment setup finished. exit=$exitCode err=$errCode")
