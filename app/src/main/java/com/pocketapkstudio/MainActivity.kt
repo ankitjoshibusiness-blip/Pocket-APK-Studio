@@ -7,6 +7,8 @@ import android.content.IntentFilter
 import android.app.PendingIntent
 import android.app.AlertDialog
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -56,6 +58,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var analysisPermissions: TextView
     private lateinit var recoveryStatus: TextView
     private lateinit var recoveryProgress: ProgressBar
+    private lateinit var recoveryPercentText: TextView
+    private lateinit var recoveryStageText: TextView
+    private lateinit var recoveryLogText: TextView
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private val recoveryPollTask = object : Runnable {
+        override fun run() {
+            readRecoveryProgress()
+            if (getSharedPreferences("recovery_state", MODE_PRIVATE).getBoolean("running", false)) recoveryHandler.postDelayed(this, 1000)
+        }
+    }
     private lateinit var setupScreen: ScrollView
     private lateinit var setupStatus: TextView
     private lateinit var setupResults: TextView
@@ -642,11 +654,25 @@ class MainActivity : androidx.activity.ComponentActivity() {
         recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(recoveryStatus)
         recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            isIndeterminate = true
+            max = 100
+            isIndeterminate = false
             visibility = View.GONE
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
         }
-        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(6)))
+        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(8)))
+        recoveryPercentText = label("0%", 12, 0xFF78A5A8.toInt(), true)
+        analysisCard.addView(recoveryPercentText)
+        recoveryStageText = label("Waiting for decompilation…", 12, 0xFFB6BBC9.toInt(), false)
+        analysisCard.addView(recoveryStageText)
+        analysisCard.addView(space(8))
+        analysisCard.addView(label("LIVE PROCESS LOG", 11, 0xFF9AA7FF.toInt(), true))
+        recoveryLogText = label("No process logs yet.", 11, 0xFFB6BBC9.toInt(), false).apply { setTextIsSelectable(true) }
+        val recoveryLogScroll = ScrollView(this).apply {
+            addView(recoveryLogText)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(150))
+            isFillViewport = true
+        }
+        analysisCard.addView(recoveryLogScroll)
         exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
         analysisCard.addView(space(6))
         analysisCard.addView(exportRecoveryButton)
@@ -1121,7 +1147,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         recoveryStatus.text = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
         val running = prefs.getBoolean("running", false)
         recoveryProgress.visibility = if (running) View.VISIBLE else View.GONE
+        recoveryProgress.progress = prefs.getInt("percent", 0)
+        recoveryPercentText.text = "${recoveryProgress.progress}%"
+        recoveryStageText.text = prefs.getString("stage", if (running) "Working…" else "Waiting for decompilation…")
+        recoveryLogText.text = prefs.getString("live_log", prefs.getString("log", "No process logs yet.")) ?: "No process logs yet."
         recoveryFilePath = prefs.getString("zip_path", null)
+        if (running) startRecoveryProgressPolling() else recoveryHandler.removeCallbacks(recoveryPollTask)
         val file = recoveryFilePath?.let(::File)
         exportRecoveryButton.visibility = if (file?.isFile == true && file.length() > 0L) View.VISIBLE else View.GONE
     }
@@ -1137,9 +1168,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) { copyApkToRecoveryFolder(uri) }
+                createRecoveryProgressFile()
                 recoveryStatus.text = "APK copied. Starting JADX in Ubuntu…"
                 getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
-                    .putString("status", "APK copied. Starting JADX in Ubuntu…").apply()
+                    .putString("status", "APK copied. Starting JADX in Ubuntu…")
+                    .putInt("percent", 5).putString("stage", "APK copied. Connecting to Ubuntu…").apply()
                 launchTermuxDecompile()
             } catch (e: Exception) {
                 val message = "Could not prepare APK: ${e.message ?: "storage error"}"
@@ -1179,34 +1212,134 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private fun createRecoveryProgressFile() {
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Recovery"
+        val name = "decompile_progress.txt"
+        contentResolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+            arrayOf(name, folder + "/"))
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: error("Could not create live decompilation progress file")
+        contentResolver.openOutputStream(uri).use { output ->
+            requireNotNull(output).write("P|1|Starting decompilation…\\n".toByteArray())
+        }
+        getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+            .putString("progress_uri", uri.toString()).putInt("percent", 1)
+            .putString("stage", "Starting decompilation…").putString("live_log", "Progress tracking initialized.")
+            .apply()
+    }
+
+    private fun startRecoveryProgressPolling() {
+        recoveryHandler.removeCallbacks(recoveryPollTask)
+        recoveryHandler.post(recoveryPollTask)
+    }
+
+    private fun readRecoveryProgress() {
+        if (!::recoveryLogText.isInitialized) return
+        val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+        val uriText = prefs.getString("progress_uri", null) ?: return
+        try {
+            val content = contentResolver.openInputStream(Uri.parse(uriText))?.bufferedReader()?.use { it.readText() }.orEmpty()
+            var percent = prefs.getInt("percent", 1)
+            var stage = prefs.getString("stage", "Working…") ?: "Working…"
+            val logLines = mutableListOf<String>()
+            content.lineSequence().forEach { line ->
+                when {
+                    line.startsWith("P|") -> {
+                        val parts = line.split("|", limit = 3)
+                        if (parts.size == 3) {
+                            percent = parts[1].toIntOrNull()?.coerceIn(0, 100) ?: percent
+                            stage = parts[2]
+                        }
+                    }
+                    line.startsWith("L|") -> logLines.add(line.removePrefix("L|"))
+                    line.isNotBlank() -> logLines.add(line)
+                }
+            }
+            val log = logLines.takeLast(100).joinToString("\\n").ifBlank { "Waiting for JADX output…" }
+            recoveryProgress.progress = percent
+            recoveryPercentText.text = "$percent%"
+            recoveryStageText.text = stage
+            recoveryLogText.text = log
+            prefs.edit().putInt("percent", percent).putString("stage", stage).putString("live_log", log).apply()
+        } catch (_: Exception) {
+            recoveryStageText.text = "Reading live progress…"
+        }
+    }
+
     private fun launchTermuxDecompile() {
         val command = """
             set -e
             proot-distro login ubuntu -- bash -lc '
               set -e
-              command -v java >/dev/null || { echo "ERROR: Java 17 is required in Ubuntu"; exit 21; }
-              if ! command -v curl >/dev/null 2>&1; then apt-get update; apt-get install -y curl; fi
-              if ! command -v unzip >/dev/null 2>&1; then apt-get install -y unzip; fi
-              if ! command -v zip >/dev/null 2>&1; then apt-get install -y zip; fi
-              JADXD="${'$'}HOME/.local/share/jadx-1.5.1"
-              if [ ! -x "${'$'}JADXD/bin/jadx" ]; then
-                mkdir -p "${'$'}JADXD"
-                curl -L --fail --silent --show-error "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/jadx-1.5.1.zip
-                unzip -q -o /tmp/jadx-1.5.1.zip -d "${'$'}JADXD"
+              PROGRESS="/sdcard/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
+              progress() { printf "P|%s|%s\\n" "$1" "$2" >> "$PROGRESS"; }
+              logline() { printf "L|%s\\n" "$*" >> "$PROGRESS"; }
+              progress 5 "Connecting to Ubuntu"
+              logline "Ubuntu session started."
+              command -v java >/dev/null || { logline "ERROR: Java is required in Ubuntu"; exit 21; }
+              progress 10 "Checking JADX and required tools"
+              for tool in curl unzip zip; do
+                if ! command -v "$tool" >/dev/null 2>&1; then
+                  logline "Installing missing tool: $tool"
+                  apt-get update
+                  apt-get install -y "$tool"
+                fi
+              done
+              JADXD="$HOME/.local/share/jadx-1.5.1"
+              if [ ! -x "$JADXD/bin/jadx" ]; then
+                progress 18 "Downloading JADX 1.5.1"
+                logline "Downloading JADX from official GitHub release."
+                mkdir -p "$JADXD"
+                curl -L --fail --show-error "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/jadx-1.5.1.zip
+                progress 28 "Extracting JADX tools"
+                unzip -q -o /tmp/jadx-1.5.1.zip -d "$JADXD"
+              else
+                progress 28 "JADX already installed"
+                logline "Using existing JADX installation."
               fi
               INPUT="/sdcard/Download/PocketAPKStudio/Recovery/customer-manager.apk"
-              test -s "${'$'}INPUT" || { echo "ERROR: selected APK not found in Recovery folder"; exit 22; }
-              OUT="${'$'}HOME/pocket-apk-studio/recovered_customer_manager"
-              rm -rf "${'$'}OUT"
-              mkdir -p "${'$'}OUT"
-              "${'$'}JADXD/bin/jadx" --show-bad-code -d "${'$'}OUT" "${'$'}INPUT"
+              test -s "$INPUT" || { logline "ERROR: selected APK not found"; exit 22; }
+              progress 35 "Validating selected APK"
+              logline "APK input validated."
+              OUT="$HOME/pocket-apk-studio/recovered_customer_manager"
+              rm -rf "$OUT"
+              mkdir -p "$OUT"
+              progress 42 "Decompiling DEX and resources with JADX"
+              logline "JADX started. Live tool output follows."
+              rm -f /tmp/pocket-jadx.log
+              "$JADXD/bin/jadx" --show-bad-code -d "$OUT" "$INPUT" > /tmp/pocket-jadx.log 2>&1 &
+              JAD_PID=$!
+              tail -n 0 -f /tmp/pocket-jadx.log >> "$PROGRESS" &
+              TAIL_PID=$!
+              set +e
+              wait "$JAD_PID"
+              JAD_EXIT=$?
+              kill "$TAIL_PID" >/dev/null 2>&1
+              set -e
+              if [ "$JAD_EXIT" -ne 0 ]; then
+                logline "JADX failed with exit code $JAD_EXIT"
+                cat /tmp/pocket-jadx.log
+                exit "$JAD_EXIT"
+              fi
+              progress 82 "Decompilation complete. Preparing ZIP archive"
+              logline "JADX finished successfully."
               OUTPUT="/sdcard/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
-              rm -f "${'$'}OUTPUT"
-              cd "$(dirname "${'$'}OUT")"
-              zip -qr "${'$'}OUTPUT" "$(basename "${'$'}OUT")"
-              test -s "${'$'}OUTPUT" || { echo "ERROR: recovered ZIP was not created"; exit 23; }
-              echo "RECOVERY_SAVED=${'$'}OUTPUT"
+              rm -f "$OUTPUT"
+              cd "$(dirname "$OUT")"
+              zip -qr "$OUTPUT" "$(basename "$OUT")"
+              progress 95 "Verifying recovered ZIP"
+              test -s "$OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
+              logline "Recovered ZIP verified."
+              echo "RECOVERY_SAVED=$OUTPUT"
               echo "JADX_DECOMPILE_SUCCESS=1"
+              progress 100 "Decompilation successful"
+              logline "SUCCESS: recovered source ZIP is ready."
             '
         """.trimIndent()
         val resultIntent = Intent(this, TermuxResultService::class.java).putExtra("task_type", "apk_decompile")
@@ -1224,18 +1357,20 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         try {
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
-                .putString("status", "JADX is running in Ubuntu. Downloading/checking JADX, decompiling DEX files and preparing ZIP…")
-                .putBoolean("running", true)
-                .apply()
+                .putString("status", "JADX is running in Ubuntu. Live progress is being tracked.")
+                .putString("stage", "Connecting to Ubuntu…").putInt("percent", 1)
+                .putBoolean("running", true).putBoolean("failed", false).apply()
             startService(intent)
-            recoveryStatus.text = "JADX is running in Ubuntu. Decompiling DEX files and preparing ZIP…"
+            recoveryStatus.text = "JADX is running in Ubuntu. Live progress is being tracked."
             recoveryProgress.visibility = View.VISIBLE
+            startRecoveryProgressPolling()
         } catch (e: Exception) {
             val message = "Could not start JADX: ${e.message ?: "Termux permission or service error"}"
             recoveryStatus.text = message
             recoveryProgress.visibility = View.GONE
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
-                .putString("status", message).putBoolean("running", false).apply()
+                .putString("status", message).putString("stage", "Failed to start JADX")
+                .putBoolean("running", false).putBoolean("failed", true).apply()
         }
     }
 
