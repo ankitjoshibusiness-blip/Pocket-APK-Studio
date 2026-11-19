@@ -610,6 +610,72 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupCard.addView(space(8))
         setupCard.addView(actionButton("Device & build information") { showDeviceInfo() })
         settingsContent.addView(setupCard)
+        val recoverySettingsCard = card()
+        recoverySettingsCard.addView(label("APK TOOLS PREFERENCES", 12, 0xFF9AA7FF.toInt(), true))
+        recoverySettingsCard.addView(space(8))
+        recoverySettingsCard.addView(label("Default decompile mode", 14, 0xFFE2E8ED.toInt(), true))
+        recoverySettingsCard.addView(label("Choose how JADX processes APK files. You can change this any time.", 12, 0xFFB6BBC9.toInt(), false))
+        recoverySettingsCard.addView(space(8))
+        val modePrefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+        val modeLabels = listOf("Balanced • Full source + resources", "Fast • Skip resources", "Full Recovery • Maximum detail")
+        val modeValues = listOf("balanced", "fast", "full")
+        val modeSelector = TextView(this).apply {
+            textSize = 14f
+            setTextColor(0xFFF2F5F6.toInt())
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(14), 0)
+            background = premiumGradient(0xFF405968.toInt(), 0xFF344B59.toInt(), 12)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48))
+            isClickable = true
+            isFocusable = true
+        }
+        fun updateModeLabel() {
+            val selected = modePrefs.getString("decompile_mode", "balanced") ?: "balanced"
+            val index = modeValues.indexOf(selected).coerceAtLeast(0)
+            modeSelector.text = modeLabels[index] + "     ▾"
+        }
+        updateModeLabel()
+        modeSelector.setOnClickListener {
+            val popupContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                background = premiumGradient(0xFF405968.toInt(), 0xFF344B59.toInt(), 14)
+                alpha = 0f
+                scaleY = 0.92f
+                transformPivotY = 0f
+            }
+            val popup = android.widget.PopupWindow(popupContent, modeSelector.width.takeIf { it > 0 } ?: -1, -2, true).apply {
+                elevation = dp(12).toFloat()
+                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                isOutsideTouchable = true
+                animationStyle = android.R.style.Animation_Dialog
+            }
+            modeLabels.forEachIndexed { index, modeLabel ->
+                val option = TextView(this).apply {
+                    text = modeLabel
+                    textSize = 13f
+                    setTextColor(0xFFF2F5F6.toInt())
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), 0, dp(12), 0)
+                    minHeight = dp(46)
+                    background = premiumGradient(if ((modePrefs.getString("decompile_mode", "balanced") ?: "balanced") == modeValues[index]) 0xFF587C8B.toInt() else 0xFF405968.toInt(), 0xFF405968.toInt(), 10)
+                    setOnClickListener {
+                        modePrefs.edit().putString("decompile_mode", modeValues[index]).apply()
+                        updateModeLabel()
+                        popup.dismiss()
+                    }
+                }
+                popupContent.addView(option)
+                if (index < modeLabels.lastIndex) {
+                    popupContent.addView(space(4))
+                }
+            }
+            popup.showAsDropDown(modeSelector, 0, dp(4))
+            popupContent.animate().alpha(1f).scaleY(1f).setDuration(190L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+        }
+        recoverySettingsCard.addView(modeSelector)
+        settingsContent.addView(space(10))
+        settingsContent.addView(recoverySettingsCard)
         val toolsIntro = card().apply {
             setPadding(dp(16), dp(16), dp(16), dp(16))
             background = premiumGradient(0xFF405968.toInt(), 0xFF3A5260.toInt(), 2)
@@ -631,7 +697,21 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         }
         toolsHeading.addView(toolsBack, LinearLayout.LayoutParams(dp(44), dp(44)))
-        toolsHeading.addView(label("  Apk Tool", 22, 0xFFFFFFFF.toInt(), true))
+        toolsHeading.addView(label("  Apk Tool", 22, 0xFFFFFFFF.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
+        val toolsSettingsButton = TextView(this).apply {
+            text = "⚙"
+            textSize = 24f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFFF2F5F6.toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(0x224FFFFFF.toInt())
+            }
+            contentDescription = "APK Tools settings"
+            setOnClickListener { openSettingsPage?.invoke() }
+        }
+        toolsHeading.addView(toolsSettingsButton, LinearLayout.LayoutParams(dp(42), dp(42)))
+        toolsBack.setOnClickListener { openPage?.invoke(0) }
         toolsIntro.addView(toolsHeading)
         toolsIntro.addView(space(14))
         val toolsMenuPanel = LinearLayout(this).apply {
@@ -663,32 +743,29 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analyzeAction.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
         analyzeAction.background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 12)
         toolActions.addView(analyzeAction)
+        toolActions.addView(space(8))
         val decompileAction = actionButton("⟳   Decompile Apk", false) {
             pickDecompileApk.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream"))
         }
         decompileAction.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
         decompileAction.background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 12)
         toolActions.addView(decompileAction)
-        val modePrefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
-        val decompileModeSpinner = android.widget.Spinner(this).apply {
-            val modes = listOf("Balanced • Full source + resources", "Fast • Skip resources", "Full Recovery • Maximum detail")
-            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, modes)
-            val savedMode = modePrefs.getString("decompile_mode", "balanced")
-            setSelection(when (savedMode) { "fast" -> 1; "full" -> 2; else -> 0 })
-            setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
-                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    modePrefs.edit().putString("decompile_mode", when (position) { 1 -> "fast"; 2 -> "full"; else -> "balanced" }).apply()
-                }
-            })
-        }
-        toolActions.addView(label("DECOMPILE MODE", 10, 0xFFE1E8EC.toInt(), true))
-        toolActions.addView(decompileModeSpinner, LinearLayout.LayoutParams(-1, dp(42)))
         toolsMenuPanel.addView(toolActions)
         var menuExpanded = true
         menuToggle.setOnClickListener {
             menuExpanded = !menuExpanded
-            toolActions.visibility = if (menuExpanded) View.VISIBLE else View.GONE
+            if (menuExpanded) {
+                toolActions.visibility = View.VISIBLE
+                toolActions.alpha = 0f
+                toolActions.translationY = -dp(8).toFloat()
+                toolActions.animate().alpha(1f).translationY(0f).setDuration(210L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            } else {
+                toolActions.animate().alpha(0f).translationY(-dp(8).toFloat()).setDuration(150L).withEndAction {
+                    toolActions.visibility = View.GONE
+                    toolActions.alpha = 1f
+                    toolActions.translationY = 0f
+                }.start()
+            }
             menuToggle.text = if (menuExpanded) "⌃" else "⌄"
         }
         toolsIntro.addView(toolsMenuPanel)
