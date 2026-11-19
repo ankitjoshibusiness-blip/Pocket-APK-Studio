@@ -705,7 +705,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setTextColor(0xFFF2F5F6.toInt())
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(0x224FFFFFF.toInt())
+                setColor(0x224F5F6F.toInt())
             }
             contentDescription = "APK Tools settings"
             setOnClickListener { openSettingsPage?.invoke() }
