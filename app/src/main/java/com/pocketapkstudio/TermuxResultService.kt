@@ -14,7 +14,7 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
         if (intent.getStringExtra("task_type") == "apk_decompile") {
-            val outputPath = Regex("RECOVERY_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
+            val outputPath = Regex("RECOVERY_SAVED=([^\\r\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
             val outputFile = outputPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
             val successful = exitCode == 0 && errCode == -1 && outputFile != null
             val combined = buildString {
@@ -56,12 +56,12 @@ class TermuxResultService : IntentService("TermuxResultService") {
                 "Android SDK" to "SCAN_ANDROID_SDK",
                 "Platform Tools" to "SCAN_PLATFORM_TOOLS",
                 "Build Tools" to "SCAN_BUILD_TOOLS"
-            ).joinToString("\\n") { item ->
+            ).joinToString("\n") { item ->
                 item.first + ": " + if (stdout.contains(item.second + "=INSTALLED")) "INSTALLED" else "MISSING / NOT VERIFIED"
             }
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
                 .putString("server_status", message)
-                .putString("environment_setup_result", scanSummary + if (successful) "\\n\\nAll components are ready." else "\\n\\nSetup incomplete. Review the error and retry.")
+                .putString("environment_setup_result", scanSummary + if (successful) "\n\nAll components are ready." else "\n\nSetup incomplete. Review the error and retry.")
                 .putBoolean("environment_setup_complete", successful)
                 .apply()
             sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
@@ -71,14 +71,14 @@ class TermuxResultService : IntentService("TermuxResultService") {
         if (intent.getStringExtra("task_type") == "server_check") {
             val successful = exitCode == 0 && errCode == -1
             val ready = successful && stdout.contains("BUILD_SERVER_READY=1")
-            val failure = Regex("BUILD_SERVER_FAILED=([^\\r\\n]+)").find(stdout)?.groupValues?.get(1)
+            val failure = Regex("BUILD_SERVER_FAILED=([^\\r\n]+)").find(stdout)?.groupValues?.get(1)
             val detail = failure ?: errMessage.ifBlank { stderr.ifBlank { "Check Termux and Ubuntu setup." } }
             val message = if (ready) "Build server READY - Termux + Ubuntu + Java + Android SDK connected." else "Build server NOT READY. " + detail
             getSharedPreferences("build_state", MODE_PRIVATE).edit().putString("server_status", message).apply()
             sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
             return
         }
-        val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
+        val apkPath = Regex("APK_SAVED=([^\\r\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
         val verifiedApk = apkPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
         val successful = exitCode == 0 && errCode == -1 && verifiedApk != null
         val combined = buildString {
