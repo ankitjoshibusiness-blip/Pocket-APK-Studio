@@ -1294,9 +1294,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun launchTermuxDecompile() {
         val command = """
             set -e
-            proot-distro login ubuntu -- bash -lc '
+            SHARED="/storage/emulated/0"
+            RECOVERY="$SHARED/Download/PocketAPKStudio/Recovery"
+            if [ ! -d "$RECOVERY" ] || [ ! -r "$RECOVERY/customer-manager.apk" ]; then
+              echo "ERROR: Termux cannot access shared Downloads. Open Termux and run: termux-setup-storage, then allow storage permission and retry."
+              exit 24
+            fi
+            proot-distro login --bind "$SHARED:/mnt/shared" ubuntu -- bash -lc '
               set -e
-              PROGRESS="/sdcard/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
+              PROGRESS="/mnt/shared/Download/PocketAPKStudio/Recovery/decompile_progress.txt"
               progress() { printf "P|%s|%s\n" "@D@1" "@D@2" >> "@D@PROGRESS"; }
               logline() { printf "L|%s\n" "@D@*" >> "@D@PROGRESS"; }
               progress 5 "Connecting to Ubuntu"
@@ -1322,7 +1328,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 progress 28 "JADX already installed"
                 logline "Using existing JADX installation."
               fi
-              INPUT="/sdcard/Download/PocketAPKStudio/Recovery/customer-manager.apk"
+              INPUT="/mnt/shared/Download/PocketAPKStudio/Recovery/customer-manager.apk"
               test -s "@D@INPUT" || { logline "ERROR: selected APK not found"; exit 22; }
               progress 35 "Validating selected APK"
               logline "APK input validated."
@@ -1348,7 +1354,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
               fi
               progress 82 "Decompilation complete. Preparing ZIP archive"
               logline "JADX finished successfully."
-              OUTPUT="/sdcard/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
+              OUTPUT="/mnt/shared/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
               rm -f "@D@OUTPUT"
               cd "@D@(dirname "@D@OUT")"
               zip -qr "@D@OUTPUT" "@D@(basename "@D@OUT")"
