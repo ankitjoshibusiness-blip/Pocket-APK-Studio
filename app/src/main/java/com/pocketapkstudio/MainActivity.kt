@@ -697,16 +697,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         toolsHeading.addView(toolsBack, LinearLayout.LayoutParams(dp(44), dp(44)))
         toolsHeading.addView(label("  Apk Tool", 22, 0xFFFFFFFF.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
-        val toolsSettingsButton = TextView(this).apply {
-            text = "⚙"
-            textSize = 24f
-            gravity = android.view.Gravity.CENTER
-            setTextColor(0xFFF2F5F6.toInt())
+        val toolsSettingsButton = android.widget.ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_preferences)
+            imageTintList = android.content.res.ColorStateList.valueOf(0xFFF2F5F6.toInt())
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            setPadding(dp(9), dp(9), dp(9), dp(9))
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(0x224F5F6F.toInt())
+                setColor(0x334F5F6F)
             }
             contentDescription = "APK Tools settings"
+            isClickable = true
+            isFocusable = true
             setOnClickListener { openSettingsPage?.invoke() }
         }
         toolsHeading.addView(toolsSettingsButton, LinearLayout.LayoutParams(dp(42), dp(42)))
@@ -723,11 +725,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
         menuHeader.addView(label("•  Live Process Logs", 15, 0xFF111820.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
-        val menuToggle = actionButton("⌄", false) {}.apply {
-            textSize = 20f
+        val menuToggle = TextView(this).apply {
+            text = "⌄"
+            textSize = 25f
+            gravity = android.view.Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt())
             background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 24)
-            layoutParams = LinearLayout.LayoutParams(dp(52), dp(36))
+            minWidth = dp(52)
+            minHeight = dp(36)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Show or hide APK actions"
         }
         menuHeader.addView(menuToggle)
         toolsMenuPanel.addView(menuHeader)
@@ -751,6 +759,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         toolActions.addView(decompileAction)
         toolsMenuPanel.addView(toolActions)
         var menuExpanded = true
+        toolActions.visibility = View.VISIBLE
         menuToggle.setOnClickListener {
             menuExpanded = !menuExpanded
             if (menuExpanded) {
