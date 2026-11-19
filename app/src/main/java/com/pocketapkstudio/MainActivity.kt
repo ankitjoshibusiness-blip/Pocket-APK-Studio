@@ -1359,7 +1359,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 while kill -0 "@D@JAD_PID" 2>/dev/null; do
                   sleep 15
                   kill -0 "@D@JAD_PID" 2>/dev/null || break
-                  FILE_COUNT=@D@(find "@D@OUT" -type f 2>/dev/null | wc -l | tr -d ' ')
+                  FILE_COUNT=@D@(find "@D@OUT" -type f 2>/dev/null | wc -l | tr -d " ")
                   MEM_AVAILABLE_KB=@D@(grep MemAvailable /proc/meminfo 2>/dev/null | tr -s " " | cut -d " " -f 2)
                   MEM_AVAILABLE_MB=@D@((MEM_AVAILABLE_KB / 1024))
                   LOAD_AVG=@D@(tr " " "\n" < /proc/loadavg 2>/dev/null | head -n 3 | paste -sd "," - || echo unavailable)
