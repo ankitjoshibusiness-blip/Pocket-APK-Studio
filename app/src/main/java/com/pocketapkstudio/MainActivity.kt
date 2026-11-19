@@ -55,6 +55,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var analysisComponents: TextView
     private lateinit var analysisPermissions: TextView
     private lateinit var recoveryStatus: TextView
+    private lateinit var recoveryProgress: ProgressBar
     private lateinit var exportRecoveryButton: Button
     private var recoveryFilePath: String? = null
     private var analysisReportText: String = ""
@@ -547,6 +548,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisCard.addView(space(8))
         recoveryStatus = label("Decompilation has not started.", 12, 0xFFB6BBC9.toInt(), false)
         analysisCard.addView(recoveryStatus)
+        recoveryProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(0xFF78A5A8.toInt())
+        }
+        analysisCard.addView(recoveryProgress, LinearLayout.LayoutParams(-1, dp(6)))
         exportRecoveryButton = actionButton("Export recovered project ZIP") { shareRecoveredProject() }.apply { visibility = View.GONE }
         analysisCard.addView(space(6))
         analysisCard.addView(exportRecoveryButton)
@@ -973,21 +980,34 @@ class MainActivity : androidx.activity.ComponentActivity() {
         if (!::recoveryStatus.isInitialized || !::exportRecoveryButton.isInitialized) return
         val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
         recoveryStatus.text = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
+        val running = prefs.getBoolean("running", false)
+        recoveryProgress.visibility = if (running) View.VISIBLE else View.GONE
         recoveryFilePath = prefs.getString("zip_path", null)
         val file = recoveryFilePath?.let(::File)
         exportRecoveryButton.visibility = if (file?.isFile == true && file.length() > 0L) View.VISIBLE else View.GONE
     }
 
     private fun startApkDecompilation(uri: Uri) {
-        recoveryStatus.text = "Preparing APK for JADX decompilation…"
+        recoveryStatus.text = "Preparing selected APK…"
+        recoveryProgress.visibility = View.VISIBLE
         exportRecoveryButton.visibility = View.GONE
-        getSharedPreferences("recovery_state", MODE_PRIVATE).edit().clear().putString("status", "Preparing APK for JADX decompilation…").apply()
+        getSharedPreferences("recovery_state", MODE_PRIVATE).edit().clear()
+            .putString("status", "Preparing selected APK…")
+            .putBoolean("running", true)
+            .apply()
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) { copyApkToRecoveryFolder(uri) }
+                recoveryStatus.text = "APK copied. Starting JADX in Ubuntu…"
+                getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+                    .putString("status", "APK copied. Starting JADX in Ubuntu…").apply()
                 launchTermuxDecompile()
             } catch (e: Exception) {
-                recoveryStatus.text = "Could not prepare APK: ${e.message ?: "storage error"}"
+                val message = "Could not prepare APK: ${e.message ?: "storage error"}"
+                recoveryStatus.text = message
+                recoveryProgress.visibility = View.GONE
+                getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+                    .putString("status", message).putBoolean("running", false).apply()
             }
         }
     }
@@ -1065,12 +1085,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         try {
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
-                .putString("status", "JADX is running in Ubuntu. Keep Termux installed; this may take several minutes on first run.")
+                .putString("status", "JADX is running in Ubuntu. Downloading/checking JADX, decompiling DEX files and preparing ZIP…")
+                .putBoolean("running", true)
                 .apply()
             startService(intent)
-            recoveryStatus.text = "JADX is running in Ubuntu. First run downloads JADX and may take several minutes."
+            recoveryStatus.text = "JADX is running in Ubuntu. Decompiling DEX files and preparing ZIP…"
+            recoveryProgress.visibility = View.VISIBLE
         } catch (e: Exception) {
-            recoveryStatus.text = "Could not start JADX: ${e.message ?: "Termux permission or service error"}"
+            val message = "Could not start JADX: ${e.message ?: "Termux permission or service error"}"
+            recoveryStatus.text = message
+            recoveryProgress.visibility = View.GONE
+            getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+                .putString("status", message).putBoolean("running", false).apply()
         }
     }
 
