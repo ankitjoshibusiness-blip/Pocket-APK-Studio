@@ -713,6 +713,25 @@ class MainActivity : androidx.activity.ComponentActivity() {
         analysisCard.addView(space(6))
         analysisCard.addView(exportRecoveryButton)
         analysisCard.addView(space(8))
+        analysisCard.addView(actionButton("Copy decompile logs") {
+            val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+            val statusText = prefs.getString("status", "").orEmpty()
+            val stageText = prefs.getString("stage", "").orEmpty()
+            val fullLog = prefs.getString("log", "").orEmpty()
+            val liveLog = prefs.getString("live_log", "").orEmpty()
+            val report = buildString {
+                append("POCKET APK STUDIO — JADX DECOMPILE LOGS\n")
+                append("Status: ").append(statusText).append("\n")
+                append("Stage: ").append(stageText).append("\n")
+                append("Progress: ").append(prefs.getInt("percent", 0)).append("%\n\n")
+                append("FULL TERMUX OUTPUT:\n").append(fullLog.ifBlank { "No final output captured." })
+                append("\n\nLIVE PROCESS LOG:\n").append(liveLog.ifBlank { recoveryLogText.text })
+            }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JADX Decompile Logs", report))
+            Toast.makeText(this, "Decompile logs copied.", Toast.LENGTH_SHORT).show()
+        })
+        analysisCard.addView(space(6))
         analysisCard.addView(actionButton("Copy analysis report") {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("APK Analysis Report", analysisReportText))
@@ -1189,6 +1208,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val failed = prefs.getBoolean("failed", false)
         recoveryStatus.setTextColor(when {
             running -> 0xFF78A5A8.toInt()
+            prefs.getBoolean("partial", false) -> 0xFFFFC16B.toInt()
             failed -> 0xFFFF7777.toInt()
             prefs.getString("zip_path", null) != null -> 0xFF72C995.toInt()
             else -> 0xFFB6BBC9.toInt()
@@ -1411,13 +1431,22 @@ class MainActivity : androidx.activity.ComponentActivity() {
               JAD_EXIT=@D@?
               kill "@D@TAIL_PID" "@D@MON_PID" >/dev/null 2>&1
               set -e
+              PARTIAL=0
               if [ "@D@JAD_EXIT" -ne 0 ]; then
-                logline "JADX failed with exit code @D@JAD_EXIT"
-                cat /tmp/pocket-jadx.log
-                exit "@D@JAD_EXIT"
+                GENERATED_COUNT=@D@(find "@D@OUT" -type f 2>/dev/null | wc -l | tr -d " ")
+                logline "JADX returned exit code @D@JAD_EXIT after processing. Generated files: @D@GENERATED_COUNT."
+                if [ "@D@GENERATED_COUNT" -gt 0 ]; then
+                  PARTIAL=1
+                  logline "WARNING: Continuing with partial recovery because JADX produced usable files."
+                else
+                  logline "ERROR: JADX produced no recoverable files."
+                  cat /tmp/pocket-jadx.log
+                  exit "@D@JAD_EXIT"
+                fi
+              else
+                logline "JADX finished successfully."
               fi
-              progress 82 "Decompilation complete. Preparing ZIP archive"
-              logline "JADX finished successfully."
+              progress 82 "Decompilation finished. Preparing ZIP archive"
               OUTPUT="/mnt/shared/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
               rm -f "@D@OUTPUT"
               cd "@D@(dirname "@D@OUT")"
@@ -1426,9 +1455,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
               test -s "@D@OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
               logline "Recovered ZIP verified."
               echo "RECOVERY_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
-              echo "JADX_DECOMPILE_SUCCESS=1"
-              progress 100 "Decompilation successful"
-              logline "SUCCESS: recovered source ZIP is ready."
+              if [ "@D@PARTIAL" -eq 1 ]; then
+                echo "JADX_PARTIAL=1"
+                progress 100 "Partial recovery ZIP created"
+                logline "PARTIAL RECOVERY: ZIP created with available files; inspect JADX errors in the logs."
+              else
+                echo "JADX_DECOMPILE_SUCCESS=1"
+                progress 100 "Decompilation successful"
+                logline "SUCCESS: recovered source ZIP is ready."
+              fi
             '
         """.trimIndent().replace("@D@", "$")
         val resultIntent = Intent(this, TermuxResultService::class.java).putExtra("task_type", "apk_decompile")
