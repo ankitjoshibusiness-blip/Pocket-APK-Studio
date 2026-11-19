@@ -281,7 +281,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
-    private fun clearLegacyAiData()    private fun clearLegacyAiData() {
+    private fun clearLegacyAiData() {
         getSharedPreferences("openai_secure_settings", MODE_PRIVATE).edit().clear().apply()
         try {
             val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
