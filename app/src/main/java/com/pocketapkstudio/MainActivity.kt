@@ -56,6 +56,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var analysisPermissions: TextView
     private lateinit var recoveryStatus: TextView
     private lateinit var recoveryProgress: ProgressBar
+    private lateinit var setupScreen: ScrollView
+    private lateinit var setupStatus: TextView
+    private lateinit var setupResults: TextView
+    private lateinit var setupProgress: ProgressBar
+    private lateinit var setupNextButton: Button
     private lateinit var exportRecoveryButton: Button
     private var recoveryFilePath: String? = null
     private var analysisReportText: String = ""
@@ -72,7 +77,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 return
             }
             if (intent?.action == "com.pocketapkstudio.SERVER_STATUS") {
-                if (::serverStatus.isInitialized) serverStatus.text = prefs.getString("server_status", "Build server status unavailable.")
+                val message = prefs.getString("server_status", "Build server status unavailable.") ?: "Build server status unavailable."
+                if (::serverStatus.isInitialized) serverStatus.text = message
+                if (::setupScreen.isInitialized && setupScreen.visibility == View.VISIBLE) {
+                    setupProgress.visibility = View.GONE
+                    setupStatus.text = message
+                    setupResults.text = prefs.getString("environment_setup_result", message) ?: message
+                    setupNextButton.isEnabled = prefs.getBoolean("environment_setup_complete", false)
+                    setupNextButton.alpha = if (setupNextButton.isEnabled) 1f else 0.45f
+                }
                 return
             }
             status.text = prefs.getString("last_build_status", "Build finished. Check result.")
@@ -169,8 +182,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private val termuxPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startAutomaticEnvironmentSetup()
         else {
-            serverStatus.text = "Termux command permission is required for automatic setup."
-            showEnvironmentSetupWizard()
+            setupStatus.text = "Termux command permission was denied."
+            setupResults.text = "Allow the Termux RUN_COMMAND permission in Android settings, then tap Scan & Setup again."
+            setupProgress.visibility = View.GONE
         }
     }
 
@@ -178,35 +192,49 @@ class MainActivity : androidx.activity.ComponentActivity() {
         super.onCreate(savedInstanceState)
         clearLegacyAiData()
         buildScreen()
-        showEnvironmentSetupWizard()
+        val done = getSharedPreferences("build_state", MODE_PRIVATE).getBoolean("environment_setup_complete", false)
+        if (done) {
+            setupScreen.visibility = View.GONE
+            startAutomaticEnvironmentCheck()
+        } else {
+            setupScreen.visibility = View.VISIBLE
+            updateTermuxInstallStatus()
+        }
     }
 
     private fun showEnvironmentSetupWizard() {
+        if (::setupScreen.isInitialized) {
+            setupScreen.visibility = View.VISIBLE
+            updateTermuxInstallStatus()
+        }
+    }
+
+    private fun updateTermuxInstallStatus() {
+        val installed = packageManager.getLaunchIntentForPackage("com.termux") != null
+        setupStatus.text = if (installed) "Termux detected. Ready to scan the build environment."
+            else "Termux is not installed. Install it first, then return here."
+        setupResults.text = if (installed) {
+            "Termux: INSTALLED\nUbuntu: Waiting for scan\nJava 17: Waiting for scan\nAndroid SDK: Waiting for scan\nPlatform Tools: Waiting for scan\nBuild Tools: Waiting for scan"
+        } else {
+            "Termux: NOT INSTALLED\nUbuntu: Not checked\nJava 17: Not checked\nAndroid SDK: Not checked\nPlatform Tools: Not checked\nBuild Tools: Not checked"
+        }
+    }
+
+    private fun beginEnvironmentSetup() {
         if (packageManager.getLaunchIntentForPackage("com.termux") == null) {
-            serverStatus.text = "Termux is not installed. Install it to prepare the build environment."
-            AlertDialog.Builder(this)
-                .setTitle("Welcome to Pocket APK Studio")
-                .setMessage("First, install the official Termux app. After installation, reopen Pocket APK Studio and it will check and prepare only the missing build components.")
-                .setPositiveButton("Install Termux") { _, _ ->
-                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/"))) }
-                    catch (_: Exception) { Toast.makeText(this, "Could not open Termux download page.", Toast.LENGTH_LONG).show() }
-                }
-                .setNegativeButton("Later", null)
-                .show()
+            updateTermuxInstallStatus()
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("Automatic Environment Setup")
-            .setMessage("Pocket APK Studio will check Termux, Ubuntu, Java 17 and Android SDK. Already installed components will be kept; only missing tools will be installed. This may download several hundred MB.")
-            .setPositiveButton("Check & Setup") { _, _ ->
-                val permission = "com.termux.permission.RUN_COMMAND"
-                if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    serverStatus.text = "Waiting for Termux command permission…"
-                    termuxPermissionLauncher.launch(permission)
-                } else startAutomaticEnvironmentSetup()
-            }
-            .setNegativeButton("Later") { _, _ -> serverStatus.text = "Environment setup postponed. Open Preferences to check the build environment." }
-            .show()
+        val permission = "com.termux.permission.RUN_COMMAND"
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            setupStatus.text = "Waiting for Termux command permission…"
+            termuxPermissionLauncher.launch(permission)
+        } else startAutomaticEnvironmentSetup()
+    }
+
+    private fun openTermuxDownloadPage() {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/"))) }
+        catch (_: Exception) { Toast.makeText(this, "Could not open Termux download page.", Toast.LENGTH_LONG).show() }
     }
 
     private fun startAutomaticEnvironmentSetup() {
