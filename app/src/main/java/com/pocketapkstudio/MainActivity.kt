@@ -1335,17 +1335,40 @@ class MainActivity : androidx.activity.ComponentActivity() {
               OUT="@D@HOME/pocket-apk-studio/recovered_customer_manager"
               rm -rf "@D@OUT"
               mkdir -p "@D@OUT"
+              CPU_THREADS=@D@(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+              MEM_AVAILABLE_MB=@D@(awk '/MemAvailable/ {print int(@D@2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
+              if [ "@D@MEM_AVAILABLE_MB" -lt 2048 ]; then
+                THREADS=1
+              elif [ "@D@MEM_AVAILABLE_MB" -lt 4096 ]; then
+                THREADS=2
+              else
+                THREADS=@D@((CPU_THREADS / 2))
+                [ "@D@THREADS" -lt 1 ] && THREADS=1
+                [ "@D@THREADS" -gt 4 ] && THREADS=4
+              fi
+              logline "Performance profile: @D@THREADS JADX threads; @D@MEM_AVAILABLE_MB MB available RAM; @D@CPU_THREADS CPU threads detected."
               progress 42 "Decompiling DEX and resources with JADX"
-              logline "JADX started. Live tool output follows."
+              logline "JADX started. Live tool output and resource monitoring follow."
               rm -f /tmp/pocket-jadx.log
-              "@D@JADXD/bin/jadx" --show-bad-code -d "@D@OUT" "@D@INPUT" > /tmp/pocket-jadx.log 2>&1 &
+              "@D@JADXD/bin/jadx" --show-bad-code --threads-count "@D@THREADS" -d "@D@OUT" "@D@INPUT" > /tmp/pocket-jadx.log 2>&1 &
               JAD_PID=@D@!
               tail -n 0 -f /tmp/pocket-jadx.log >> "@D@PROGRESS" &
               TAIL_PID=@D@!
+              (
+                while kill -0 "@D@JAD_PID" 2>/dev/null; do
+                  sleep 15
+                  kill -0 "@D@JAD_PID" 2>/dev/null || break
+                  FILE_COUNT=@D@(find "@D@OUT" -type f 2>/dev/null | wc -l | tr -d ' ')
+                  MEM_AVAILABLE_MB=@D@(awk '/MemAvailable/ {print int(@D@2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+                  LOAD_AVG=@D@(cut -d ' ' -f 1-3 /proc/loadavg 2>/dev/null || echo unavailable)
+                  logline "Live monitor: @D@FILE_COUNT files generated; @D@MEM_AVAILABLE_MB MB RAM available; CPU load @D@LOAD_AVG."
+                done
+              ) &
+              MON_PID=@D@!
               set +e
               wait "@D@JAD_PID"
               JAD_EXIT=@D@?
-              kill "@D@TAIL_PID" >/dev/null 2>&1
+              kill "@D@TAIL_PID" "@D@MON_PID" >/dev/null 2>&1
               set -e
               if [ "@D@JAD_EXIT" -ne 0 ]; then
                 logline "JADX failed with exit code @D@JAD_EXIT"
@@ -1361,7 +1384,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
               progress 95 "Verifying recovered ZIP"
               test -s "@D@OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
               logline "Recovered ZIP verified."
-              echo "RECOVERY_SAVED=@D@OUTPUT"
+              echo "RECOVERY_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
               echo "JADX_DECOMPILE_SUCCESS=1"
               progress 100 "Decompilation successful"
               logline "SUCCESS: recovered source ZIP is ready."
