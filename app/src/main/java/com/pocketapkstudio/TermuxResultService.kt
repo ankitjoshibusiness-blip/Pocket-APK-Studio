@@ -29,6 +29,7 @@ class TermuxResultService : IntentService("TermuxResultService") {
             }
             getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
                 .putString("status", status)
+                .putBoolean("running", false)
                 .putString("zip_path", if (successful) outputFile!!.absolutePath else null)
                 .putString("log", combined.takeLast(30000))
                 .apply()
