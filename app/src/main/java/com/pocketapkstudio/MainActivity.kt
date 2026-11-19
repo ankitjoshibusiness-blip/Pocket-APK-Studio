@@ -1145,7 +1145,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun refreshRecoveryResult() {
         if (!::recoveryStatus.isInitialized || !::exportRecoveryButton.isInitialized) return
         val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
-        recoveryStatus.text = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
+        val savedStatus = prefs.getString("status", "Decompilation has not started.") ?: "Decompilation has not started."
+        if (savedStatus != "Decompilation has not started." || prefs.getBoolean("running", false)) {
+            analysisCard.visibility = View.VISIBLE
+        }
+        recoveryStatus.text = savedStatus
         val running = prefs.getBoolean("running", false)
         val failed = prefs.getBoolean("failed", false)
         recoveryStatus.setTextColor(when {
@@ -1166,7 +1170,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun startApkDecompilation(uri: Uri) {
+        // The JADX progress UI lives inside analysisCard; reveal it when decompilation starts.
+        analysisCard.visibility = View.VISIBLE
         recoveryStatus.text = "Preparing selected APK…"
+        recoveryPercentText.text = "1%"
+        recoveryStageText.text = "Preparing selected APK…"
+        recoveryLogText.text = "Starting decompilation…"
+        recoveryProgress.progress = 1
         recoveryProgress.visibility = View.VISIBLE
         exportRecoveryButton.visibility = View.GONE
         getSharedPreferences("recovery_state", MODE_PRIVATE).edit().clear()
