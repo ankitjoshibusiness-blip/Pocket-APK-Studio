@@ -518,10 +518,23 @@ class MainActivity : androidx.activity.ComponentActivity() {
             gravity = android.view.Gravity.CENTER
         }
         fun heroActionArrow(): TextView {
-            return label("➜", 23, 0xFFFFFFFF.toInt(), true).apply {
+            return label("→", 25, 0xFFFFFFFF.toInt(), true).apply {
                 gravity = android.view.Gravity.CENTER
-                setPadding(dp(9), dp(1), dp(9), dp(1))
-                background = premiumGradient(0xFF315E70.toInt(), 0xFF244654.toInt(), 50)
+                setPadding(dp(12), dp(4), dp(12), dp(4))
+                minWidth = dp(52)
+                minHeight = dp(42)
+                background = android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(0xFF3E8790.toInt(), 0xFF24566A.toInt())
+                ).apply {
+                    cornerRadius = dp(16).toFloat()
+                    setStroke(dp(1), 0xFF75AEB1.toInt())
+                }
+                elevation = dp(4).toFloat()
+                contentDescription = "Open Workspace"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { openPage?.invoke(1) }
             }
         }
         fun heroText(text: String): TextView {
@@ -540,7 +553,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
         workspaceHero.addView(workspaceActions)
         homeContent.addView(workspaceHero)
         homeContent.addView(space(10))
-        homeContent.addView(welcomeMenuItem("</>", "Workspace") { openPage?.invoke(1) })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
             val repoUrl = EditText(this).apply {
