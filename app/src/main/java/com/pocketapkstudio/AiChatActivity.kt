@@ -214,7 +214,7 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
 
     private fun geminiRequest(key: String, userText: String): String {
         val body = JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt())))
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt()))))
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", userText)))))
             .put("generationConfig", JSONObject().put("temperature", 0.15).put("maxOutputTokens", 8192).put("responseMimeType", "application/json"))
         val response = JSONObject(post("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=" + key, body))
