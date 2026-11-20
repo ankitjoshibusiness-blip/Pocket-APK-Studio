@@ -83,6 +83,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private var importedZipName: String? = null
     private var projectIsGradle = false
     private var projectIsFlutter = false
+    private var navigateToWorkflow: (() -> Unit)? = null
     private val buildResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
@@ -205,6 +206,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             projectType.text = "Changes saved. Build will use the edited project."
             status.text = "Edited project ready to build."
             if (result.data?.getBooleanExtra("runtime_preview_build", false) == true) {
+                navigateToWorkflow?.invoke()
                 status.text = "Preparing a real device build from the edited project…"
                 startLocalBuild()
             }
@@ -490,10 +492,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }.start() }
             }
         }
-        homeContent.addView(welcomeMenuItem("＋", "Create project") { showQuickStart() })
-        homeContent.addView(welcomeMenuItem("▣", "Open existing project") {
+        val workflowActions = card()
+        workflowActions.addView(label("WORKFLOW", 13, 0xFF9AA7FF.toInt(), true))
+        workflowActions.addView(space(8))
+        workflowActions.addView(label("Create a project or open an existing Android project, then build and monitor it here.", 13, 0xFFB6BBC9.toInt(), false))
+        workflowActions.addView(space(10))
+        workflowActions.addView(actionButton("＋  Create Project", true) { showQuickStart() })
+        workflowActions.addView(space(8))
+        workflowActions.addView(actionButton("▣  Open Existing Project") {
             pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
         })
+        homeContent.addView(workflowActions)
+        homeContent.addView(space(10))
         homeContent.addView(welcomeMenuItem("</>", "Workspace") { openPage?.invoke(1) })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
@@ -587,7 +597,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
-        editorContent.addView(buildCard)
+        homeContent.addView(buildCard)
         toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -605,7 +615,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        editorContent.addView(logCard)
+        homeContent.addView(logCard)
         homeContent.addView(space(18))
 
         val setupCard = card()
@@ -950,6 +960,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         }
         openPage = { pageIndex -> showPage(pageIndex) }
+        navigateToWorkflow = { showPage(0) }
         openSettingsPage = { showPage(4) }
 
         fun addPageBackHeader(target: LinearLayout, title: String, home: Boolean = false) {
@@ -981,8 +992,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(4), dp(6), dp(4), dp(6))
             background = premiumGradient(0xFF273640.toInt(), 0xFF202A33.toInt(), 18)
         }
-        homeTab = navButton("⌂", "Home") { showPage(0) }
-        editorTab = navButton("</>", "Editor") { showPage(1) }
+        homeTab = navButton("⇄", "Workflow") { showPage(0) }
+        editorTab = navButton("</>", "Workspace") { showPage(1) }
         toolsTab = navButton("⬡", "Tools") { showPage(2) }
         previewTab = navButton("◉", "Preview") { showPage(3) }
         settingsTab = navButton("⚙", "Settings") { showPage(4) }
@@ -1001,7 +1012,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupScreen = buildEnvironmentSetupPage()
         pageContainer.addView(setupScreen, FrameLayout.LayoutParams(-1, -1))
         root.addView(pageContainer, LinearLayout.LayoutParams(-1, 0, 1f))
-        // Bottom navigation removed; navigation is available from the Welcome screen and page back controls.
+        root.addView(tabBar, LinearLayout.LayoutParams(-1, dp(62)))
         pages.forEachIndexed { index, view -> view.visibility = if (index == 0) View.VISIBLE else View.GONE }
         homeTab.background = premiumGradient(0xFF568B91.toInt(), 0xFF4D7F85.toInt(), 13)
         setContentView(root)
