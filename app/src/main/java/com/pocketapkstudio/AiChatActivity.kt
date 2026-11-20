@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Typeface
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -32,6 +34,10 @@ class AiChatActivity : Activity() {
     private lateinit var send: Button
     private lateinit var progress: ProgressBar
     private lateinit var providerInfo: TextView
+    private lateinit var activityLog: TextView
+    private lateinit var attachmentInfo: TextView
+    private data class AiAttachment(val name: String, val mime: String, val bytes: ByteArray, val text: String?)
+    private val attachments = mutableListOf<AiAttachment>()
     private val worker = Executors.newSingleThreadExecutor()
     private val prefs by lazy { getSharedPreferences("ai_developer_settings", MODE_PRIVATE) }
     private val history = mutableListOf<Pair<String, String>>()
@@ -44,7 +50,9 @@ class AiChatActivity : Activity() {
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { finish(); return }
         buildUi()
-        addMessage("AI DEVELOPER", "Namaste! Gujarati ke English ma command lakho. Hu current project ni files inspect kari code changes taiyar karish. Changes apply karta pehla review ane backup thase. API key mate ⚙ dabavo.")
+        addMessage("AI DEVELOPER", "Namaste! Gujarati ke English ma command lakho. Attachments pan mokli shako. Changes apply karta pehla review ane backup thase. API key mate ⚙ dabavo.")
+        logActivity("AI Developer session started")
+        logActivity("Project workspace connected: " + projectRoot.name)
         val initialPrompt = intent.getStringExtra("initial_prompt").orEmpty()
         if (initialPrompt.isNotBlank()) {
             prompt.setText(initialPrompt)
@@ -79,12 +87,22 @@ class AiChatActivity : Activity() {
             background = rounded(0xFF256B72.toInt(), 11)
         }
         root.addView(previewButton, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(6) })
+        val activityHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(3), dp(4), dp(3), dp(2)) }
+        activityHeader.addView(TextView(this).apply { text = "LIVE ACTIVITY"; textSize = 11f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF9FB5C7.toInt()) }, LinearLayout.LayoutParams(0, dp(28), 1f))
+        activityHeader.addView(button("Clear") { activityLog.text = "Activity log cleared."; logActivity("Viewer ready") })
+        root.addView(activityHeader)
+        val activityScroll = ScrollView(this).apply { background = rounded(0xFF101A22.toInt(), 10); setPadding(dp(9), dp(6), dp(9), dp(6)) }
+        activityLog = TextView(this).apply { text = "Waiting for AI activity…"; textSize = 11f; typeface = Typeface.MONOSPACE; setTextColor(0xFFB8D3E5.toInt()); setTextIsSelectable(true) }
+        activityScroll.addView(activityLog)
+        root.addView(activityScroll, LinearLayout.LayoutParams(-1, dp(112)).apply { topMargin = dp(3) })
         scroll = ScrollView(this).apply { isFillViewport = true; setPadding(0, dp(8), 0, dp(8)) }
         messages = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(messages)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(7) })
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(5) })
         progress = ProgressBar(this).apply { visibility = View.GONE; isIndeterminate = true }
         root.addView(progress, LinearLayout.LayoutParams(dp(28), dp(28)).apply { gravity = Gravity.CENTER })
+        attachmentInfo = TextView(this).apply { text = "No attachments"; textSize = 11f; setTextColor(0xFF9FB5C7.toInt()); setPadding(dp(4), dp(3), dp(4), dp(3)) }
+        root.addView(attachmentInfo)
         val composer = LinearLayout(this).apply { gravity = Gravity.BOTTOM; setPadding(dp(7), dp(5), dp(7), dp(5)); background = rounded(0xFF24313D.toInt(), 15) }
         prompt = EditText(this).apply {
             hint = "App ma shu badalvu chhe?"; textSize = 14f; minLines = 1; maxLines = 5; background = null
@@ -92,6 +110,7 @@ class AiChatActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         composer.addView(prompt, LinearLayout.LayoutParams(0, -2, 1f))
+        composer.addView(button("＋") { pickAttachments() }, LinearLayout.LayoutParams(dp(42), dp(46)).apply { rightMargin = dp(4) })
         send = button("➤") { sendMessage() }
         composer.addView(send, LinearLayout.LayoutParams(dp(50), dp(46)))
         root.addView(composer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
@@ -146,7 +165,7 @@ class AiChatActivity : Activity() {
     private fun sendMessage() {
         if (busy) return
         val question = prompt.text.toString().trim()
-        if (question.isBlank()) return
+        if (question.isBlank() && attachments.isEmpty()) return
         val g = readSecret("gemini_key")
         val r = readSecret("groq_key")
         val mode = prefs.getString("provider", "auto") ?: "auto"
@@ -156,11 +175,19 @@ class AiChatActivity : Activity() {
             return
         }
         prompt.setText("")
-        addMessage("YOU", question)
+        val attachmentSnapshot = attachments.toList()
+        attachments.clear()
+        updateAttachmentInfo()
+        addMessage("YOU", (if (question.isBlank()) "Please inspect attached file(s)." else question) + if (attachmentSnapshot.isNotEmpty()) "\\nAttachments: " + attachmentSnapshot.joinToString { it.name } else "")
+        logActivity("Request submitted to AI provider")
+        logActivity("Reading project files and attached documents…")
         busy = true; send.isEnabled = false; progress.visibility = View.VISIBLE
         worker.execute {
             try {
-                val result = requestAi(question, projectContext(), mode, g, r)
+                val context = projectContext()
+                runOnUiThread { logActivity("Project context prepared (" + context.length + " characters)") }
+                val result = requestAi(if (question.isBlank()) "Read and understand the attached files, then explain their contents and any relevant project impact." else question, context, mode, g, r, attachmentSnapshot)
+                runOnUiThread { logActivity("AI response received; parsing structured response…") }
                 val json = parseResponse(result)
                 val answer = json.optString("message", "AI response ready.")
                 val array = json.optJSONArray("files") ?: JSONArray()
@@ -177,16 +204,19 @@ class AiChatActivity : Activity() {
                 runOnUiThread {
                     history.add(question to answer)
                     addMessage("AI DEVELOPER", answer)
+                    logActivity("Analysis completed")
                     pending = staged
                     if (pending.isNotEmpty()) {
                         addMessage("STATUS", pending.size.toString() + " file(s) ready. Review pachi j apply thase.")
+                        pending.keys.forEach { logActivity("Prepared file change: " + it) }
+                        logActivity("Waiting for your approval to apply changes")
                         reviewChanges()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread { addMessage("AI DEVELOPER", "Request failed: " + (e.message ?: "Unknown error") + "\nAPI key, internet ane free-tier limit check karo.") }
             } finally {
-                runOnUiThread { busy = false; send.isEnabled = true; progress.visibility = View.GONE }
+                runOnUiThread { busy = false; send.isEnabled = true; progress.visibility = View.GONE; logActivity("Request finished") }
             }
         }
     }
@@ -219,14 +249,14 @@ Use safe project-relative paths only. Never output secrets, API keys, keystores,
 For build fixes, use evidence from the supplied log. If uncertain, explain instead of guessing.
 """.trimIndent()
 
-    private fun requestAi(question: String, context: String, mode: String, gemini: String, groq: String): String {
+    private fun requestAi(question: String, context: String, mode: String, gemini: String, groq: String, attached: List<AiAttachment>): String {
         val recent = history.takeLast(6).joinToString("\n") { "USER: " + it.first + "\nAI: " + it.second }
         val promptText = "PROJECT CONTEXT:\n" + context + "\nRECENT CHAT:\n" + recent + "\nUSER REQUEST:\n" + question
         if (mode == "gemini") return geminiRequest(gemini, promptText)
         if (mode == "groq") return groqRequest(groq, promptText)
         var first: Exception? = null
-        if (gemini.isNotBlank()) try { return geminiRequest(gemini, promptText) } catch (e: Exception) { first = e }
-        if (groq.isNotBlank()) try { return groqRequest(groq, promptText) } catch (e: Exception) {
+        if (gemini.isNotBlank()) try { return geminiRequest(gemini, promptText, attached.filter { it.text == null }) } catch (e: Exception) { first = e }
+        if (groq.isNotBlank() && attached.none { it.text == null }) try { return groqRequest(groq, promptText) } catch (e: Exception) {
             throw IllegalStateException("Gemini: " + (first?.message ?: "not configured") + " | Groq: " + (e.message ?: "failed"))
         }
         throw first ?: IllegalStateException("No AI provider configured")
@@ -245,10 +275,15 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
         return response
     }
 
-    private fun geminiRequest(key: String, userText: String): String {
+    private fun geminiRequest(key: String, userText: String, binaryAttachments: List<AiAttachment> = emptyList()): String {
         val systemParts = JSONArray().put(JSONObject().put("text", systemPrompt()))
         val systemInstruction = JSONObject().put("parts", systemParts)
         val userParts = JSONArray().put(JSONObject().put("text", userText))
+        binaryAttachments.forEach { item ->
+            userParts.put(JSONObject().put("inlineData", JSONObject()
+                .put("mimeType", item.mime)
+                .put("data", Base64.encodeToString(item.bytes, Base64.NO_WRAP))))
+        }
         val userContent = JSONObject().put("role", "user").put("parts", userParts)
         val contents = JSONArray().put(userContent)
         val generation = JSONObject()
@@ -370,6 +405,8 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
                 target.parentFile?.mkdirs(); staged.copyTo(target, overwrite = true); paths.put(path)
             }
             prefs.edit().putString("last_backup", backup.absolutePath).putString("last_paths", paths.toString()).apply()
+            pending.keys.forEach { logActivity("Applied changes to " + it) }
+            logActivity("All staged changes applied; backup created")
             val count = pending.size; pending.clear()
             addMessage("STATUS", count.toString() + " file(s) applied. Backup saved. Editor par pacha jai updated files check karo; pachhi Save & Return thi build karo.")
         } catch (e: Exception) { addMessage("STATUS", "Apply error: " + e.message + ". Backup available chhe.") }
@@ -392,13 +429,84 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
                         if (saved.isFile) saved.copyTo(target, overwrite = true) else target.delete()
                     }
                     prefs.edit().remove("last_backup").remove("last_paths").apply()
+                    logActivity("Last AI changes restored from backup")
                     addMessage("STATUS", "Last AI changes undo thai gaya.")
                 } catch (e: Exception) { addMessage("STATUS", "Undo failed: " + e.message) }
             }.show()
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+    private fun logActivity(message: String) {
+        if (!::activityLog.isInitialized) return
+        val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val line = "[$stamp] $message"
+        activityLog.append("\\n" + line)
+        val parent = activityLog.parent as? ScrollView
+        parent?.post { parent.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun updateAttachmentInfo() {
+        if (!::attachmentInfo.isInitialized) return
+        attachmentInfo.text = if (attachments.isEmpty()) "No attachments" else
+            attachments.joinToString("  •  ") { it.name } + "   (tap + to add more)"
+    }
+
+    private fun pickAttachments() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(pick, 7201)
+    }
+
+    private fun loadAttachment(uri: Uri) {
+        try {
+            val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+            val name = queryDisplayName(uri) ?: "attachment_" + (attachments.size + 1)
+            val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    total += n
+                    require(total <= 8 * 1024 * 1024) { "Attachment 8 MB karta nani rakho." }
+                    out.write(buffer, 0, n)
+                }
+                out.toByteArray()
+            } ?: throw IllegalStateException("File read nathi thai")
+            val text = if (mime.startsWith("text/") || name.substringAfterLast('.', "").lowercase() in extensions ||
+                mime in setOf("application/json", "application/xml")) {
+                String(bytes, Charsets.UTF_8)
+            } else null
+            if (text == null && !(mime.startsWith("image/") || mime == "application/pdf")) {
+                throw IllegalArgumentException("Aa file type currently supported nathi. Image, PDF, text/code file try karo.")
+            }
+            attachments.add(AiAttachment(name, mime, bytes, text))
+            updateAttachmentInfo()
+            logActivity("Attachment loaded: $name (" + bytes.size + " bytes)")
+        } catch (e: Exception) {
+            Toast.makeText(this, (e.message ?: "Attachment read failed"), Toast.LENGTH_LONG).show()
+            logActivity("Attachment error: " + (e.message ?: "unknown"))
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7201 && resultCode == RESULT_OK && data != null) {
+            val clip = data.clipData
+            if (clip != null) {
+                for (i in 0 until clip.itemCount) loadAttachment(clip.getItemAt(i).uri)
+            } else data.data?.let { loadAttachment(it) }
+        }
         if (requestCode == 7106 && resultCode == RESULT_OK) {
             setResult(RESULT_OK, data)
             finish()
