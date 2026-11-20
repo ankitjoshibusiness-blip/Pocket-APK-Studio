@@ -649,7 +649,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
-        homeContent.addView(buildCard)
+        editorContent.addView(buildCard)
         toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -667,7 +667,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        homeContent.addView(logCard)
+        editorContent.addView(logCard)
         homeContent.addView(space(18))
 
         val setupCard = card()
