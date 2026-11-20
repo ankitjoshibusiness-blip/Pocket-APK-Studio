@@ -204,6 +204,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
             projectName.text = "Edited project ZIP"
             projectType.text = "Changes saved. Build will use the edited project."
             status.text = "Edited project ready to build."
+            if (result.data?.getBooleanExtra("runtime_preview_build", false) == true) {
+                status.text = "Preparing a real device build from the edited project…"
+                startLocalBuild()
+            }
         }
     }
 
