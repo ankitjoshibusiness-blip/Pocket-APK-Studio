@@ -39,9 +39,10 @@ class LivePreviewActivity : Activity() {
         header.addView(Button(this).apply { text = "‹ Back"; isAllCaps = false; setOnClickListener { finish() } }, LinearLayout.LayoutParams(-2, dp(44)))
         title = TextView(this).apply { text = "LIVE UI PREVIEW"; textSize = 17f; setTextColor(Color.WHITE); setPadding(dp(12), 0, 0, 0) }
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(Button(this).apply { text = "↻"; contentDescription = "Reload preview"; setOnClickListener { chooseLayout() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
+        header.addView(Button(this).apply { text = "☷"; contentDescription = "Choose screen"; setOnClickListener { chooseLayout() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
+        header.addView(Button(this).apply { text = "↻"; contentDescription = "Refresh preview"; setOnClickListener { refreshCurrentPreview() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
-        root.addView(TextView(this).apply { text = "Android layout preview · XML and Compose source"; textSize = 11f; setTextColor(0xFFB6C5D2.toInt()); setPadding(dp(4), dp(8), dp(4), dp(6)) })
+        root.addView(TextView(this).apply { text = "Source preview is an approximation. Use Build & Run on Device for the exact compiled app."; textSize = 11f; setTextColor(0xFFFFD28A.toInt()); setPadding(dp(4), dp(8), dp(4), dp(6)) })
         val deviceControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         fun deviceButton(label: String, width: Int, height: Int, rotate: Boolean = false) = Button(this).apply {
             text = label
@@ -130,12 +131,51 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun findLayouts() {
-        layouts = projectRoot.walkTopDown().maxDepth(8).filter { it.isFile && it.extension == "xml" && it.parentFile?.name == "layout" && it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git") } }.take(100).sortedBy { it.name }.toList()
+        layouts = projectRoot.walkTopDown().maxDepth(10)
+            .filter { it.isFile && it.extension.equals("xml", true) && it.parentFile?.name == "layout" &&
+                it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules") } }
+            .take(200).sortedBy { it.relativeTo(projectRoot).invariantSeparatorsPath }.toList()
         if (layouts.isEmpty()) { renderSourcePreview(); return }
-        val first = layouts.firstOrNull { it.name == "activity_main.xml" } ?: layouts.firstOrNull { it.name == "main.xml" } ?: layouts.first()
+        val preferred = findLauncherLayout()
+        val first = preferred ?: layouts.firstOrNull { it.name == "activity_main.xml" }
+            ?: layouts.firstOrNull { it.name == "main.xml" } ?: layouts.first()
         render(first)
     }
 
+    private fun findLauncherLayout(): File? {
+        val manifests = projectRoot.walkTopDown().maxDepth(8)
+            .filter { it.isFile && it.name == "AndroidManifest.xml" &&
+                it.path.split(File.separator).none { p -> p in setOf(".gradle", "build", ".git") } }
+            .take(10).toList()
+        for (manifest in manifests) {
+            val xml = runCatching { manifest.readText() }.getOrNull() ?: continue
+            val launcher = Regex("""<activity\b([^>]*)>([\s\S]*?)</activity>""")
+                .findAll(xml).firstOrNull {
+                    it.groupValues[2].contains("android.intent.action.MAIN") &&
+                    it.groupValues[2].contains("android.intent.category.LAUNCHER")
+                } ?: continue
+            val activityName = Regex("""android:name=["']([^"']+)["']""")
+                .find(launcher.groupValues[1])?.groupValues?.get(1) ?: continue
+            val simpleName = activityName.substringAfterLast('.').removePrefix(".")
+            val sourceFiles = projectRoot.walkTopDown().maxDepth(12)
+                .filter { it.isFile && it.extension == "kt" && it.nameWithoutExtension == simpleName &&
+                    it.path.split(File.separator).none { p -> p in setOf(".gradle", "build", ".git", "node_modules") } }
+                .take(5).toList()
+            for (source in sourceFiles) {
+                val code = runCatching { source.readText() }.getOrNull() ?: continue
+                val layoutName = Regex("""setContentView\s*\(\s*R\.layout\.(\w+)\s*\)""")
+                    .find(code)?.groupValues?.get(1)
+                if (layoutName != null) return layouts.firstOrNull { it.nameWithoutExtension == layoutName }
+                if (code.contains("setContent") || code.contains("@Composable")) return null
+            }
+        }
+        return null
+    }
+
+    private fun refreshCurrentPreview() {
+        content.removeAllViews()
+        findLayouts()
+    }
 
     /** Static Compose source preview. It approximates common composables without executing app code. */
     private fun renderSourcePreview() {
@@ -144,13 +184,17 @@ class LivePreviewActivity : Activity() {
             it.isFile && it.extension == "kt" && it.length() < 2_000_000L &&
                 it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules", "generated") }
         }.toList()
-        val source = sources.firstOrNull { it.name == "MainActivity.kt" && it.readText().contains("setContent") }
-            ?: sources.firstOrNull { it.readText().contains("@Composable") }
+        val source = sources.firstOrNull { it.name == "MainActivity.kt" && runCatching { it.readText().contains("setContent") }.getOrDefault(false) }
+            ?: sources.firstOrNull { runCatching { it.readText().contains("@Composable") }.getOrDefault(false) }
         if (source == null) {
             title.text = "LIVE UI PREVIEW"
             showMessage("No Compose Kotlin source found. Add a MainActivity or @Composable screen.")
             return
         }
+        renderComposeFile(source)
+    }
+
+    private fun renderComposeFile(source: File) {
         title.text = "COMPOSE PREVIEW · " + source.name
         try {
             val code = source.readText()
@@ -490,10 +534,23 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun chooseLayout() {
-        findLayouts()
-        if (layouts.size > 1) AlertDialog.Builder(this).setTitle("Choose layout")
-            .setItems(layouts.map { it.name }.toTypedArray()) { _, which -> render(layouts[which]) }
-            .setNegativeButton("Cancel", null).show()
+        if (layouts.size > 1) {
+            AlertDialog.Builder(this).setTitle("Choose screen / layout")
+                .setItems(layouts.map { it.relativeTo(projectRoot).invariantSeparatorsPath }.toTypedArray()) { _, which ->
+                    render(layouts[which])
+                }
+                .setNegativeButton("Cancel", null).show()
+        } else {
+            val sourceFiles = projectRoot.walkTopDown().maxDepth(10)
+                .filter { it.isFile && it.extension == "kt" &&
+                    it.path.split(File.separator).none { p -> p in setOf(".gradle", "build", ".git", "node_modules") } }
+                .take(100).toList()
+            if (sourceFiles.size > 1) AlertDialog.Builder(this).setTitle("Choose Compose source")
+                .setItems(sourceFiles.map { it.relativeTo(projectRoot).invariantSeparatorsPath }.toTypedArray()) { _, which ->
+                    renderComposeFile(sourceFiles[which])
+                }.setNegativeButton("Cancel", null).show()
+            else refreshCurrentPreview()
+        }
     }
 
     private fun render(file: File) {
