@@ -197,7 +197,12 @@ class LivePreviewActivity : Activity() {
                         isAllCaps = false
                         setOnClickListener { anchor ->
                             val popup = PopupMenu(this@LivePreviewActivity, anchor)
-                            val optionNames = Regex("""Text\s*\(\s*"([^"]+)"""").findAll(callArgs).map { it.groupValues[1] }.distinct().take(12).toList()
+                            val menuLambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                            val menuLambdaBody = menuLambdaStart?.let { start ->
+                                val menuLambdaEnd = findClosing(code, start, '{', '}')
+                                if (menuLambdaEnd > start) code.substring(start + 1, menuLambdaEnd) else ""
+                            } ?: ""
+                            val optionNames = Regex("""Text\s*\(\s*"([^"]+)"""").findAll(menuLambdaBody).map { it.groupValues[1] }.distinct().take(12).toList()
                             (if (optionNames.isEmpty()) listOf("Option 1", "Option 2", "Option 3") else optionNames).forEachIndexed { index, option ->
                                 popup.menu.add(0, index, index, option)
                             }
