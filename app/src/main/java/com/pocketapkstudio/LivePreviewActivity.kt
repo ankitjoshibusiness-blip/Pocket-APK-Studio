@@ -103,6 +103,8 @@ class LivePreviewActivity : Activity() {
             val pattern = Regex("""\b(Scaffold|Column|Row|Box|LazyColumn|LazyRow|Card|Surface|TopAppBar|CenterAlignedTopAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Checkbox|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog)\s*\(""")
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
+            data class PreviewNode(val start: Int, val end: Int, val view: View, val params: LinearLayout.LayoutParams, val container: Boolean)
+            val previewNodes = ArrayList<PreviewNode>()
             var rendered = 0
             for (match in matches) {
                 if (consumed.any { match.range.first in it }) continue
@@ -128,11 +130,19 @@ class LivePreviewActivity : Activity() {
                     val labelBlock = Regex("""(?:label|placeholder)\s*=\s*\{\s*Text\s*\(""").find(callArgs)
                     if (labelBlock != null) label = firstLiteral(callArgs.substring(labelBlock.range.last + 1)) ?: label
                 }
-                consumed.add(match.range.first..endOfElement)
+                val isContainer = kind in setOf("Scaffold", "Column", "Row", "Box", "LazyColumn", "LazyRow", "Card", "Surface", "NavigationBar", "NavigationRail", "NavigationDrawer", "ModalNavigationDrawer")
+                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton")) consumed.add(match.range.first..endOfElement)
+                if (isContainer) {
+                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    if (lambdaStart != null) {
+                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        if (lambdaEnd > lambdaStart) endOfElement = lambdaEnd
+                    }
+                }
                 val view: View? = when (kind) {
-                    "Scaffold", "Column", "LazyColumn", "NavigationDrawer", "ModalNavigationDrawer" -> TextView(this).apply { text = "▤ " + kind; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
-                    "Row", "LazyRow", "NavigationBar", "NavigationRail" -> TextView(this).apply { text = "↔ " + kind; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
-                    "Box" -> TextView(this).apply { text = "□ Box"; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
+                    "Scaffold", "Column", "LazyColumn", "NavigationDrawer", "ModalNavigationDrawer", "Card", "Surface" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(if (kind == "Card" || kind == "Surface") 0xFFE8ECF7.toInt() else 0xFFF5F7FF.toInt()) }
+                    "Row", "LazyRow", "NavigationBar", "NavigationRail" -> LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
+                    "Box" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "TopAppBar", "CenterAlignedTopAppBar" -> TextView(this).apply { text = label ?: "App Bar"; textSize = 18f; setTextColor(0xFF263449.toInt()); setPadding(dp(12), dp(14), dp(12), dp(14)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
                     "Icon" -> TextView(this).apply { text = "◆"; textSize = 20f; gravity = Gravity.CENTER }
@@ -189,9 +199,33 @@ class LivePreviewActivity : Activity() {
                     val heightDp = Regex("""height\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
                     widthDp?.let { lp.width = dp(it) }
                     heightDp?.let { lp.height = dp(it) }
-                    screen.addView(view, lp)
+                    previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer))
                     rendered++
                 }
+            }
+            // Rebuild the detected Compose call tree so nested composables stay inside their parent.
+            val attached = HashSet<Int>()
+            previewNodes.sortedBy { it.start }.forEachIndexed { index, node ->
+                var parentIndex = -1
+                var parentSpan = Int.MAX_VALUE
+                if (node.start >= 0) {
+                    previewNodes.forEachIndexed { candidateIndex, candidate ->
+                        if (candidateIndex != index && candidate.container &&
+                            candidate.start < node.start && candidate.end > node.end) {
+                            val span = candidate.end - candidate.start
+                            if (span < parentSpan) { parentSpan = span; parentIndex = candidateIndex }
+                        }
+                    }
+                }
+                val parent = if (parentIndex >= 0) previewNodes[parentIndex].view else screen
+                if (parent is FrameLayout) {
+                    parent.addView(node.view, FrameLayout.LayoutParams(node.params.width, node.params.height, Gravity.CENTER))
+                } else if (parent is LinearLayout) {
+                    parent.addView(node.view, node.params)
+                } else {
+                    screen.addView(node.view, node.params)
+                }
+                attached.add(index)
             }
             if (rendered == 0) {
                 screen.addView(TextView(this).apply {
