@@ -72,8 +72,8 @@ class LivePreviewActivity : Activity() {
                 setPadding(dp(18), dp(18), dp(18), dp(18))
                 setBackgroundColor(0xFFF5F7FF.toInt())
             }
-            val textPattern = Regex("(?:text\\\\s*=\\\\s*|setText\\\\()\\\"([^\\\"]+)\\\"")
-            val hintPattern = Regex("(?:hint\\\\s*=\\\\s*|setHint\\\\()\\\"([^\\\"]+)\\\"")
+            val textPattern = Regex("(?:text\\s*=\\s*|setText\\()\\\"([^\\\"]+)\\\"")
+            val hintPattern = Regex("(?:hint\\s*=\\s*|setHint\\()\\\"([^\\\"]+)\\\"")
             val strings = textPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
             val hints = hintPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
             val heading = strings.firstOrNull() ?: source.nameWithoutExtension
@@ -84,7 +84,7 @@ class LivePreviewActivity : Activity() {
                 setTextColor(0xFF18264A.toInt())
                 setPadding(0, 0, 0, dp(18))
             }, LinearLayout.LayoutParams(-1, -2))
-            val editCount = Regex("EditText\\\\s*\\\\(").findAll(code).count().coerceAtMost(8)
+            val editCount = Regex("EditText\\s*\\(").findAll(code).count().coerceAtMost(8)
             repeat(editCount) { index ->
                 screen.addView(EditText(this).apply {
                     hint = hints.getOrNull(index) ?: "Enter text"
