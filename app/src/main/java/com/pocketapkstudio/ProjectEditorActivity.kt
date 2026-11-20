@@ -407,6 +407,11 @@ class ProjectEditorActivity : Activity() {
             return
         }
         if (requestCode == 7105) {
+            if (resultCode == RESULT_OK && data?.getBooleanExtra("runtime_preview_build", false) == true) {
+                setResult(RESULT_OK, data)
+                finish()
+                return
+            }
             refreshExplorer()
             val fileToReload = currentFile
             if (fileToReload != null && fileToReload.isFile) {
