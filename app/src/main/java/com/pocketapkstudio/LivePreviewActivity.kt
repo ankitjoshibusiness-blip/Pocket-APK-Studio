@@ -9,6 +9,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.core.content.FileProvider
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 
@@ -59,6 +62,14 @@ class LivePreviewActivity : Activity() {
         deviceControls.addView(deviceButton("Tablet", 600, 900), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
         root.addView(deviceControls, LinearLayout.LayoutParams(-1, -2))
+        val buildRunButton = Button(this).apply {
+            text = "Build & Run on Device"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF2563EB.toInt())
+            setOnClickListener { exportProjectForDeviceRun() }
+        }
+        root.addView(buildRunButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(7); bottomMargin = dp(8) })
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFFE0E5EC.toInt()) }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
         previewScroll = ScrollView(this).apply { isFillViewport = true }
@@ -67,6 +78,44 @@ class LivePreviewActivity : Activity() {
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         applyDeviceProfile()
+    }
+
+    /**
+     * A true source preview must compile and run the imported app. Export the edited
+     * project to the existing Termux build pipeline rather than pretending that
+     * statically rendered Android Views execute the user's Compose code.
+     */
+    private fun exportProjectForDeviceRun() {
+        try {
+            val output = File(cacheDir, "runtime-preview-project.zip")
+            ZipOutputStream(output.outputStream().buffered()).use { zip ->
+                projectRoot.walkTopDown()
+                    .filter { file ->
+                        file.isFile && file.path.split(File.separator).none {
+                            it in setOf(".gradle", "build", ".git", "node_modules")
+                        }
+                    }
+                    .forEach { file ->
+                        val entryName = file.relativeTo(projectRoot).invariantSeparatorsPath
+                        zip.putNextEntry(ZipEntry(entryName))
+                        file.inputStream().buffered().use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+            }
+            check(output.isFile && output.length() > 0L) { "Project ZIP is empty." }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", output)
+            setResult(RESULT_OK, android.content.Intent().setData(uri)
+                .putExtra("runtime_preview_build", true)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            Toast.makeText(this, "Project sent to the real Android build pipeline.", Toast.LENGTH_LONG).show()
+            finish()
+        } catch (error: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Could not prepare runtime build")
+                .setMessage(error.message ?: "Unknown ZIP export error")
+                .setPositiveButton("OK", null)
+                .show()
+        }
     }
 
     private fun applyDeviceProfile() {
