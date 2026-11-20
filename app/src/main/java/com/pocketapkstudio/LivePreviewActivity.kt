@@ -12,7 +12,7 @@ import android.widget.*
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 
-/** Lightweight renderer for Android XML layouts; it does not execute app code. */
+/** Lightweight Android layout/source preview; it does not execute app code. */
 class LivePreviewActivity : Activity() {
     private lateinit var projectRoot: File
     private lateinit var content: LinearLayout
@@ -46,9 +46,78 @@ class LivePreviewActivity : Activity() {
 
     private fun findLayouts() {
         layouts = File(projectRoot, "app/src/main/res/layout").walkTopDown().filter { it.isFile && it.extension == "xml" }.take(100).sortedBy { it.name }.toList()
-        if (layouts.isEmpty()) { showMessage("No Android XML layouts found. Jetpack Compose and Flutter previews are not supported in this first version."); return }
+        if (layouts.isEmpty()) { renderSourcePreview(); return }
         val first = layouts.firstOrNull { it.name == "activity_main.xml" } ?: layouts.firstOrNull { it.name == "main.xml" } ?: layouts.first()
         render(first)
+    }
+
+
+    /** Best-effort approximation for projects that build UI in Kotlin/Java code. */
+    private fun renderSourcePreview() {
+        content.removeAllViews()
+        val sourceDir = File(projectRoot, "app/src/main/java")
+        val source = sourceDir.walkTopDown().firstOrNull {
+            it.isFile && (it.name == "MainActivity.kt" || it.name == "MainActivity.java")
+        }
+        if (source == null) {
+            title.text = "LIVE UI PREVIEW"
+            showMessage("No Android XML layout or MainActivity source file found.")
+            return
+        }
+        title.text = "PREVIEW · " + source.name
+        try {
+            val code = source.readText()
+            val screen = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(18), dp(18), dp(18))
+                setBackgroundColor(0xFFF5F7FF.toInt())
+            }
+            val textPattern = Regex("(?:text\\\\s*=\\\\s*|setText\\\\()\\\"([^\\\"]+)\\\"")
+            val hintPattern = Regex("(?:hint\\\\s*=\\\\s*|setHint\\\\()\\\"([^\\\"]+)\\\"")
+            val strings = textPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
+            val hints = hintPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
+            val heading = strings.firstOrNull() ?: source.nameWithoutExtension
+            screen.addView(TextView(this).apply {
+                text = heading
+                textSize = 24f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(0xFF18264A.toInt())
+                setPadding(0, 0, 0, dp(18))
+            }, LinearLayout.LayoutParams(-1, -2))
+            val editCount = Regex("EditText\\\\s*\\\\(").findAll(code).count().coerceAtMost(8)
+            repeat(editCount) { index ->
+                screen.addView(EditText(this).apply {
+                    hint = hints.getOrNull(index) ?: "Enter text"
+                    textSize = 16f
+                    setSingleLine(true)
+                }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(10) })
+            }
+            val buttonTexts = strings.filter { label ->
+                code.contains("Button") && (code.contains("text=\\\"$label\\\"") || code.contains("setText(\\\"$label\\\")"))
+            }
+            strings.drop(1).filterNot { buttonTexts.contains(it) }.forEach { label ->
+                screen.addView(TextView(this).apply {
+                    text = label
+                    textSize = 16f
+                    setTextColor(0xFF273449.toInt())
+                    setPadding(0, dp(8), 0, dp(8))
+                }, LinearLayout.LayoutParams(-1, -2))
+            }
+            buttonTexts.forEach { label ->
+                screen.addView(Button(this).apply {
+                    text = label
+                    isAllCaps = false
+                    setOnClickListener { Toast.makeText(this@LivePreviewActivity, "Preview only: $label", Toast.LENGTH_SHORT).show() }
+                }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            }
+            if (strings.isEmpty() && editCount == 0) screen.addView(TextView(this).apply {
+                text = "Source found, but no simple UI labels could be detected. This is an approximate preview, not a running app."
+                setTextColor(Color.DKGRAY)
+            })
+            content.addView(screen, LinearLayout.LayoutParams(-1, -2))
+        } catch (e: Exception) {
+            showMessage("Could not create source preview.\\n\\n" + (e.message ?: e.javaClass.simpleName))
+        }
     }
 
     private fun chooseLayout() {
