@@ -47,6 +47,8 @@ class ProjectEditorActivity : Activity() {
     private var darkTheme = true
     private var dirty = false
     private val autoSave = Runnable { saveCurrent(false) }
+    private val pendingAiChanges = LinkedHashMap<String, File>()
+    private val aiSafeExtensions = setOf("kt","java","xml","gradle","kts","properties","txt","md","json","yaml","yml","dart","sh","pro","toml","html","css")
 
     private val editableExtensions = setOf("kt","java","xml","gradle","kts","properties","txt","md","json","yaml","yml","py","dart","sh","pro","toml","html","css")
 
@@ -103,6 +105,20 @@ class ProjectEditorActivity : Activity() {
             background = roundedSurface(0xFF2563EB.toInt(), 12)
         }
         root.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+        val aiActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val shareAiButton = smallButton("✦  Share to ChatGPT") { shareProjectWithChatGPT() }.apply {
+            textSize = 11f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF256B72.toInt(), 12)
+        }
+        val importAiButton = smallButton("⇩  Import AI Changes") { chooseAiChangesZip() }.apply {
+            textSize = 11f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF3E607C.toInt(), 12)
+        }
+        aiActions.addView(shareAiButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
+        aiActions.addView(importAiButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
+        root.addView(aiActions, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
         root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
@@ -378,6 +394,11 @@ class ProjectEditorActivity : Activity() {
             finish()
             return
         }
+        if (requestCode == 7104 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            previewAndApplyAiChanges(uri)
+            return
+        }
         if (requestCode == 7102 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             try {
@@ -542,6 +563,145 @@ class ProjectEditorActivity : Activity() {
         val log = getSharedPreferences("build_state", MODE_PRIVATE).getString("last_build_log", "No build log available.") ?: "No build log available."
         AlertDialog.Builder(this).setTitle("Build output / errors").setMessage(log)
             .setPositiveButton("OK", null).show()
+    }
+
+
+    private fun isAiSafeProjectFile(file: File): Boolean {
+        val relative = file.relativeTo(rootDir).invariantSeparatorsPath
+        val lower = relative.lowercase()
+        val parts = lower.split("/")
+        if (parts.any { it in setOf(".git", ".gradle", ".idea", ".kotlin", "build", ".dart_tool", "node_modules") }) return false
+        if (parts.any { it.startsWith("keystore") || it == "secrets" }) return false
+        if (file.name in setOf("local.properties", "google-services.json", "key.properties")) return false
+        if (file.extension.lowercase() !in aiSafeExtensions) return false
+        if (file.name.endsWith(".jks", true) || file.name.endsWith(".keystore", true) || file.name.contains("secret", true)) return false
+        return file.length() <= 1024 * 1024
+    }
+
+    private fun shareProjectWithChatGPT() {
+        saveCurrent(false)
+        try {
+            val out = File(cacheDir, "ai-project-source.zip")
+            var count = 0
+            ZipOutputStream(out.outputStream().buffered()).use { zos ->
+                rootDir.walkTopDown().filter { it.isFile && isAiSafeProjectFile(it) }.forEach { file ->
+                    require(++count <= 1500) { "Project has too many source files (limit 1500)" }
+                    zos.putNextEntry(ZipEntry(file.relativeTo(rootDir).invariantSeparatorsPath))
+                    file.inputStream().buffered().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                    require(out.length() <= 15L * 1024L * 1024L) { "AI source ZIP exceeds 15 MB" }
+                }
+            }
+            require(count > 0) { "No supported source files found" }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", out)
+            val prompt = "Please inspect this Pocket APK Studio Android project. Apply my requested code changes, preserve project-relative file paths, and return a ZIP containing only the changed or new files. Do not include secrets, keystores, local.properties, or build outputs. Requested change: [WRITE YOUR REQUEST HERE]."
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_TEXT, prompt)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "Share project source with ChatGPT"))
+        } catch (e: Exception) {
+            toast("AI export failed: ${e.message}")
+        }
+    }
+
+    private fun chooseAiChangesZip() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try { startActivityForResult(pick, 7104) }
+        catch (e: Exception) { toast("Could not open ZIP picker: ${e.message}") }
+    }
+
+    private fun previewAndApplyAiChanges(uri: Uri) {
+        val staging = File(cacheDir, "ai-change-staging").apply { deleteRecursively(); mkdirs() }
+        pendingAiChanges.clear()
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                ZipInputStream(input).use { zip ->
+                    var entry = zip.nextEntry
+                    var count = 0
+                    var total = 0L
+                    while (entry != null) {
+                        require(++count <= 500) { "AI ZIP contains too many files (limit 500)" }
+                        val name = entry.name.replace('\\', '/')
+                        if (!entry.isDirectory) {
+                            val target = File(staging, name).canonicalFile
+                            require(target.path.startsWith(staging.canonicalPath + File.separator)) { "Unsafe ZIP path rejected" }
+                            val relative = name.lowercase()
+                            val parts = relative.split("/")
+                            require(parts.none { it in setOf(".git", ".gradle", ".idea", "build", ".dart_tool", "node_modules") }) { "Build/cache files are not accepted" }
+                            require(parts.none { it.startsWith("keystore") || it == "secrets" }) { "Sensitive files are not accepted" }
+                            require(target.name !in setOf("local.properties", "google-services.json", "key.properties")) { "Sensitive configuration file rejected" }
+                            require(target.extension.lowercase() in aiSafeExtensions) { "Unsupported file type: $name" }
+                            require(!target.name.endsWith(".jks", true) && !target.name.endsWith(".keystore", true) && !target.name.contains("secret", true)) { "Sensitive file rejected" }
+                            target.parentFile?.mkdirs()
+                            target.outputStream().use { output ->
+                                val buffer = ByteArray(8192)
+                                while (true) {
+                                    val n = zip.read(buffer)
+                                    if (n <= 0) break
+                                    total += n
+                                    require(total <= 15L * 1024L * 1024L) { "AI changes ZIP exceeds 15 MB" }
+                                    output.write(buffer, 0, n)
+                                }
+                            }
+                            val current = File(rootDir, name).canonicalFile
+                            require(current.path.startsWith(rootDir.canonicalPath + File.separator)) { "Unsafe project path rejected" }
+                            val changed = !current.isFile || current.length() != target.length() || !current.readBytes().contentEquals(target.readBytes())
+                            if (changed) pendingAiChanges[name] = target
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+            } ?: error("Cannot read selected ZIP")
+            if (pendingAiChanges.isEmpty()) {
+                toast("No changed or new source files found in this ZIP.")
+                return
+            }
+            val preview = pendingAiChanges.entries.joinToString("\n") { (path, file) ->
+                (if (File(rootDir, path).exists()) "MODIFIED  " else "NEW        ") + path + "  (" + file.length() + " bytes)"
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Review AI changes • ${pendingAiChanges.size} file(s)")
+                .setMessage("Only listed files will be updated. Existing originals will be backed up. No files will be deleted.\n\n$preview")
+                .setNegativeButton("Reject", null)
+                .setPositiveButton("Apply Changes") { _, _ -> applyPendingAiChanges() }
+                .show()
+        } catch (e: Exception) {
+            pendingAiChanges.clear()
+            toast("AI ZIP rejected: ${e.message}")
+        }
+    }
+
+    private fun applyPendingAiChanges() {
+        if (pendingAiChanges.isEmpty()) return
+        try {
+            val backupRoot = File(filesDir, "ai-change-backups/${System.currentTimeMillis()}").apply { mkdirs() }
+            pendingAiChanges.forEach { (relative, staged) ->
+                val target = File(rootDir, relative).canonicalFile
+                require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Unsafe destination path" }
+                if (target.isFile) {
+                    val backup = File(backupRoot, relative)
+                    backup.parentFile?.mkdirs()
+                    target.copyTo(backup, overwrite = true)
+                }
+                target.parentFile?.mkdirs()
+                staged.copyTo(target, overwrite = true)
+            }
+            val applied = pendingAiChanges.size
+            pendingAiChanges.clear()
+            refreshExplorer()
+            currentFile?.let { if (it.isFile) openFile(it) }
+            toast("Applied $applied AI file change(s). Original files backed up.")
+        } catch (e: Exception) {
+            toast("Could not apply all AI changes: ${e.message}. Check project files and backups.")
+        }
     }
 
     private fun exportEditedZip() {
