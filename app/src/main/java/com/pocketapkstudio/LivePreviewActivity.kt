@@ -192,8 +192,35 @@ class LivePreviewActivity : Activity() {
                             minimumHeight = dp(72)
                         }
                     }
-                    "DropdownMenu" -> TextView(this).apply { text = label ?: "Dropdown Menu"; setPadding(dp(12), dp(10), dp(12), dp(10)); setBackgroundColor(0xFFE8ECF7.toInt()) }
-                    "AlertDialog" -> TextView(this).apply { text = label ?: "Dialog Preview"; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "DropdownMenu" -> Button(this).apply {
+                        text = label ?: "Open menu ▾"
+                        isAllCaps = false
+                        setOnClickListener { anchor ->
+                            val popup = PopupMenu(this@LivePreviewActivity, anchor)
+                            val optionNames = Regex("""Text\s*\(\s*"([^"]+)"""").findAll(callArgs).map { it.groupValues[1] }.distinct().take(12).toList()
+                            (if (optionNames.isEmpty()) listOf("Option 1", "Option 2", "Option 3") else optionNames).forEachIndexed { index, option ->
+                                popup.menu.add(0, index, index, option)
+                            }
+                            popup.setOnMenuItemClickListener { item ->
+                                text = item.title
+                                Toast.makeText(this@LivePreviewActivity, "Selected: ${item.title}", Toast.LENGTH_SHORT).show()
+                                true
+                            }
+                            popup.show()
+                        }
+                    }
+                    "AlertDialog" -> Button(this).apply {
+                        text = label ?: "Show dialog"
+                        isAllCaps = false
+                        setOnClickListener {
+                            AlertDialog.Builder(this@LivePreviewActivity)
+                                .setTitle(label ?: "Preview dialog")
+                                .setMessage("This is an interactive preview dialog. App actions are not executed.")
+                                .setPositiveButton("OK", null)
+                                .setNegativeButton("Cancel", null)
+                                .show()
+                        }
+                    }
                     "Text" -> label?.let { textValue ->
                         TextView(this).apply {
                             text = textValue
