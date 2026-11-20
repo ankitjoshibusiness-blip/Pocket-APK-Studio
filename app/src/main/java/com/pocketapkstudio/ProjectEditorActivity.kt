@@ -105,18 +105,6 @@ class ProjectEditorActivity : Activity() {
             background = roundedSurface(0xFF2563EB.toInt(), 12)
         }
         root.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
-        val aiChatButton = smallButton("✦  AI Developer Chat • Free AI") {
-            saveCurrent(false)
-            startActivityForResult(
-                Intent(this, AiChatActivity::class.java).putExtra("project_root", rootDir.absolutePath),
-                7105
-            )
-        }.apply {
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            background = roundedSurface(0xFF256B72.toInt(), 12)
-        }
-        root.addView(aiChatButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
         val aiActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val shareAiButton = smallButton("✦  Share to ChatGPT") { shareProjectWithChatGPT() }.apply {
             textSize = 11f
@@ -171,6 +159,41 @@ class ProjectEditorActivity : Activity() {
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
         diagnosticsPanel.addView(errorsPanel)
         root.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
+        val aiPromptBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(9), dp(5), dp(7), dp(5))
+            background = roundedSurface(if (darkTheme) 0xFF243746.toInt() else 0xFFE7EDF5.toInt(), 16)
+        }
+        val aiPromptInput = EditText(this).apply {
+            hint = "App ma shu badalvu chhe?"
+            textSize = 14f
+            minLines = 1
+            maxLines = 3
+            background = null
+            setTextColor(if (darkTheme) 0xFFF2F6FA.toInt() else 0xFF17212B.toInt())
+            setHintTextColor(if (darkTheme) 0xFF91A1B2.toInt() else 0xFF687789.toInt())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        aiPromptBar.addView(aiPromptInput, LinearLayout.LayoutParams(0, -2, 1f))
+        val aiSendButton = smallButton("➤") {
+            val request = aiPromptInput.text.toString().trim()
+            if (request.isNotBlank()) {
+                saveCurrent(false)
+                startActivityForResult(
+                    Intent(this, AiChatActivity::class.java)
+                        .putExtra("project_root", rootDir.absolutePath)
+                        .putExtra("initial_prompt", request),
+                    7105
+                )
+            } else toast("Pehla shu badalvu chhe te lakho")
+        }.apply {
+            textSize = 18f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF256B72.toInt(), 12)
+        }
+        aiPromptBar.addView(aiSendButton, LinearLayout.LayoutParams(dp(48), dp(46)))
+        root.addView(aiPromptBar, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         exportButton=smallButton("⇧  SAVE CHANGES & RETURN TO PROJECT") { exportEditedZip() }
         root.addView(exportButton,LinearLayout.LayoutParams(-1,dp(42)).apply { topMargin=dp(5) })
         setContentView(root)
@@ -183,6 +206,7 @@ class ProjectEditorActivity : Activity() {
             suggestionsBar.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             diagnosticsPanel.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             exportButton.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
+            aiPromptBar.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             if (keyboardVisible && editor.hasFocus()) {
                 editor.post {
                     val line = editor.layout?.getLineForOffset(editor.selectionStart.coerceAtLeast(0)) ?: 0
