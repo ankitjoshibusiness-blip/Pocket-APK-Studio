@@ -211,17 +211,35 @@ class LivePreviewActivity : Activity() {
                         Button(this).apply {
                             text = textValue
                             isAllCaps = false
-                            setOnClickListener { Toast.makeText(this@LivePreviewActivity, "Preview control only: $textValue", Toast.LENGTH_SHORT).show() }
+                            contentDescription = textValue
+                            var pressed = false
+                            setOnClickListener {
+                                pressed = !pressed
+                                text = if (pressed) "✓ $textValue" else textValue
+                                alpha = if (pressed) 0.78f else 1f
+                                Toast.makeText(this@LivePreviewActivity, "Preview interaction: $textValue", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                     "OutlinedTextField", "TextField" -> EditText(this).apply {
                         hint = label ?: "Enter text"
+                        contentDescription = label ?: "Preview text field"
                         textSize = 16f
                         setSingleLine(true)
                     }
-                    "Switch" -> Switch(this).apply { text = label ?: "Toggle" }
-                    "Checkbox" -> CheckBox(this).apply { text = label ?: "Check" }
-                    "Slider" -> SeekBar(this)
+                    "Switch" -> Switch(this).apply {
+                        text = label ?: "Toggle"
+                        contentDescription = label ?: "Preview switch"
+                    }
+                    "Checkbox" -> CheckBox(this).apply {
+                        text = label ?: "Check"
+                        contentDescription = label ?: "Preview checkbox"
+                    }
+                    "Slider" -> SeekBar(this).apply {
+                        contentDescription = label ?: "Preview slider"
+                        max = 100
+                        progress = 50
+                    }
                     "Card", "Surface" -> TextView(this).apply {
                         text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
                         textSize = 14f
