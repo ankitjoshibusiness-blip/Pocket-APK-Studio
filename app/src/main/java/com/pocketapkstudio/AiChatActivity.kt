@@ -45,6 +45,11 @@ class AiChatActivity : Activity() {
         if (!projectRoot.isDirectory) { finish(); return }
         buildUi()
         addMessage("AI DEVELOPER", "Namaste! Gujarati ke English ma command lakho. Hu current project ni files inspect kari code changes taiyar karish. Changes apply karta pehla review ane backup thase. API key mate ⚙ dabavo.")
+        val initialPrompt = intent.getStringExtra("initial_prompt").orEmpty()
+        if (initialPrompt.isNotBlank()) {
+            prompt.setText(initialPrompt)
+            prompt.setSelection(prompt.text.length)
+        }
     }
 
     private fun buildUi() {
