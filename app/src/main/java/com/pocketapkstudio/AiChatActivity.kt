@@ -213,11 +213,21 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
     }
 
     private fun geminiRequest(key: String, userText: String): String {
+        val systemParts = JSONArray().put(JSONObject().put("text", systemPrompt()))
+        val systemInstruction = JSONObject().put("parts", systemParts)
+        val userParts = JSONArray().put(JSONObject().put("text", userText))
+        val userContent = JSONObject().put("role", "user").put("parts", userParts)
+        val contents = JSONArray().put(userContent)
+        val generation = JSONObject()
+            .put("temperature", 0.15)
+            .put("maxOutputTokens", 8192)
+            .put("responseMimeType", "application/json")
         val body = JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt()))))
-            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", userText)))))
-            .put("generationConfig", JSONObject().put("temperature", 0.15).put("maxOutputTokens", 8192).put("responseMimeType", "application/json"))
-        val response = JSONObject(post("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=" + key, body))
+            .put("systemInstruction", systemInstruction)
+            .put("contents", contents)
+            .put("generationConfig", generation)
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=" + key
+        val response = JSONObject(post(endpoint, body))
         val parts = response.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
             ?: throw IllegalStateException("Gemini returned no content")
         return (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optString("text") }.joinToString("\n")
