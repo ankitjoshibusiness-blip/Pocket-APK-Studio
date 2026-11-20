@@ -105,6 +105,18 @@ class ProjectEditorActivity : Activity() {
             background = roundedSurface(0xFF2563EB.toInt(), 12)
         }
         root.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+        val aiChatButton = smallButton("✦  AI Developer Chat • Free AI") {
+            saveCurrent(false)
+            startActivityForResult(
+                Intent(this, AiChatActivity::class.java).putExtra("project_root", rootDir.absolutePath),
+                7105
+            )
+        }.apply {
+            textSize = 14f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF256B72.toInt(), 12)
+        }
+        root.addView(aiChatButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
         val aiActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val shareAiButton = smallButton("✦  Share to ChatGPT") { shareProjectWithChatGPT() }.apply {
             textSize = 11f
@@ -392,6 +404,11 @@ class ProjectEditorActivity : Activity() {
             // Forward the runtime-preview ZIP to MainActivity, which owns the Termux build pipeline.
             setResult(RESULT_OK, data)
             finish()
+            return
+        }
+        if (requestCode == 7105) {
+            refreshExplorer()
+            currentFile?.takeIf { it.isFile }?.let { openFile(it) }
             return
         }
         if (requestCode == 7104 && resultCode == RESULT_OK) {
