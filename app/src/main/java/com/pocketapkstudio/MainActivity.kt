@@ -495,49 +495,48 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val workspaceHero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
-            setPadding(dp(16), dp(20), dp(16), dp(18))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFFFFFFFF.toInt())
-                cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), 0xFFE4EDF1.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFFFFFFFF.toInt(), 0xFFF1F6F8.toInt())
+            ).apply {
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), 0xFFD9E5E9.toInt())
             }
-            elevation = dp(4).toFloat()
+            elevation = dp(5).toFloat()
         }
-        workspaceHero.addView(label("WORKSPACE", 34, 0xFF405968.toInt(), true).apply {
+        workspaceHero.addView(label("WORKSPACE", 29, 0xFF354F5D.toInt(), true).apply {
             gravity = android.view.Gravity.CENTER
-            letterSpacing = 0.035f
+            letterSpacing = 0.045f
         })
-        workspaceHero.addView(label("Manage your Android projects", 12, 0xFF718592.toInt(), false).apply {
+        workspaceHero.addView(label("Manage your Android projects", 11, 0xFF778B96.toInt(), false).apply {
             gravity = android.view.Gravity.CENTER
         })
-        workspaceHero.addView(space(12))
+        workspaceHero.addView(space(5))
         val workspaceActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
         }
-        fun heroAction(text: String, action: () -> Unit): TextView {
-            return label(text, 15, 0xFF245A72.toInt(), true).apply {
-                setPadding(dp(10), dp(9), dp(10), dp(9))
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(0xFFEAF4F7.toInt())
-                    cornerRadius = dp(12).toFloat()
-                }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { action() }
+        fun heroActionArrow(): TextView {
+            return label("➜", 23, 0xFFFFFFFF.toInt(), true).apply {
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(9), dp(1), dp(9), dp(1))
+                background = premiumGradient(0xFF315E70.toInt(), 0xFF244654.toInt(), 50)
             }
         }
-        workspaceActions.addView(heroAction("Manage") {
-            pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
-        })
-        workspaceActions.addView(heroAction("Create") { showQuickStart() })
-        workspaceActions.addView(heroAction("Edit") { openPage?.invoke(1) })
-        workspaceActions.addView(heroAction("➜") { openPage?.invoke(1) }.apply {
-            textSize = 28f
-            gravity = android.view.Gravity.CENTER
-            background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 50)
-            setTextColor(0xFFFFFFFF.toInt())
-        })
+        fun heroText(text: String): TextView {
+            return label(text, 16, 0xFF315E70.toInt(), false).apply {
+                setPadding(dp(5), dp(3), dp(5), dp(3))
+                letterSpacing = 0.01f
+            }
+        }
+        workspaceActions.addView(heroText("Manage"))
+        workspaceActions.addView(heroText("·"))
+        workspaceActions.addView(heroText("Create"))
+        workspaceActions.addView(heroText("·"))
+        workspaceActions.addView(heroText("Edit"))
+        workspaceActions.addView(space(4))
+        workspaceActions.addView(heroActionArrow())
         workspaceHero.addView(workspaceActions)
         homeContent.addView(workspaceHero)
         homeContent.addView(space(10))
