@@ -45,7 +45,7 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun findLayouts() {
-        layouts = File(projectRoot, "app/src/main/res/layout").walkTopDown().filter { it.isFile && it.extension == "xml" }.take(100).sortedBy { it.name }.toList()
+        layouts = projectRoot.walkTopDown().maxDepth(8).filter { it.isFile && it.extension == "xml" && it.parentFile?.name == "layout" && it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git") } }.take(100).sortedBy { it.name }.toList()
         if (layouts.isEmpty()) { renderSourcePreview(); return }
         val first = layouts.firstOrNull { it.name == "activity_main.xml" } ?: layouts.firstOrNull { it.name == "main.xml" } ?: layouts.first()
         render(first)
@@ -55,9 +55,9 @@ class LivePreviewActivity : Activity() {
     /** Static Compose source preview. It approximates common composables without executing app code. */
     private fun renderSourcePreview() {
         content.removeAllViews()
-        val sourceDir = File(projectRoot, "app/src/main")
-        val sources = sourceDir.walkTopDown().filter {
-            it.isFile && it.extension == "kt" && it.length() < 2_000_000L
+        val sources = projectRoot.walkTopDown().maxDepth(10).filter {
+            it.isFile && it.extension == "kt" && it.length() < 2_000_000L &&
+                it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules", "generated") }
         }.toList()
         val source = sources.firstOrNull { it.name == "MainActivity.kt" && it.readText().contains("setContent") }
             ?: sources.firstOrNull { it.readText().contains("@Composable") }
