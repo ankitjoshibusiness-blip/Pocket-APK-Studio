@@ -251,12 +251,17 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
 
     private fun requestAi(question: String, context: String, mode: String, gemini: String, groq: String, attached: List<AiAttachment>): String {
         val recent = history.takeLast(6).joinToString("\n") { "USER: " + it.first + "\nAI: " + it.second }
-        val promptText = "PROJECT CONTEXT:\n" + context + "\nRECENT CHAT:\n" + recent + "\nUSER REQUEST:\n" + question
-        if (mode == "gemini") return geminiRequest(gemini, promptText)
-        if (mode == "groq") return groqRequest(groq, promptText)
+        val textFiles = attached.filter { it.text != null }.joinToString("\n") { "\n--- ATTACHMENT: " + it.name + " ---\n" + it.text!!.take(30000) }
+        val promptText = "PROJECT CONTEXT:\n" + context + "\nRECENT CHAT:\n" + recent + "\nUSER REQUEST:\n" + question + textFiles
+        val binaryFiles = attached.filter { it.text == null }
+        if (mode == "gemini") return geminiRequest(gemini, promptText, binaryFiles)
+        if (mode == "groq") {
+            if (binaryFiles.isNotEmpty()) throw IllegalStateException("Image/PDF reading is supported through Gemini. Select Gemini provider or attach text/code files.")
+            return groqRequest(groq, promptText)
+        }
         var first: Exception? = null
-        if (gemini.isNotBlank()) try { return geminiRequest(gemini, promptText, attached.filter { it.text == null }) } catch (e: Exception) { first = e }
-        if (groq.isNotBlank() && attached.none { it.text == null }) try { return groqRequest(groq, promptText) } catch (e: Exception) {
+        if (gemini.isNotBlank()) try { return geminiRequest(gemini, promptText, binaryFiles) } catch (e: Exception) { first = e }
+        if (groq.isNotBlank() && binaryFiles.isEmpty()) try { return groqRequest(groq, promptText) } catch (e: Exception) {
             throw IllegalStateException("Gemini: " + (first?.message ?: "not configured") + " | Groq: " + (e.message ?: "failed"))
         }
         throw first ?: IllegalStateException("No AI provider configured")
