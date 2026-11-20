@@ -35,7 +35,7 @@ class LivePreviewActivity : Activity() {
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(Button(this).apply { text = "↻"; contentDescription = "Reload preview"; setOnClickListener { chooseLayout() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
-        root.addView(TextView(this).apply { text = "Android XML layout preview · Basic controls can be tried"; textSize = 11f; setTextColor(0xFFB6C5D2.toInt()); setPadding(dp(4), dp(8), dp(4), dp(10)) })
+        root.addView(TextView(this).apply { text = "Android layout preview · XML and Compose source"; textSize = 11f; setTextColor(0xFFB6C5D2.toInt()); setPadding(dp(4), dp(8), dp(4), dp(10)) })
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFFF5F7FA.toInt()) }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
         val scroll = ScrollView(this); scroll.addView(content)
