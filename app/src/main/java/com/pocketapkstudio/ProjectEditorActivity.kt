@@ -180,7 +180,10 @@ class ProjectEditorActivity : Activity() {
 
     private fun openLivePreview() {
         saveCurrent(false)
-        startActivity(Intent(this, LivePreviewActivity::class.java).putExtra("project_root", rootDir.absolutePath))
+        startActivityForResult(
+            Intent(this, LivePreviewActivity::class.java).putExtra("project_root", rootDir.absolutePath),
+            7103
+        )
     }
 
     private fun toggleExplorer() {
@@ -369,6 +372,12 @@ class ProjectEditorActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7103 && resultCode == RESULT_OK) {
+            // Forward the runtime-preview ZIP to MainActivity, which owns the Termux build pipeline.
+            setResult(RESULT_OK, data)
+            finish()
+            return
+        }
         if (requestCode == 7102 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             try {
