@@ -17,6 +17,9 @@ class LivePreviewActivity : Activity() {
     private lateinit var projectRoot: File
     private lateinit var content: LinearLayout
     private lateinit var title: TextView
+    private lateinit var previewScroll: ScrollView
+    private var previewWidthDp = 360
+    private var previewHeightDp = 800
     private var layouts: List<File> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,13 +38,46 @@ class LivePreviewActivity : Activity() {
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(Button(this).apply { text = "↻"; contentDescription = "Reload preview"; setOnClickListener { chooseLayout() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
-        root.addView(TextView(this).apply { text = "Android layout preview · XML and Compose source"; textSize = 11f; setTextColor(0xFFB6C5D2.toInt()); setPadding(dp(4), dp(8), dp(4), dp(10)) })
-        val frame = FrameLayout(this).apply { setBackgroundColor(0xFFF5F7FA.toInt()) }
+        root.addView(TextView(this).apply { text = "Android layout preview · XML and Compose source"; textSize = 11f; setTextColor(0xFFB6C5D2.toInt()); setPadding(dp(4), dp(8), dp(4), dp(6)) })
+        val deviceControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        fun deviceButton(label: String, width: Int, height: Int, rotate: Boolean = false) = Button(this).apply {
+            text = label
+            isAllCaps = false
+            setOnClickListener {
+                if (rotate) {
+                    val oldWidth = previewWidthDp
+                    previewWidthDp = previewHeightDp
+                    previewHeightDp = oldWidth
+                } else {
+                    previewWidthDp = width
+                    previewHeightDp = height
+                }
+                applyDeviceProfile()
+            }
+        }
+        deviceControls.addView(deviceButton("Phone", 360, 800), LinearLayout.LayoutParams(0, dp(42), 1f))
+        deviceControls.addView(deviceButton("Tablet", 600, 900), LinearLayout.LayoutParams(0, dp(42), 1f))
+        deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
+        root.addView(deviceControls, LinearLayout.LayoutParams(-1, -2))
+        val frame = FrameLayout(this).apply { setBackgroundColor(0xFFE0E5EC.toInt()) }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
-        val scroll = ScrollView(this); scroll.addView(content)
-        frame.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+        previewScroll = ScrollView(this).apply { isFillViewport = true }
+        previewScroll.addView(content)
+        frame.addView(previewScroll, FrameLayout.LayoutParams(-1, -1))
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        applyDeviceProfile()
+    }
+
+    private fun applyDeviceProfile() {
+        if (!::content.isInitialized) return
+        content.layoutParams = (content.layoutParams ?: ScrollView.LayoutParams(-1, -2)).apply {
+            width = dp(previewWidthDp)
+            height = -2
+        }
+        content.minimumHeight = dp(previewHeightDp)
+        content.requestLayout()
+        title.text = "LIVE UI PREVIEW · ${previewWidthDp}×${previewHeightDp} dp"
     }
 
     private fun findLayouts() {
