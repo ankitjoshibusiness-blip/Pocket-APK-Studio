@@ -71,7 +71,7 @@ class LivePreviewActivity : Activity() {
 
     private fun applyDeviceProfile() {
         if (!::content.isInitialized) return
-        content.layoutParams = (content.layoutParams ?: ScrollView.LayoutParams(-1, -2)).apply {
+        content.layoutParams = (content.layoutParams ?: FrameLayout.LayoutParams(-1, -2)).apply {
             width = dp(previewWidthDp)
             height = -2
         }
