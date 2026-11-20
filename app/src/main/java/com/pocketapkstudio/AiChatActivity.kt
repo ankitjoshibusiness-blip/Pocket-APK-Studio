@@ -68,6 +68,12 @@ class AiChatActivity : Activity() {
             }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(4) })
         }
         root.addView(quick)
+        val previewButton = button("▶  Live UI Preview") { openLivePreview() }.apply {
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = rounded(0xFF256B72.toInt(), 11)
+        }
+        root.addView(previewButton, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(6) })
         scroll = ScrollView(this).apply { isFillViewport = true; setPadding(0, dp(8), 0, dp(8)) }
         messages = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(messages)
@@ -85,6 +91,18 @@ class AiChatActivity : Activity() {
         composer.addView(send, LinearLayout.LayoutParams(dp(50), dp(46)))
         root.addView(composer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         setContentView(root)
+    }
+
+    private fun openLivePreview() {
+        if (busy) {
+            Toast.makeText(this, "AI request complete thava do.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivityForResult(
+            android.content.Intent(this, LivePreviewActivity::class.java)
+                .putExtra("project_root", projectRoot.absolutePath),
+            7106
+        )
     }
 
     private fun settings() {
@@ -372,6 +390,14 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
                     addMessage("STATUS", "Last AI changes undo thai gaya.")
                 } catch (e: Exception) { addMessage("STATUS", "Undo failed: " + e.message) }
             }.show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7106 && resultCode == RESULT_OK) {
+            setResult(RESULT_OK, data)
+            finish()
+        }
     }
 
     private fun addMessage(who: String, text: String) {
