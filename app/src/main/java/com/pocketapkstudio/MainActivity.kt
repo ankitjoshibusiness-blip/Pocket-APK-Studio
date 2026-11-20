@@ -495,25 +495,33 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val workspaceHero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
-            setPadding(dp(18), dp(24), dp(18), dp(22))
+            setPadding(dp(16), dp(20), dp(16), dp(18))
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0xFFFFFFFF.toInt())
-                cornerRadius = dp(24).toFloat()
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1), 0xFFE4EDF1.toInt())
             }
-            elevation = dp(3).toFloat()
+            elevation = dp(4).toFloat()
         }
-        workspaceHero.addView(label("WORKSPACE", 38, 0xFF405968.toInt(), true).apply {
+        workspaceHero.addView(label("WORKSPACE", 34, 0xFF405968.toInt(), true).apply {
             gravity = android.view.Gravity.CENTER
-            letterSpacing = 0.04f
+            letterSpacing = 0.035f
         })
-        workspaceHero.addView(space(10))
+        workspaceHero.addView(label("Manage your Android projects", 12, 0xFF718592.toInt(), false).apply {
+            gravity = android.view.Gravity.CENTER
+        })
+        workspaceHero.addView(space(12))
         val workspaceActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
         }
         fun heroAction(text: String, action: () -> Unit): TextView {
-            return label(text, 21, 0xFF0000FF.toInt(), false).apply {
-                setPadding(dp(4), dp(6), dp(4), dp(6))
+            return label(text, 15, 0xFF245A72.toInt(), true).apply {
+                setPadding(dp(10), dp(9), dp(10), dp(9))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFEAF4F7.toInt())
+                    cornerRadius = dp(12).toFloat()
+                }
                 isClickable = true
                 isFocusable = true
                 setOnClickListener { action() }
@@ -572,11 +580,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(label("Build status, recent activity and build logs remain available below.", 12, 0xFFB4C0C8.toInt(), false))
         homeContent.addView(space(8))
         val importCard = card()
-        importCard.addView(label("1. IMPORT PROJECT", 12, 0xFF9AA7FF.toInt(), true))
+        importCard.addView(label("1. PROJECT ACTIONS", 12, 0xFF9AA7FF.toInt(), true))
         importCard.addView(space(10))
-        importCard.addView(actionButton("Choose ZIP project") { pickZip.launch(arrayOf("application/zip", "application/octet-stream")) })
+        importCard.addView(actionButton("＋  Create Project", true) { showQuickStart() })
         importCard.addView(space(8))
-        importCard.addView(actionButton("Choose project folder") { pickFolder.launch(null) })
+        importCard.addView(actionButton("▣  Open Existing Project (ZIP)") {
+            pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
+        })
+        importCard.addView(space(8))
+        importCard.addView(actionButton("Open Existing Project (Folder)") { pickFolder.launch(null) })
         editorContent.addView(importCard)
         editorContent.addView(space(14))
 
@@ -587,7 +599,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         projectType = label("Targets: Android Java/Kotlin first; Flutter later", 14, 0xFFB6BBC9.toInt(), false)
         projectCard.addView(projectType)
         projectCard.addView(space(8))
-        projectCard.addView(actionButton("Open ZIP in Workspace", true) {
+        projectCard.addView(actionButton("Open Selected Project in Editor", true) {
             val uri = selectedUri
             if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
             else openProjectEditor(uri)
