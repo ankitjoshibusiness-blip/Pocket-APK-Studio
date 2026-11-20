@@ -103,7 +103,7 @@ class LivePreviewActivity : Activity() {
             val pattern = Regex("""\b(Scaffold|Column|Row|Box|LazyColumn|LazyRow|Card|Surface|TopAppBar|CenterAlignedTopAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Checkbox|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog)\s*\(""")
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
-            data class PreviewNode(val start: Int, val end: Int, val view: View, val params: LinearLayout.LayoutParams, val container: Boolean)
+            data class PreviewNode(val start: Int, val end: Int, val view: View, val params: LinearLayout.LayoutParams, val container: Boolean, val args: String)
             val previewNodes = ArrayList<PreviewNode>()
             var rendered = 0
             for (match in matches) {
@@ -174,7 +174,8 @@ class LivePreviewActivity : Activity() {
                         textSize = 16f
                         setSingleLine(true)
                     }
-                    "Switch", "Checkbox" -> Switch(this).apply { text = label ?: "Toggle" }
+                    "Switch" -> Switch(this).apply { text = label ?: "Toggle" }
+                    "Checkbox" -> CheckBox(this).apply { text = label ?: "Check" }
                     "Slider" -> SeekBar(this)
                     "Card", "Surface" -> TextView(this).apply {
                         text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
@@ -187,19 +188,68 @@ class LivePreviewActivity : Activity() {
                     else -> null
                 }
                 if (view != null) {
-                    val pad = Regex("""padding\s*\(\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: 0
-                    if (pad > 0) view.setPadding(pad, pad, pad, pad)
+                    val paddingMatch = Regex("""padding\s*\(\s*(?:(\d+)\.dp|(?:all|horizontal|vertical|start|end|top|bottom)\s*=\s*(\d+)\.dp)""").find(callArgs)
+                    val allPad = (paddingMatch?.groupValues?.get(1)?.ifBlank { paddingMatch.groupValues[2] })?.toIntOrNull()?.let { dp(it) } ?: 0
+                    val horizontalPad = Regex("""horizontal\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: allPad
+                    val verticalPad = Regex("""vertical\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: allPad
+                    val startPad = Regex("""start\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: horizontalPad
+                    val endPad = Regex("""end\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: horizontalPad
+                    val topPad = Regex("""top\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: verticalPad
+                    val bottomPad = Regex("""bottom\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: verticalPad
+                    if (paddingMatch != null) view.setPadding(startPad, topPad, endPad, bottomPad)
                     val bgHex = Regex("""background\s*\(\s*Color\(0x([0-9A-Fa-f]{8})\)""").find(callArgs)?.groupValues?.get(1)
                     if (bgHex != null) runCatching { view.setBackgroundColor(Color.parseColor("#" + bgHex.takeLast(6))) }
-                    val schemeBg = Regex("""containerColor\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                    val bgName = Regex("""background\s*\(\s*([A-Za-z_]\w*)""").find(callArgs)?.groupValues?.get(1)
+                    if (bgName != null) colorMap[bgName]?.let { view.setBackgroundColor(it) }
+                    val schemeBg = Regex("""(?:containerColor|color)\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
                     if (schemeBg != null) colorMap[schemeBg]?.let { view.setBackgroundColor(it) }
                     val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
                     if (view is EditText) lp.height = dp(52)
-                    val widthDp = Regex("""width\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
-                    val heightDp = Regex("""height\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    val widthDp = Regex("""(?:width|size)\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                        ?: Regex("""\.width\s*\(\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    val heightDp = Regex("""(?:height|size)\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                        ?: Regex("""\.height\s*\(\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
                     widthDp?.let { lp.width = dp(it) }
                     heightDp?.let { lp.height = dp(it) }
-                    previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer))
+                    if (callArgs.contains("fillMaxSize()")) { lp.width = -1; lp.height = -1 }
+                    if (callArgs.contains("fillMaxWidth()")) lp.width = -1
+                    if (callArgs.contains("fillMaxHeight()")) lp.height = -1
+                    Regex("""weight\s*\(\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { lp.weight = it }
+                    if (isContainer && view is LinearLayout) {
+                        if (kind == "Row" || kind == "LazyRow" || kind == "NavigationBar" || kind == "NavigationRail") {
+                            view.gravity = when {
+                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER
+                                callArgs.contains("Arrangement.End") -> Gravity.END or Gravity.CENTER_VERTICAL
+                                callArgs.contains("Arrangement.SpaceBetween") -> Gravity.CENTER_VERTICAL
+                                else -> Gravity.CENTER_VERTICAL
+                            }
+                        } else {
+                            view.gravity = when {
+                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER_HORIZONTAL
+                                callArgs.contains("Arrangement.Bottom") -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                                else -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                            }
+                        }
+                    }
+                    if (view is TextView) {
+                        val typographySize = when {
+                            callArgs.contains("typography.displayLarge") -> 57f
+                            callArgs.contains("typography.headlineLarge") -> 32f
+                            callArgs.contains("typography.headlineMedium") -> 28f
+                            callArgs.contains("typography.headlineSmall") -> 24f
+                            callArgs.contains("typography.titleLarge") -> 22f
+                            callArgs.contains("typography.titleMedium") -> 16f
+                            callArgs.contains("typography.bodySmall") -> 12f
+                            callArgs.contains("typography.labelSmall") -> 11f
+                            else -> 0f
+                        }
+                        if (typographySize > 0f) view.textSize = typographySize
+                        if (callArgs.contains("TextAlign.End")) view.gravity = Gravity.END
+                        val maxLines = Regex("""maxLines\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                        if (maxLines != null) view.maxLines = maxLines
+                    }
+                    if (callArgs.contains("enabled = false") && view.isEnabled) view.isEnabled = false
+                    previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer, callArgs))
                     rendered++
                 }
             }
@@ -219,7 +269,19 @@ class LivePreviewActivity : Activity() {
                 }
                 val parent = if (parentIndex >= 0) previewNodes[parentIndex].view else screen
                 if (parent is FrameLayout) {
-                    parent.addView(node.view, FrameLayout.LayoutParams(node.params.width, node.params.height, Gravity.CENTER))
+                    val parentArgs = if (parentIndex >= 0) previewNodes[parentIndex].args else ""
+                    val boxGravity = when {
+                        parentArgs.contains("Alignment.TopStart") -> Gravity.TOP or Gravity.START
+                        parentArgs.contains("Alignment.TopEnd") -> Gravity.TOP or Gravity.END
+                        parentArgs.contains("Alignment.BottomStart") -> Gravity.BOTTOM or Gravity.START
+                        parentArgs.contains("Alignment.BottomEnd") -> Gravity.BOTTOM or Gravity.END
+                        parentArgs.contains("Alignment.CenterStart") -> Gravity.CENTER_VERTICAL or Gravity.START
+                        parentArgs.contains("Alignment.CenterEnd") -> Gravity.CENTER_VERTICAL or Gravity.END
+                        parentArgs.contains("Alignment.TopCenter") -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                        parentArgs.contains("Alignment.BottomCenter") -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                        else -> Gravity.CENTER
+                    }
+                    parent.addView(node.view, FrameLayout.LayoutParams(node.params.width, node.params.height, boxGravity))
                 } else if (parent is LinearLayout) {
                     parent.addView(node.view, node.params)
                 } else {
