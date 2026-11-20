@@ -408,7 +408,12 @@ class ProjectEditorActivity : Activity() {
         }
         if (requestCode == 7105) {
             refreshExplorer()
-            currentFile?.takeIf { it.isFile }?.let { openFile(it) }
+            val fileToReload = currentFile
+            if (fileToReload != null && fileToReload.isFile) {
+                openTabs.remove(fileToReload)
+                currentFile = null
+                openFile(fileToReload)
+            }
             return
         }
         if (requestCode == 7104 && resultCode == RESULT_OK) {
