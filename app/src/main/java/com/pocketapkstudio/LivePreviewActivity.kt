@@ -97,7 +97,7 @@ class LivePreviewActivity : Activity() {
             fun firstLiteral(text: String): String? =
                 Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
                     ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
-            val pattern = Regex("""\b(Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Card|Surface|CircularProgressIndicator|LinearProgressIndicator|Checkbox)\s*\(""")
+            val pattern = Regex("""\b(Scaffold|Column|Row|Box|LazyColumn|LazyRow|Card|Surface|TopAppBar|CenterAlignedTopAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Checkbox|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog)\s*\(""")
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
             var rendered = 0
@@ -127,13 +127,23 @@ class LivePreviewActivity : Activity() {
                 }
                 consumed.add(match.range.first..endOfElement)
                 val view: View? = when (kind) {
+                    "Scaffold", "Column", "LazyColumn", "NavigationDrawer", "ModalNavigationDrawer" -> TextView(this).apply { text = "▤ " + kind; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
+                    "Row", "LazyRow", "NavigationBar", "NavigationRail" -> TextView(this).apply { text = "↔ " + kind; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
+                    "Box" -> TextView(this).apply { text = "□ Box"; textSize = 12f; setTextColor(0xFF52627A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xFFE9EDF5.toInt()) }
+                    "TopAppBar", "CenterAlignedTopAppBar" -> TextView(this).apply { text = label ?: "App Bar"; textSize = 18f; setTextColor(0xFF263449.toInt()); setPadding(dp(12), dp(14), dp(12), dp(14)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
+                    "Icon" -> TextView(this).apply { text = "◆"; textSize = 20f; gravity = Gravity.CENTER }
+                    "Image", "AsyncImage" -> TextView(this).apply { text = "▧ Image"; gravity = Gravity.CENTER; textSize = 12f; setTextColor(0xFF65738B.toInt()); setBackgroundColor(0xFFE8ECF7.toInt()); minimumHeight = dp(72) }
+                    "DropdownMenu" -> TextView(this).apply { text = label ?: "Dropdown Menu"; setPadding(dp(12), dp(10), dp(12), dp(10)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "AlertDialog" -> TextView(this).apply { text = label ?: "Dialog Preview"; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "Text" -> label?.let { textValue ->
                         TextView(this).apply {
                             text = textValue
                             textSize = if (callArgs.contains("fontSize") && callArgs.contains("sp")) {
                                 Regex("""fontSize\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 16f
                             } else 16f
-                            setTextColor(colorMap["Ink"] ?: 0xFF263449.toInt())
+                            val textColorName = Regex("""color\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                            setTextColor(colorMap[textColorName] ?: colorMap["Ink"] ?: 0xFF263449.toInt())
                             setPadding(0, dp(5), 0, dp(5))
                         }
                     }
@@ -151,21 +161,25 @@ class LivePreviewActivity : Activity() {
                     }
                     "Switch", "Checkbox" -> Switch(this).apply { text = label ?: "Toggle" }
                     "Slider" -> SeekBar(this)
-                    "Card", "Surface" -> label?.let { textValue ->
-                        TextView(this).apply {
-                            text = textValue
-                            textSize = 16f
-                            setTextColor(0xFF263449.toInt())
-                            setPadding(dp(12), dp(12), dp(12), dp(12))
-                            setBackgroundColor(0xFFE8ECF7.toInt())
-                        }
+                    "Card", "Surface" -> TextView(this).apply {
+                        text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
+                        textSize = 14f
+                        setTextColor(0xFF263449.toInt())
+                        setPadding(dp(12), dp(12), dp(12), dp(12))
+                        setBackgroundColor(0xFFE8ECF7.toInt())
                     }
                     "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
                     else -> null
                 }
                 if (view != null) {
+                    val pad = Regex("""padding\s*\(\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: 0
+                    if (pad > 0) view.setPadding(pad, pad, pad, pad)
                     val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
                     if (view is EditText) lp.height = dp(52)
+                    val widthDp = Regex("""width\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    val heightDp = Regex("""height\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    widthDp?.let { lp.width = dp(it) }
+                    heightDp?.let { lp.height = dp(it) }
                     screen.addView(view, lp)
                     rendered++
                 }
