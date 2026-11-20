@@ -78,6 +78,10 @@ class LivePreviewActivity : Activity() {
             Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach {
                 runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
             }
+            Regex("""(?:primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach { match ->
+                val key = Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=""").find(code.substring((match.range.first - 40).coerceAtLeast(0), match.range.first))?.groupValues?.get(1)
+                if (key != null) runCatching { colorMap[key] = android.graphics.Color.parseColor("#" + match.groupValues[1].takeLast(6)) }
+            }
             fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
                 var depth = 0
                 var quoted = false
@@ -144,6 +148,8 @@ class LivePreviewActivity : Activity() {
                             } else 16f
                             val textColorName = Regex("""color\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
                             setTextColor(colorMap[textColorName] ?: colorMap["Ink"] ?: 0xFF263449.toInt())
+                            if (callArgs.contains("FontWeight.Bold") || callArgs.contains("fontWeight = FontWeight.SemiBold")) setTypeface(typeface, android.graphics.Typeface.BOLD)
+                            if (callArgs.contains("TextAlign.Center")) gravity = Gravity.CENTER
                             setPadding(0, dp(5), 0, dp(5))
                         }
                     }
@@ -174,6 +180,10 @@ class LivePreviewActivity : Activity() {
                 if (view != null) {
                     val pad = Regex("""padding\s*\(\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: 0
                     if (pad > 0) view.setPadding(pad, pad, pad, pad)
+                    val bgHex = Regex("""background\s*\(\s*Color\(0x([0-9A-Fa-f]{8})\)""").find(callArgs)?.groupValues?.get(1)
+                    if (bgHex != null) runCatching { view.setBackgroundColor(Color.parseColor("#" + bgHex.takeLast(6))) }
+                    val schemeBg = Regex("""containerColor\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                    if (schemeBg != null) colorMap[schemeBg]?.let { view.setBackgroundColor(it) }
                     val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
                     if (view is EditText) lp.height = dp(52)
                     val widthDp = Regex("""width\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
