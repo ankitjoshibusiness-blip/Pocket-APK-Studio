@@ -78,9 +78,8 @@ class LivePreviewActivity : Activity() {
             Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach {
                 runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
             }
-            Regex("""(?:primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach { match ->
-                val key = Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=""").find(code.substring((match.range.first - 40).coerceAtLeast(0), match.range.first))?.groupValues?.get(1)
-                if (key != null) runCatching { colorMap[key] = android.graphics.Color.parseColor("#" + match.groupValues[1].takeLast(6)) }
+            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").findAll(code).forEach { match ->
+                runCatching { colorMap[match.groupValues[1]] = android.graphics.Color.parseColor("#" + match.groupValues[2].takeLast(6)) }
             }
             fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
                 var depth = 0
