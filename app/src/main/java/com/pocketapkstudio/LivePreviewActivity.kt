@@ -52,71 +52,141 @@ class LivePreviewActivity : Activity() {
     }
 
 
-    /** Best-effort approximation for projects that build UI in Kotlin/Java code. */
+    /** Static Compose source preview. It approximates common composables without executing app code. */
     private fun renderSourcePreview() {
         content.removeAllViews()
-        val sourceDir = File(projectRoot, "app/src/main/java")
-        val source = sourceDir.walkTopDown().firstOrNull {
-            it.isFile && (it.name == "MainActivity.kt" || it.name == "MainActivity.java")
-        }
+        val sourceDir = File(projectRoot, "app/src/main")
+        val sources = sourceDir.walkTopDown().filter {
+            it.isFile && it.extension == "kt" && it.length() < 2_000_000L
+        }.toList()
+        val source = sources.firstOrNull { it.name == "MainActivity.kt" && it.readText().contains("setContent") }
+            ?: sources.firstOrNull { it.readText().contains("@Composable") }
         if (source == null) {
             title.text = "LIVE UI PREVIEW"
-            showMessage("No Android XML layout or MainActivity source file found.")
+            showMessage("No Compose Kotlin source found. Add a MainActivity or @Composable screen.")
             return
         }
-        title.text = "PREVIEW · " + source.name
+        title.text = "COMPOSE PREVIEW · " + source.name
         try {
             val code = source.readText()
             val screen = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(18), dp(18), dp(18), dp(18))
+                setPadding(dp(16), dp(16), dp(16), dp(16))
                 setBackgroundColor(0xFFF5F7FF.toInt())
             }
-            val textPattern = Regex("(?:text\\s*=\\s*|setText\\()\\\"([^\\\"]+)\\\"")
-            val hintPattern = Regex("(?:hint\\s*=\\s*|setHint\\()\\\"([^\\\"]+)\\\"")
-            val strings = textPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
-            val hints = hintPattern.findAll(code).map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().toList()
-            val heading = strings.firstOrNull() ?: source.nameWithoutExtension
-            screen.addView(TextView(this).apply {
-                text = heading
-                textSize = 24f
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setTextColor(0xFF18264A.toInt())
-                setPadding(0, 0, 0, dp(18))
-            }, LinearLayout.LayoutParams(-1, -2))
-            val editCount = Regex("EditText\\s*\\(").findAll(code).count().coerceAtMost(8)
-            repeat(editCount) { index ->
-                screen.addView(EditText(this).apply {
-                    hint = hints.getOrNull(index) ?: "Enter text"
-                    textSize = 16f
-                    setSingleLine(true)
-                }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(10) })
+            val colorMap = HashMap<String, Int>()
+            Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach {
+                runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
             }
-            val buttonTexts = strings.filter { label ->
-                code.contains("Button") && (code.contains("text=\\\"$label\\\"") || code.contains("setText(\\\"$label\\\")"))
+            fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
+                var depth = 0
+                var quoted = false
+                var escaped = false
+                for (i in open until text.length) {
+                    val ch = text[i]
+                    if (quoted) {
+                        if (escaped) escaped = false else if (ch == '\\') escaped = true else if (ch == '"') quoted = false
+                    } else {
+                        if (ch == '"') quoted = true
+                        else if (ch == left) depth++
+                        else if (ch == right && --depth == 0) return i
+                    }
+                }
+                return -1
             }
-            strings.drop(1).filterNot { buttonTexts.contains(it) }.forEach { label ->
+            fun firstLiteral(text: String): String? =
+                Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
+                    ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
+            val pattern = Regex("""\b(Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Card|Surface|CircularProgressIndicator|LinearProgressIndicator|Checkbox)\s*\(""")
+            val matches = pattern.findAll(code).toList()
+            val consumed = ArrayList<IntRange>()
+            var rendered = 0
+            for (match in matches) {
+                if (consumed.any { match.range.first in it }) continue
+                val open = code.indexOf('(', match.range.first)
+                val close = findClosing(code, open, '(', ')')
+                if (close < 0) continue
+                val callArgs = code.substring(open + 1, close)
+                val kind = match.groupValues[1]
+                var label = firstLiteral(callArgs)
+                var endOfElement = close
+                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton")) {
+                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    if (lambdaStart != null) {
+                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        if (lambdaEnd > lambdaStart) {
+                            val body = code.substring(lambdaStart, lambdaEnd + 1)
+                            label = Regex("""Text\s*\(\s*"""").find(body)?.let { firstLiteral(body.substring(it.range.first)) } ?: label
+                            endOfElement = lambdaEnd
+                        }
+                    }
+                }
+                if (kind in setOf("OutlinedTextField", "TextField")) {
+                    val labelBlock = Regex("""(?:label|placeholder)\s*=\s*\{\s*Text\s*\(""").find(callArgs)
+                    if (labelBlock != null) label = firstLiteral(callArgs.substring(labelBlock.range.last + 1)) ?: label
+                }
+                consumed.add(match.range.first..endOfElement)
+                val view: View? = when (kind) {
+                    "Text" -> label?.let { textValue ->
+                        TextView(this).apply {
+                            text = textValue
+                            textSize = if (callArgs.contains("fontSize") && callArgs.contains("sp")) {
+                                Regex("""fontSize\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 16f
+                            } else 16f
+                            setTextColor(colorMap["Ink"] ?: 0xFF263449.toInt())
+                            setPadding(0, dp(5), 0, dp(5))
+                        }
+                    }
+                    "Button", "OutlinedButton", "TextButton", "IconButton" -> label?.let { textValue ->
+                        Button(this).apply {
+                            text = textValue
+                            isAllCaps = false
+                            setOnClickListener { Toast.makeText(this@LivePreviewActivity, "Preview control only: $textValue", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                    "OutlinedTextField", "TextField" -> EditText(this).apply {
+                        hint = label ?: "Enter text"
+                        textSize = 16f
+                        setSingleLine(true)
+                    }
+                    "Switch", "Checkbox" -> Switch(this).apply { text = label ?: "Toggle" }
+                    "Slider" -> SeekBar(this)
+                    "Card", "Surface" -> label?.let { textValue ->
+                        TextView(this).apply {
+                            text = textValue
+                            textSize = 16f
+                            setTextColor(0xFF263449.toInt())
+                            setPadding(dp(12), dp(12), dp(12), dp(12))
+                            setBackgroundColor(0xFFE8ECF7.toInt())
+                        }
+                    }
+                    "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
+                    else -> null
+                }
+                if (view != null) {
+                    val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) }
+                    if (view is EditText) lp.height = dp(52)
+                    screen.addView(view, lp)
+                    rendered++
+                }
+            }
+            if (rendered == 0) {
                 screen.addView(TextView(this).apply {
-                    text = label
-                    textSize = 16f
-                    setTextColor(0xFF273449.toInt())
-                    setPadding(0, dp(8), 0, dp(8))
-                }, LinearLayout.LayoutParams(-1, -2))
+                    text = "Compose source was found, but supported UI calls could not be extracted. This is a static approximation, not a running Compose renderer."
+                    setTextColor(Color.DKGRAY)
+                    textSize = 14f
+                })
+            } else {
+                screen.addView(TextView(this).apply {
+                    text = "Static Compose preview · $rendered detected elements · App logic and exact layout are not executed"
+                    textSize = 11f
+                    setTextColor(0xFF65738B.toInt())
+                    setPadding(0, dp(12), 0, dp(8))
+                })
             }
-            buttonTexts.forEach { label ->
-                screen.addView(Button(this).apply {
-                    text = label
-                    isAllCaps = false
-                    setOnClickListener { Toast.makeText(this@LivePreviewActivity, "Preview only: $label", Toast.LENGTH_SHORT).show() }
-                }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
-            }
-            if (strings.isEmpty() && editCount == 0) screen.addView(TextView(this).apply {
-                text = "Source found, but no simple UI labels could be detected. This is an approximate preview, not a running app."
-                setTextColor(Color.DKGRAY)
-            })
             content.addView(screen, LinearLayout.LayoutParams(-1, -2))
         } catch (e: Exception) {
-            showMessage("Could not create source preview.\\n\\n" + (e.message ?: e.javaClass.simpleName))
+            showMessage("Could not create Compose preview.\n\n" + (e.message ?: e.javaClass.simpleName))
         }
     }
 
