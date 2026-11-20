@@ -78,9 +78,12 @@ class LivePreviewActivity : Activity() {
             Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach {
                 runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
             }
-            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").findAll(code).forEach { match ->
+            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach { match ->
                 runCatching { colorMap[match.groupValues[1]] = android.graphics.Color.parseColor("#" + match.groupValues[2].takeLast(6)) }
             }
+            val usesDarkTheme = Regex("""darkColorScheme\s*\(""").containsMatchIn(code)
+            val themeBackground = colorMap["background"] ?: colorMap["surface"] ?: if (usesDarkTheme) 0xFF171B24.toInt() else 0xFFF5F7FF.toInt()
+            val themeOnBackground = colorMap["onSurface"] ?: if (usesDarkTheme) Color.WHITE else 0xFF263449.toInt()
             fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
                 var depth = 0
                 var quoted = false
@@ -101,6 +104,7 @@ class LivePreviewActivity : Activity() {
                 Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
                     ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
             val pattern = Regex("""\b(Scaffold|Column|Row|Box|LazyColumn|LazyRow|Card|Surface|TopAppBar|CenterAlignedTopAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Checkbox|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog)\s*\(""")
+            screen.setBackgroundColor(themeBackground)
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
             data class PreviewNode(val start: Int, val end: Int, val view: View, val params: LinearLayout.LayoutParams, val container: Boolean, val args: String)
@@ -145,8 +149,49 @@ class LivePreviewActivity : Activity() {
                     "Box" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "TopAppBar", "CenterAlignedTopAppBar" -> TextView(this).apply { text = label ?: "App Bar"; textSize = 18f; setTextColor(0xFF263449.toInt()); setPadding(dp(12), dp(14), dp(12), dp(14)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
-                    "Icon" -> TextView(this).apply { text = "◆"; textSize = 20f; gravity = Gravity.CENTER }
-                    "Image", "AsyncImage" -> TextView(this).apply { text = "▧ Image"; gravity = Gravity.CENTER; textSize = 12f; setTextColor(0xFF65738B.toInt()); setBackgroundColor(0xFFE8ECF7.toInt()); minimumHeight = dp(72) }
+                    "Icon" -> {
+                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""").find(callArgs)?.groupValues?.get(1) ?: "Star"
+                        val glyph = when (iconName.lowercase()) {
+                            "home" -> "⌂"; "search" -> "⌕"; "settings" -> "⚙"; "menu" -> "☰"; "add" -> "+"; "close" -> "×"
+                            "arrowback" -> "←"; "delete" -> "▤"; "edit" -> "✎"; "person" -> "●"; "favorite" -> "♥"
+                            "notifications" -> "♢"; "cameraalt", "camera" -> "▣"; "check" -> "✓"; "morevert" -> "⋮"
+                            "share" -> "↗"; "download" -> "↓"; "visibility" -> "◉"; "locationon" -> "⌖"; else -> "◆"
+                        }
+                        TextView(this).apply {
+                            text = glyph
+                            textSize = Regex("""size\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 22f
+                            gravity = Gravity.CENTER
+                            val tint = Regex("""tint\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").find(callArgs)?.groupValues?.get(1)
+                            setTextColor(tint?.let { runCatching { Color.parseColor("#" + it.takeLast(6)) }.getOrNull() } ?: themeOnBackground)
+                            contentDescription = iconName
+                        }
+                    }
+                    "Image", "AsyncImage" -> {
+                        val resourceName = Regex("""R\.drawable\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                            ?: Regex("""painterResource\s*\(\s*R\.drawable\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                        val imageFile = resourceName?.let { name ->
+                            projectRoot.walkTopDown().maxDepth(10).firstOrNull {
+                                it.isFile && it.nameWithoutExtension == name && it.parentFile?.name?.startsWith("drawable") == true &&
+                                    it.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp")
+                            }
+                        }
+                        if (imageFile != null) {
+                            ImageView(this).apply {
+                                setImageBitmap(android.graphics.BitmapFactory.decodeFile(imageFile.absolutePath))
+                                scaleType = ImageView.ScaleType.CENTER_CROP
+                                adjustViewBounds = true
+                                contentDescription = label ?: resourceName
+                                minimumHeight = dp(72)
+                            }
+                        } else TextView(this).apply {
+                            text = "▧ " + (label ?: resourceName ?: "Image preview")
+                            gravity = Gravity.CENTER
+                            textSize = 12f
+                            setTextColor(0xFF65738B.toInt())
+                            setBackgroundColor(0xFFE8ECF7.toInt())
+                            minimumHeight = dp(72)
+                        }
+                    }
                     "DropdownMenu" -> TextView(this).apply { text = label ?: "Dropdown Menu"; setPadding(dp(12), dp(10), dp(12), dp(10)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "AlertDialog" -> TextView(this).apply { text = label ?: "Dialog Preview"; setPadding(dp(16), dp(16), dp(16), dp(16)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "Text" -> label?.let { textValue ->
@@ -156,7 +201,7 @@ class LivePreviewActivity : Activity() {
                                 Regex("""fontSize\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 16f
                             } else 16f
                             val textColorName = Regex("""color\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
-                            setTextColor(colorMap[textColorName] ?: colorMap["Ink"] ?: 0xFF263449.toInt())
+                            setTextColor(colorMap[textColorName] ?: colorMap["Ink"] ?: themeOnBackground)
                             if (callArgs.contains("FontWeight.Bold") || callArgs.contains("fontWeight = FontWeight.SemiBold")) setTypeface(typeface, android.graphics.Typeface.BOLD)
                             if (callArgs.contains("TextAlign.Center")) gravity = Gravity.CENTER
                             setPadding(0, dp(5), 0, dp(5))
