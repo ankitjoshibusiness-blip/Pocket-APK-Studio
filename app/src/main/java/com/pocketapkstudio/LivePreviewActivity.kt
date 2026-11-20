@@ -587,8 +587,13 @@ class LivePreviewActivity : Activity() {
 
     private fun makeView(tag: String, p: XmlPullParser): View {
         val v: View = when (tag) {
-            "LinearLayout" -> LinearLayout(this).apply { orientation = if (attr(p, "orientation") == "horizontal") LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
-            "FrameLayout", "ConstraintLayout", "CoordinatorLayout", "RelativeLayout", "ScrollView", "NestedScrollView" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            "LinearLayout" -> LinearLayout(this).apply {
+                orientation = if (attr(p, "orientation") == "horizontal") LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                gravity = gravity(attr(p, "gravity"))
+            }
+            "FrameLayout", "ConstraintLayout", "CoordinatorLayout", "RelativeLayout" -> FrameLayout(this)
+            "ScrollView", "NestedScrollView" -> ScrollView(this).apply { isFillViewport = attr(p, "fillViewport") == "true" }
+            "HorizontalScrollView" -> HorizontalScrollView(this)
             "TextView", "CheckedTextView" -> TextView(this)
             "Button", "MaterialButton" -> Button(this).apply { isAllCaps = false }
             "EditText", "TextInputEditText" -> EditText(this)
@@ -596,7 +601,24 @@ class LivePreviewActivity : Activity() {
             "RadioButton" -> RadioButton(this)
             "Switch", "SwitchCompat" -> Switch(this)
             "ProgressBar" -> ProgressBar(this)
-            "ImageView", "ImageButton" -> TextView(this).apply { text = "▧ Image placeholder"; gravity = Gravity.CENTER }
+            "ImageView", "ImageButton" -> {
+                val image = ImageView(this)
+                val ref = attr(p, "src").ifBlank { attr(p, "background") }
+                val resource = ref.substringAfter("@drawable/", "").substringAfter("@mipmap/", "")
+                val bitmapFile = if (resource.isNotBlank()) projectRoot.walkTopDown().maxDepth(10).firstOrNull {
+                    it.isFile && it.nameWithoutExtension == resource &&
+                        it.parentFile?.name?.startsWith("drawable") == true &&
+                        it.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp")
+                } else null
+                if (bitmapFile != null) {
+                    runCatching { image.setImageBitmap(android.graphics.BitmapFactory.decodeFile(bitmapFile.absolutePath)) }
+                    image.scaleType = ImageView.ScaleType.CENTER_CROP
+                } else {
+                    image.contentDescription = "Image resource: $ref (not found in supported drawable files)"
+                    image.setBackgroundColor(0xFFE3E8EF.toInt())
+                }
+                image
+            }
             "Space" -> Space(this)
             else -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         }
@@ -608,44 +630,106 @@ class LivePreviewActivity : Activity() {
             attr(p, "textSize").removeSuffix("sp").toFloatOrNull()?.let { v.textSize = it }
             color(attr(p, "textColor"))?.let { v.setTextColor(it) }
             v.gravity = gravity(attr(p, "gravity"))
+            val maxLines = attr(p, "maxLines").toIntOrNull()
+            if (maxLines != null && maxLines > 0) v.maxLines = maxLines
         } else if (v is CompoundButton && txt.isNotBlank()) v.text = resolveText(txt)
         color(attr(p, "background"))?.let { v.setBackgroundColor(it) }
-        attr(p, "padding").removeSuffix("dp").toFloatOrNull()?.toInt()?.let { val n = dp(it); v.setPadding(n,n,n,n) }
-        if (v is Button || v is CompoundButton) v.setOnClickListener { Toast.makeText(this, "Preview control: " + txt.ifBlank { tag }, Toast.LENGTH_SHORT).show() }
+        val allPadding = dim(attr(p, "padding"), 0).coerceAtLeast(0)
+        val left = dim(attr(p, "paddingLeft"), allPadding).coerceAtLeast(0)
+        val right = dim(attr(p, "paddingRight"), allPadding).coerceAtLeast(0)
+        val top = dim(attr(p, "paddingTop"), allPadding).coerceAtLeast(0)
+        val bottom = dim(attr(p, "paddingBottom"), allPadding).coerceAtLeast(0)
+        v.setPadding(left, top, right, bottom)
+        if (v is Button || v is CompoundButton || v is ImageButton) {
+            v.setOnClickListener { Toast.makeText(this, "Preview control: " + txt.ifBlank { tag }, Toast.LENGTH_SHORT).show() }
+        }
         return v
     }
 
     private fun params(p: XmlPullParser, parent: ViewGroup): ViewGroup.LayoutParams {
-        val w = dim(attr(p, "layout_width"), -2); val h = dim(attr(p, "layout_height"), -2)
+        val w = dim(attr(p, "layout_width"), -2)
+        val h = dim(attr(p, "layout_height"), -2)
+        val ml = dim(attr(p, "layout_marginLeft"), dim(attr(p, "layout_margin"), 0)).coerceAtLeast(0)
+        val mr = dim(attr(p, "layout_marginRight"), dim(attr(p, "layout_margin"), 0)).coerceAtLeast(0)
+        val mt = dim(attr(p, "layout_marginTop"), dim(attr(p, "layout_margin"), 0)).coerceAtLeast(0)
+        val mb = dim(attr(p, "layout_marginBottom"), dim(attr(p, "layout_margin"), 0)).coerceAtLeast(0)
         if (parent is LinearLayout) return LinearLayout.LayoutParams(w, h).apply {
-            val m = dim(attr(p, "layout_margin"), 0).coerceAtLeast(0); setMargins(m,m,m,m)
+            setMargins(ml, mt, mr, mb)
             attr(p, "layout_weight").toFloatOrNull()?.let { weight = it }
+            gravity = gravity(attr(p, "layout_gravity"))
         }
-        return ViewGroup.LayoutParams(w, h)
+        if (parent is FrameLayout) return FrameLayout.LayoutParams(w, h, gravity(attr(p, "layout_gravity"))).apply {
+            setMargins(ml, mt, mr, mb)
+        }
+        return ViewGroup.MarginLayoutParams(w, h).apply { setMargins(ml, mt, mr, mb) }
     }
-
     private fun attr(p: XmlPullParser, name: String) = p.getAttributeValue("http://schemas.android.com/apk/res/android", name) ?: p.getAttributeValue(null, name) ?: ""
+    private fun valueResourceFiles(fileName: String): List<File> =
+        projectRoot.walkTopDown().maxDepth(10)
+            .filter { it.isFile && it.name == fileName && it.parentFile?.name?.startsWith("values") == true &&
+                it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git") } }
+            .take(30).toList()
+
     private fun resolveText(s: String): String {
         if (s.startsWith("@string/")) {
             val key = s.substringAfter('/')
-            val f = File(projectRoot, "app/src/main/res/values/strings.xml")
-            if (f.isFile) Regex("<string\\s+name=\"" + Regex.escape(key) + "\"[^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL)).find(f.readText())?.let { return it.groupValues[1] }
+            for (file in valueResourceFiles("strings.xml")) {
+                val found = runCatching {
+                    Regex("<string\\s+name=\"" + Regex.escape(key) + "\"[^>]*>(.*?)</string>", setOf(RegexOption.DOT_MATCHES_ALL))
+                        .find(file.readText())?.groupValues?.get(1)
+                }.getOrNull()
+                if (found != null) return found.replace("\\n", "\n")
+            }
         }
         return s
     }
-    private fun color(s: String): Int? = try { if (s.startsWith("#")) Color.parseColor(s) else null } catch (_: Exception) { null }
-    private fun gravity(s: String): Int {
-        var g = Gravity.CENTER_VERTICAL
-        if (s.contains("center")) g = Gravity.CENTER
-        else if (s.contains("end") || s.contains("right")) g = Gravity.END or Gravity.CENTER_VERTICAL
-        else if (s.contains("start") || s.contains("left")) g = Gravity.START or Gravity.CENTER_VERTICAL
-        return g
+
+    private fun color(s: String): Int? {
+        if (s.isBlank()) return null
+        if (s.startsWith("#")) return runCatching { Color.parseColor(s) }.getOrNull()
+        if (s.startsWith("@color/")) {
+            val key = s.substringAfter('/')
+            for (file in valueResourceFiles("colors.xml")) {
+                val value = runCatching {
+                    Regex("<color\\s+name=\"" + Regex.escape(key) + "\"[^>]*>(.*?)</color>", setOf(RegexOption.DOT_MATCHES_ALL))
+                        .find(file.readText())?.groupValues?.get(1)?.trim()
+                }.getOrNull()
+                if (value != null) return runCatching { Color.parseColor(value) }.getOrNull()
+            }
+        }
+        return null
     }
-    private fun dim(s: String, fallback: Int): Int = when {
-        s == "match_parent" || s == "fill_parent" -> -1
-        s == "wrap_content" || s.isBlank() -> -2
-        s.endsWith("dp") -> dp(s.removeSuffix("dp").toFloatOrNull()?.toInt() ?: 0)
-        else -> fallback
+
+    private fun gravity(s: String): Int {
+        if (s.isBlank()) return Gravity.CENTER_VERTICAL
+        var result = 0
+        if (s.contains("center")) result = result or Gravity.CENTER
+        if (s.contains("start") || s.contains("left")) result = result or Gravity.START
+        if (s.contains("end") || s.contains("right")) result = result or Gravity.END
+        if (s.contains("top")) result = result or Gravity.TOP
+        if (s.contains("bottom")) result = result or Gravity.BOTTOM
+        return if (result == 0) Gravity.CENTER_VERTICAL else result
+    }
+
+    private fun dim(s: String, fallback: Int): Int {
+        if (s.isBlank()) return fallback
+        if (s == "match_parent" || s == "fill_parent") return -1
+        if (s == "wrap_content") return -2
+        if (s.startsWith("@dimen/")) {
+            val key = s.substringAfter('/')
+            for (file in valueResourceFiles("dimens.xml")) {
+                val value = runCatching {
+                    Regex("<dimen\\s+name=\"" + Regex.escape(key) + "\"[^>]*>(.*?)</dimen>", setOf(RegexOption.DOT_MATCHES_ALL))
+                        .find(file.readText())?.groupValues?.get(1)?.trim()
+                }.getOrNull()
+                if (value != null) return dim(value, fallback)
+            }
+        }
+        return when {
+            s.endsWith("dp") -> dp(s.removeSuffix("dp").toFloatOrNull()?.toInt() ?: 0)
+            s.endsWith("sp") -> dp(s.removeSuffix("sp").toFloatOrNull()?.toInt() ?: 0)
+            else -> fallback
+        }
     }
     private fun showMessage(s: String) {
         content.removeAllViews()
