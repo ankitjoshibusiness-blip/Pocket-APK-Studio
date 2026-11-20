@@ -492,17 +492,46 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }.start() }
             }
         }
-        val workflowActions = card()
-        workflowActions.addView(label("WORKFLOW", 13, 0xFF9AA7FF.toInt(), true))
-        workflowActions.addView(space(8))
-        workflowActions.addView(label("Create a project or open an existing Android project, then build and monitor it here.", 13, 0xFFB6BBC9.toInt(), false))
-        workflowActions.addView(space(10))
-        workflowActions.addView(actionButton("＋  Create Project", true) { showQuickStart() })
-        workflowActions.addView(space(8))
-        workflowActions.addView(actionButton("▣  Open Existing Project") {
+        val workspaceHero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(18), dp(24), dp(18), dp(22))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFFFFFFF.toInt())
+                cornerRadius = dp(24).toFloat()
+            }
+            elevation = dp(3).toFloat()
+        }
+        workspaceHero.addView(label("WORKSPACE", 38, 0xFF405968.toInt(), true).apply {
+            gravity = android.view.Gravity.CENTER
+            letterSpacing = 0.04f
+        })
+        workspaceHero.addView(space(10))
+        val workspaceActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        fun heroAction(text: String, action: () -> Unit): TextView {
+            return label(text, 21, 0xFF0000FF.toInt(), false).apply {
+                setPadding(dp(4), dp(6), dp(4), dp(6))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener(action)
+            }
+        }
+        workspaceActions.addView(heroAction("Manage") {
             pickZip.launch(arrayOf("application/zip", "application/octet-stream"))
         })
-        homeContent.addView(workflowActions)
+        workspaceActions.addView(heroAction("Create") { showQuickStart() })
+        workspaceActions.addView(heroAction("Edit") { openPage?.invoke(1) })
+        workspaceActions.addView(heroAction("➜") { openPage?.invoke(1) }.apply {
+            textSize = 28f
+            gravity = android.view.Gravity.CENTER
+            background = premiumGradient(0xFF405968.toInt(), 0xFF405968.toInt(), 50)
+            setTextColor(0xFFFFFFFF.toInt())
+        })
+        workspaceHero.addView(workspaceActions)
+        homeContent.addView(workspaceHero)
         homeContent.addView(space(10))
         homeContent.addView(welcomeMenuItem("</>", "Workspace") { openPage?.invoke(1) })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
@@ -992,8 +1021,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(4), dp(6), dp(4), dp(6))
             background = premiumGradient(0xFF273640.toInt(), 0xFF202A33.toInt(), 18)
         }
-        homeTab = navButton("⇄", "Workflow") { showPage(0) }
-        editorTab = navButton("</>", "Workspace") { showPage(1) }
+        homeTab = navButton("⌂", "Workspace") { showPage(0) }
+        editorTab = navButton("</>", "Editor") { showPage(1) }
         toolsTab = navButton("⬡", "Tools") { showPage(2) }
         previewTab = navButton("◉", "Preview") { showPage(3) }
         settingsTab = navButton("⚙", "Settings") { showPage(4) }
