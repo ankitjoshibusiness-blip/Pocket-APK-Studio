@@ -444,7 +444,7 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
         if (!::activityLog.isInitialized) return
         val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val line = "[$stamp] $message"
-        activityLog.append("\\n" + line)
+        activityLog.append("\n" + line)
         val parent = activityLog.parent as? ScrollView
         parent?.post { parent.fullScroll(View.FOCUS_DOWN) }
     }
