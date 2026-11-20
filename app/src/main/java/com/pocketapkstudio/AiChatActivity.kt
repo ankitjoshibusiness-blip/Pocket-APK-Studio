@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Typeface
 import android.os.Bundle
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -14,6 +17,11 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.LinkedHashMap
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import java.util.concurrent.Executors
 
 class AiChatActivity : Activity() {
@@ -86,17 +94,19 @@ class AiChatActivity : Activity() {
         choice.setSelection(when (prefs.getString("provider", "auto")) { "gemini" -> 1; "groq" -> 2; else -> 0 })
         box.addView(TextView(this).apply { text = "Free AI provider"; setTextColor(0xFFE8F0F7.toInt()) })
         box.addView(choice)
-        val gemini = EditText(this).apply { hint = "Gemini API key"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(prefs.getString("gemini_key", "")) }
-        val groq = EditText(this).apply { hint = "Groq API key"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(prefs.getString("groq_key", "")) }
+        val gemini = EditText(this).apply { hint = "Gemini API key"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(readSecret("gemini_key")) }
+        val groq = EditText(this).apply { hint = "Groq API key"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(readSecret("groq_key")) }
         box.addView(gemini); box.addView(groq)
         box.addView(TextView(this).apply {
-            text = "Project source ane prompt selected AI provider ne mokalase. Keys app-private preferences ma store thase. Sensitive code share na karo."
+            text = "Project source ane prompt selected AI provider ne mokalase. API keys Android Keystore thi encrypt kari store thase. Sensitive code share na karo."
             textSize = 11f; setTextColor(0xFF9FB5C7.toInt()); setPadding(0, dp(8), 0, 0)
         })
         AlertDialog.Builder(this).setTitle("Free AI setup").setView(box)
             .setPositiveButton("Save") { _, _ ->
                 val mode = when (choice.selectedItemPosition) { 1 -> "gemini"; 2 -> "groq"; else -> "auto" }
-                prefs.edit().putString("provider", mode).putString("gemini_key", gemini.text.toString().trim()).putString("groq_key", groq.text.toString().trim()).apply()
+                prefs.edit().putString("provider", mode).apply()
+                storeSecret("gemini_key", gemini.text.toString().trim())
+                storeSecret("groq_key", groq.text.toString().trim())
                 providerInfo.text = providerName()
                 addMessage("STATUS", "AI settings saved: " + providerName())
             }
@@ -114,8 +124,8 @@ class AiChatActivity : Activity() {
         if (busy) return
         val question = prompt.text.toString().trim()
         if (question.isBlank()) return
-        val g = prefs.getString("gemini_key", "") ?: ""
-        val r = prefs.getString("groq_key", "") ?: ""
+        val g = readSecret("gemini_key")
+        val r = readSecret("groq_key")
         val mode = prefs.getString("provider", "auto") ?: "auto"
         if ((mode == "gemini" && g.isBlank()) || (mode == "groq" && r.isBlank()) || (mode == "auto" && g.isBlank() && r.isBlank())) {
             settings()
@@ -159,15 +169,15 @@ class AiChatActivity : Activity() {
     }
 
     private fun projectContext(): String {
-        val all = projectRoot.walkTopDown().filter { it.isFile && safeProjectFile(it) }.toList()
+        val all = projectRoot.walkTopDown().filter { it.isFile && safeProjectFile(it) }.take(20).toList()
         val out = StringBuilder("PROJECT FILE TREE:\n")
         all.take(250).forEach { out.append(it.relativeTo(projectRoot).invariantSeparatorsPath).append('\n') }
         out.append("\nSOURCE CONTENTS:\n")
         var used = 0
         all.take(35).forEach { file ->
-            if (used >= 48000) return@forEach
+            if (used >= 16000) return@forEach
             val content = try { file.readText(Charsets.UTF_8) } catch (_: Exception) { return@forEach }
-            val part = content.take(minOf(content.length, 6500, 48000 - used))
+            val part = content.take(minOf(content.length, 3000, 16000 - used))
             out.append("\n--- ").append(file.relativeTo(projectRoot).invariantSeparatorsPath).append(" ---\n").append(part).append('\n')
             used += part.length
         }
@@ -220,7 +230,7 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
         val contents = JSONArray().put(userContent)
         val generation = JSONObject()
             .put("temperature", 0.15)
-            .put("maxOutputTokens", 8192)
+            .put("maxOutputTokens", 4096)
             .put("responseMimeType", "application/json")
         val body = JSONObject()
             .put("systemInstruction", systemInstruction)
@@ -238,7 +248,7 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", systemPrompt()))
                 .put(JSONObject().put("role", "user").put("content", userText)))
-            .put("temperature", 0.15).put("max_completion_tokens", 8192)
+            .put("temperature", 0.15).put("max_completion_tokens", 4096)
             .put("response_format", JSONObject().put("type", "json_object"))
         val response = JSONObject(post("https://api.groq.com/openai/v1/chat/completions", body, mapOf("Authorization" to "Bearer " + key)))
         return response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
@@ -250,6 +260,43 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
         val a = text.indexOf('{'); val b = text.lastIndexOf('}')
         require(a >= 0 && b > a) { "AI response is not valid JSON" }
         return JSONObject(text.substring(a, b + 1))
+    }
+
+    private fun encryptionKey(): SecretKey {
+        val alias = "pocket_apk_studio_ai_key"
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (store.containsAlias(alias)) return store.getKey(alias, null) as SecretKey
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    private fun storeSecret(name: String, value: String) {
+        if (value.isBlank()) { prefs.edit().remove(name).apply(); return }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, encryptionKey())
+        val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        val packed = cipher.iv + encrypted
+        prefs.edit().putString(name, Base64.encodeToString(packed, Base64.NO_WRAP)).apply()
+    }
+
+    private fun readSecret(name: String): String {
+        val encoded = prefs.getString(name, null) ?: return ""
+        return try {
+            val packed = Base64.decode(encoded, Base64.NO_WRAP)
+            require(packed.size > 12)
+            val iv = packed.copyOfRange(0, 12)
+            val encrypted = packed.copyOfRange(12, packed.size)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, encryptionKey(), GCMParameterSpec(128, iv))
+            String(cipher.doFinal(encrypted), Charsets.UTF_8)
+        } catch (_: Exception) { "" }
     }
 
     private fun safeProjectFile(file: File): Boolean {
