@@ -590,6 +590,63 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(label("PROJECT & BUILD WORKSPACE", 12, 0xFF91B5B5.toInt(), true))
         homeContent.addView(label("Build status, recent activity and build logs remain available below.", 12, 0xFFB4C0C8.toInt(), false))
         homeContent.addView(space(8))
+        // Workspace sections use an Android-Studio-inspired accordion for a clean mobile layout.
+        fun workspaceSection(title: String, subtitle: String, content: View, initiallyExpanded: Boolean = false) {
+            val section = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = premiumGradient(0xFF263640.toInt(), 0xFF22313B.toInt(), 14)
+                setPadding(dp(10), dp(8), dp(10), dp(9))
+            }
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(5), dp(5), dp(5), dp(5))
+            }
+            val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            heading.addView(label(title, 14, 0xFFE6F0F3.toInt(), true))
+            heading.addView(label(subtitle, 10, 0xFFA8BAC3.toInt(), false))
+            header.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+            val arrow = label(if (initiallyExpanded) "⌃" else "⌄", 23, 0xFF9CC5C3.toInt(), true).apply {
+                gravity = android.view.Gravity.CENTER
+                minWidth = dp(38)
+            }
+            header.addView(arrow)
+            section.addView(header)
+            val body = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = if (initiallyExpanded) View.VISIBLE else View.GONE
+                alpha = if (initiallyExpanded) 1f else 0f
+            }
+            body.addView(space(6))
+            body.addView(content, LinearLayout.LayoutParams(-1, -2))
+            section.addView(body)
+            header.setOnClickListener {
+                val expand = body.visibility != View.VISIBLE
+                if (expand) {
+                    body.visibility = View.VISIBLE
+                    body.alpha = 0f
+                    body.translationY = -dp(5).toFloat()
+                    body.animate().alpha(1f).translationY(0f).setDuration(180L).
+                        setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+                } else {
+                    body.animate().alpha(0f).translationY(-dp(5).toFloat()).setDuration(130L).
+                        withEndAction { body.visibility = View.GONE; body.alpha = 1f; body.translationY = 0f }.start()
+                }
+                arrow.text = if (expand) "⌃" else "⌄"
+            }
+            editorContent.addView(section, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        }
+
+        val workspaceIntro = card().apply {
+            background = premiumGradient(0xFF344F5D.toInt(), 0xFF263B48.toInt(), 16)
+            addView(label("ANDROID PROJECT WORKSPACE", 11, 0xFF9CC5C3.toInt(), true))
+            addView(label("Your project, source code, build controls and logs — organized in expandable panels.", 13, 0xFFE1EBEF.toInt(), false))
+        }
+        editorContent.addView(workspaceIntro)
+        editorContent.addView(space(8))
+
         val importCard = card()
         importCard.addView(label("1. PROJECT ACTIONS", 12, 0xFF9AA7FF.toInt(), true))
         importCard.addView(space(10))
@@ -600,8 +657,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         })
         importCard.addView(space(8))
         importCard.addView(actionButton("Open Existing Project (Folder)") { pickFolder.launch(null) })
-        editorContent.addView(importCard)
-        editorContent.addView(space(14))
+        workspaceSection("01  PROJECT ACTIONS", "Create a project or open an existing Android project", importCard, true)
 
         val projectCard = card()
         projectCard.addView(label("2. PROJECT DETAILS", 12, 0xFF9AA7FF.toInt(), true))
@@ -615,8 +671,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
             else openProjectEditor(uri)
         })
-        editorContent.addView(projectCard)
-        editorContent.addView(space(14))
+        workspaceSection("02  PROJECT DETAILS", "Selected project information and editor entry", projectCard)
 
         val serverCard = card()
         serverCard.addView(label("3. LOCAL BUILD SERVER", 12, 0xFF9AA7FF.toInt(), true))
@@ -649,7 +704,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
-        editorContent.addView(buildCard)
+        workspaceSection("03  BUILD APK", "Build progress, status, install and share", buildCard)
         toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -667,7 +722,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        editorContent.addView(logCard)
+        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard)
         homeContent.addView(space(18))
 
         val setupCard = card()
