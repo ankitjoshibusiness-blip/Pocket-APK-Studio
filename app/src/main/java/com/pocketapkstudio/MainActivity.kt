@@ -516,7 +516,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 setPadding(dp(4), dp(6), dp(4), dp(6))
                 isClickable = true
                 isFocusable = true
-                setOnClickListener(action)
+                setOnClickListener { action() }
             }
         }
         workspaceActions.addView(heroAction("Manage") {
