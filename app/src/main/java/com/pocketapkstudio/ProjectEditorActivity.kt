@@ -698,10 +698,22 @@ class ProjectEditorActivity : Activity() {
                 if (needle.isNotEmpty()) {
                     if (replace) editor.text = android.text.SpannableStringBuilder(editor.text.toString().replace(needle, replacement.text.toString()))
                     else {
-                        val start = (editor.selectionStart.coerceAtLeast(0)).coerceAtMost(editor.text.length)
-                        val at = editor.text.toString().indexOf(needle, start).let { if (it < 0) editor.text.toString().indexOf(needle) else it }
-                        if (at >= 0) { editor.requestFocus(); editor.setSelection(at, at + needle.length) }
-                        else Toast.makeText(this, "Text not found", Toast.LENGTH_SHORT).show()
+                        val length = editor.text.length
+                        val selectionEnd = editor.selectionEnd.coerceAtLeast(0).coerceAtMost(length)
+                        val selectionStart = editor.selectionStart.coerceAtLeast(0).coerceAtMost(length)
+                        val start = if (selectionEnd > selectionStart) selectionEnd else selectionStart
+                        val source = editor.text.toString()
+                        val found = source.indexOf(needle, start)
+                        val at = if (found >= 0) found else source.indexOf(needle, 0)
+                        if (at >= 0) {
+                            editor.requestFocus()
+                            editor.setSelection(at, at + needle.length)
+                            editor.post {
+                                val line = editor.layout?.getLineForOffset(at) ?: 0
+                                val y = editor.layout?.getLineTop(line) ?: 0
+                                editor.requestRectangleOnScreen(Rect(0, y, editor.width, y + dp(32)), false)
+                            }
+                        } else Toast.makeText(this, "Text not found", Toast.LENGTH_SHORT).show()
                     }
                 }
             }.setNegativeButton("Cancel", null).show()
