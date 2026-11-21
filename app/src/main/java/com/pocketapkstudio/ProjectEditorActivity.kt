@@ -235,7 +235,7 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun openLivePreview() {
-        saveCurrent(false)
+        if (!saveCurrent(false)) return
         startActivityForResult(
             Intent(this, LivePreviewActivity::class.java).putExtra("project_root", rootDir.absolutePath),
             7103
@@ -319,7 +319,7 @@ class ProjectEditorActivity : Activity() {
                 try {
                     val safeDirectory = directory.canonicalFile
                     require(safeDirectory != rootDir.canonicalFile && safeDirectory.path.startsWith(rootDir.canonicalPath + File.separator)) { "Cannot delete the project root" }
-                    saveCurrent(false)
+                    if (!saveCurrent(false)) return@setPositiveButton
                     val removed = safeDirectory.walkTopDown().filter { it.isFile }.toSet()
                     require(safeDirectory.isDirectory && safeDirectory.deleteRecursively()) { "Could not delete folder" }
                     removed.forEach { openTabs.remove(it) }
@@ -412,7 +412,7 @@ class ProjectEditorActivity : Activity() {
                 val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
-                    saveCurrent(false)
+                    if (!saveCurrent(false)) return@setPositiveButton
                     val source = file.canonicalFile
                     val target = File(rootDir, path).canonicalFile
                     require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
@@ -455,7 +455,7 @@ class ProjectEditorActivity : Activity() {
             toast("Invalid project file")
             return
         }
-        if (source == currentFile) saveCurrent(false)
+        if (source == currentFile && !saveCurrent(false)) return
         val relative = source.relativeTo(rootDir).invariantSeparatorsPath
         val baseName = if (source.name.startsWith(".") && source.name.count { it == '.' } == 1) source.name else source.name.substringBeforeLast('.', source.name)
         val defaultCopyName = relative.substringBeforeLast('/') .let { parent -> if (parent.isEmpty()) "" else "$parent/" } + baseName + "_copy" + source.extension.takeIf { it.isNotEmpty() }?.let { ".$it" }.orEmpty()
@@ -480,7 +480,7 @@ class ProjectEditorActivity : Activity() {
                 try {
                     val safeFile = file.canonicalFile
                     require(safeFile.isFile && safeFile.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid project file" }
-                    if (safeFile == currentFile) saveCurrent(false)
+                    if (safeFile == currentFile && !saveCurrent(false)) return@setPositiveButton
                     require(safeFile.delete()) { "Could not delete file" }
                     openTabs.remove(safeFile)
                     if (currentFile == safeFile) {
@@ -612,7 +612,7 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun openFile(file: File) {
-        saveCurrent(false)
+        if (!saveCurrent(false)) return
         currentFile = file
         if (!openTabs.containsKey(file)) openTabs[file] = file.readText(Charsets.UTF_8)
         undoHistory.clear(); redoHistory.clear()
@@ -643,7 +643,8 @@ class ProjectEditorActivity : Activity() {
 
     private fun closeTab(file: File) {
         if (file == currentFile) {
-            saveCurrent(false); openTabs.remove(file); currentFile = null
+            if (!saveCurrent(false)) return
+            openTabs.remove(file); currentFile = null
             loadingText = true; editor.setText(""); loadingText = false
             dirty = false; fileLabel.text = "Select a source file to start editing"
             undoHistory.clear(); redoHistory.clear()
@@ -782,7 +783,7 @@ class ProjectEditorActivity : Activity() {
                 val query = queryBox.text.toString()
                 if (query.isBlank()) return@setPositiveButton
                 try {
-                    saveCurrent(false)
+                    if (!saveCurrent(false)) return@setPositiveButton
                     val matches = ArrayList<Pair<File, Int>>()
                     val labels = ArrayList<String>()
                     rootDir.walkTopDown().onEnter { directory ->
@@ -822,8 +823,8 @@ class ProjectEditorActivity : Activity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
-    private fun saveCurrent(showMessage: Boolean) {
-        val file = currentFile ?: return
+    private fun saveCurrent(showMessage: Boolean): Boolean {
+        val file = currentFile ?: return true
         handler.removeCallbacks(autoSave)
         val content = editor.text.toString()
         try {
@@ -832,10 +833,12 @@ class ProjectEditorActivity : Activity() {
             openTabs[file] = content
             dirty = false
             if (showMessage) toast("Saved: ${file.name}")
+            return true
         } catch (e: Exception) {
             dirty = true
             openTabs[file] = content
             toast("Save failed: ${e.message ?: "Unknown error"}")
+            return false
         }
     }
 
