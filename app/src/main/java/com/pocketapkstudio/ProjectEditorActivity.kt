@@ -744,9 +744,9 @@ class ProjectEditorActivity : Activity() {
                         while (matches.size < 300) {
                             val at = content.indexOf(query, offset, ignoreCase = true)
                             if (at < 0) break
-                            val line = content.substring(0, at).count { it == '\\n' } + 1
-                            val lineStart = content.lastIndexOf('\\n', (at - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
-                            val lineEnd = content.indexOf('\\n', at).let { if (it < 0) content.length else it }
+                            val line = content.substring(0, at).count { it == '\n' } + 1
+                            val lineStart = content.lastIndexOf('\n', (at - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                            val lineEnd = content.indexOf('\n', at).let { if (it < 0) content.length else it }
                             val preview = content.substring(lineStart, lineEnd).trim().take(90)
                             matches.add(file to at)
                             labels.add("${file.relativeTo(rootDir).invariantSeparatorsPath}:$line  $preview")
