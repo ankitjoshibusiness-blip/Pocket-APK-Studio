@@ -70,12 +70,26 @@ class ProjectEditorActivity : Activity() {
                 ZipInputStream(input).use { zip ->
                     var entry = zip.nextEntry
                     var count = 0
-                    while (entry != null && count++ < 30000) {
+                    var totalBytes = 0L
+                    val rootPath = rootDir.canonicalPath + File.separator
+                    while (entry != null) {
+                        require(++count <= 30000) { "Project ZIP contains too many entries (limit 30000)" }
                         val out = File(rootDir, entry.name).canonicalFile
-                        require(out.path.startsWith(rootDir.canonicalPath + File.separator)) { "Unsafe ZIP path" }
-                        if (entry.isDirectory) out.mkdirs() else {
-                            out.parentFile?.mkdirs()
-                            out.outputStream().use { zip.copyTo(it) }
+                        require(out.path.startsWith(rootPath)) { "Unsafe ZIP path" }
+                        if (entry.isDirectory) {
+                            require(out.mkdirs() || out.isDirectory) { "Could not create project folder" }
+                        } else {
+                            out.parentFile?.let { require(it.mkdirs() || it.isDirectory) { "Could not create project folder" } }
+                            out.outputStream().use { output ->
+                                val buffer = ByteArray(8192)
+                                while (true) {
+                                    val n = zip.read(buffer)
+                                    if (n < 0) break
+                                    totalBytes += n
+                                    require(totalBytes <= 250L * 1024L * 1024L) { "Project ZIP exceeds 250 MB uncompressed limit" }
+                                    output.write(buffer, 0, n)
+                                }
+                            }
                         }
                         zip.closeEntry()
                         entry = zip.nextEntry
@@ -566,8 +580,27 @@ class ProjectEditorActivity : Activity() {
                 val target = File(rootDir, name).canonicalFile
                 require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid file name" }
                 require(!target.exists()) { "A file with this name already exists in project root" }
-                contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
-                    ?: error("Cannot read selected file")
+                val parent = target.parentFile ?: error("Invalid import destination")
+                val temp = File.createTempFile(".pocket-import-", ".tmp", parent)
+                try {
+                    var importedBytes = 0L
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        temp.outputStream().use { output ->
+                            val buffer = ByteArray(8192)
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                importedBytes += n
+                                require(importedBytes <= 100L * 1024L * 1024L) { "Imported file exceeds 100 MB limit" }
+                                output.write(buffer, 0, n)
+                            }
+                        }
+                    } ?: error("Cannot read selected file")
+                    require(!target.exists() && temp.renameTo(target)) { "Could not finish importing file" }
+                } catch (e: Exception) {
+                    temp.delete()
+                    throw e
+                }
                 refreshExplorer()
                 if (target.extension.lowercase() in editableExtensions && target.length() <= 1024 * 1024) {
                     openFile(target)
@@ -829,7 +862,27 @@ class ProjectEditorActivity : Activity() {
         val content = editor.text.toString()
         try {
             require(file.canonicalPath.startsWith(rootDir.canonicalPath + File.separator)) { "File is outside the project" }
-            file.writeText(content, Charsets.UTF_8)
+            val parent = file.parentFile ?: error("Invalid file location")
+            require(parent.isDirectory) { "Parent folder no longer exists" }
+            val temp = File.createTempFile(".pocket-save-", ".tmp", parent)
+            val backup = File(parent, ".pocket-backup-${System.currentTimeMillis()}-${file.name}")
+            try {
+                java.io.FileOutputStream(temp).use { output ->
+                    output.write(content.toByteArray(Charsets.UTF_8))
+                    output.fd.sync()
+                }
+                if (file.exists()) {
+                    require(file.renameTo(backup)) { "Could not preserve previous file before saving" }
+                }
+                if (!temp.renameTo(file)) {
+                    if (backup.exists()) backup.renameTo(file)
+                    error("Could not replace file with saved content")
+                }
+                backup.delete()
+            } finally {
+                temp.delete()
+                if (backup.exists() && !file.exists()) backup.renameTo(file)
+            }
             openTabs[file] = content
             dirty = false
             if (showMessage) toast("Saved: ${file.name}")
