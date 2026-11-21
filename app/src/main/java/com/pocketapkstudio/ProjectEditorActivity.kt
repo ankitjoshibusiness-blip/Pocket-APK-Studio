@@ -105,7 +105,12 @@ class ProjectEditorActivity : Activity() {
         addToolbarTile(smallButton("↶ Undo") { undoEdit() })
         addToolbarTile(smallButton("↷ Redo") { redoEdit() })
         addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
-        root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
+        addToolbarTile(smallButton("⌕ Project") { showProjectSearch() })
+        val toolbarScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(toolbar, HorizontalScrollView.LayoutParams(-2, -1))
+        }
+        root.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
             textSize = 14f
             setTextColor(0xFFFFFFFF.toInt())
@@ -716,6 +721,52 @@ class ProjectEditorActivity : Activity() {
                         } else Toast.makeText(this, "Text not found", Toast.LENGTH_SHORT).show()
                     }
                 }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showProjectSearch() {
+        val queryBox = EditText(this).apply { hint = "Search all project files"; setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Find in Project").setMessage("Search text files up to 1 MB each.")
+            .setView(queryBox)
+            .setPositiveButton("Search") { _, _ ->
+                val query = queryBox.text.toString()
+                if (query.isBlank()) return@setPositiveButton
+                try {
+                    saveCurrent(false)
+                    val matches = ArrayList<Pair<File, Int>>()
+                    val labels = ArrayList<String>()
+                    rootDir.walkTopDown().filter { file ->
+                        file.isFile && file.extension.lowercase() in editableExtensions && file.length() <= 1024 * 1024
+                    }.forEach { file ->
+                        if (matches.size >= 300) return@forEach
+                        val content = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
+                        var offset = 0
+                        while (matches.size < 300) {
+                            val at = content.indexOf(query, offset, ignoreCase = true)
+                            if (at < 0) break
+                            val line = content.substring(0, at).count { it == '\\n' } + 1
+                            val lineStart = content.lastIndexOf('\\n', (at - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                            val lineEnd = content.indexOf('\\n', at).let { if (it < 0) content.length else it }
+                            val preview = content.substring(lineStart, lineEnd).trim().take(90)
+                            matches.add(file to at)
+                            labels.add("${file.relativeTo(rootDir).invariantSeparatorsPath}:$line  $preview")
+                            offset = at + query.length.coerceAtLeast(1)
+                        }
+                    }
+                    if (matches.isEmpty()) toast("No matches found in project")
+                    else AlertDialog.Builder(this).setTitle("Project matches (${matches.size}${if (matches.size == 300) "+" else ""})")
+                        .setItems(labels.toTypedArray()) { _, index ->
+                            val (file, at) = matches[index]
+                            openFile(file)
+                            editor.requestFocus()
+                            editor.setSelection(at, (at + query.length).coerceAtMost(editor.text.length))
+                            editor.post {
+                                val line = editor.layout?.getLineForOffset(at) ?: 0
+                                val y = editor.layout?.getLineTop(line) ?: 0
+                                editor.requestRectangleOnScreen(Rect(0, y, editor.width, y + dp(32)), false)
+                            }
+                        }.setNegativeButton("Close", null).show()
+                } catch (e: Exception) { toast("Project search failed: ${e.message}") }
             }.setNegativeButton("Cancel", null).show()
     }
 
