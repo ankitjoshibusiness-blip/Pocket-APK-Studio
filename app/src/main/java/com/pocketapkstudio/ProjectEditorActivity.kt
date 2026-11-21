@@ -164,9 +164,9 @@ class ProjectEditorActivity : Activity() {
             nav("⚙ Build") { showBuildErrors() }
             nav("▶ Run") { openLivePreview() }
             nav("••• More") { showMoreMenu(root) }
-            contentRoot.addView(sidebar, LinearLayout.LayoutParams(dp(76), -1).apply { rightMargin = dp(8) })
+            root.addView(sidebar, LinearLayout.LayoutParams(dp(76), -1).apply { rightMargin = dp(8) })
             contentRoot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            contentRoot.addView(contentRoot, LinearLayout.LayoutParams(0, -1, 1f))
+            root.addView(contentRoot, LinearLayout.LayoutParams(0, -1, 1f))
         } else {
             contentRoot = root
         }
