@@ -383,7 +383,7 @@ class ProjectEditorActivity : Activity() {
                     val dir = File(rootDir, path).canonicalFile
                     require(dir.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                     require(!dir.exists()) { "Folder already exists" }
-                    dir.mkdirs()
+                    require(dir.mkdirs() || dir.isDirectory) { "Could not create folder" }
                     refreshExplorer()
                     toast("Folder created")
                 } catch (e: Exception) { toast("Create failed: ${e.message}") }
@@ -409,7 +409,8 @@ class ProjectEditorActivity : Activity() {
                     val affectedTabs = if (isDirectory) openTabs.entries.filter { it.key.path.startsWith(source.path + File.separator) }.toList()
                         else openTabs.entries.filter { it.key == source }
                     val oldActive = currentFile
-                    target.parentFile?.mkdirs()
+                    val parent = target.parentFile
+                    require(parent != null && (parent.mkdirs() || parent.isDirectory)) { "Could not create destination folder" }
                     if (!source.renameTo(target)) error("Could not move or rename")
                     affectedTabs.forEach { entry ->
                         val relativeChild = entry.key.relativeTo(source)
