@@ -3,6 +3,7 @@ package com.pocketapkstudio
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -37,6 +38,8 @@ class ProjectEditorActivity : Activity() {
     private lateinit var suggestionsBar: LinearLayout
     private lateinit var errorsPanel: TextView
     private lateinit var root: LinearLayout
+    private lateinit var contentRoot: LinearLayout
+    private var landscapeMode = false
     private lateinit var explorerPanel: LinearLayout
     private lateinit var explorerScrollView: ScrollView
     private lateinit var codeScrollView: ScrollView
@@ -133,35 +136,68 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun showEditor() {
+        landscapeMode = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = if (landscapeMode) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             setPadding(dp(10), dp(5), dp(10), dp(6))
             isFocusableInTouchMode = true
         }
         applyTheme()
+        if (landscapeMode) {
+            val sidebar = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                setPadding(dp(5), dp(8), dp(5), dp(6))
+                background = roundedSurface(if (darkTheme) 0xFF2B3742.toInt() else 0xFFE7ECF7.toInt(), 14)
+            }
+            sidebar.addView(label("Pocket APK", 11, true).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER },
+                LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            fun nav(text: String, action: () -> Unit) {
+                sidebar.addView(smallButton(text, action).apply {
+                    textSize = 10f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(2), 0, dp(2), 0)
+                }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(5) })
+            }
+            nav("▣ Project") { toggleExplorer() }
+            nav("</> Editor") { editor.requestFocus() }
+            nav("⚙ Build") { showBuildErrors() }
+            nav("▶ Run") { openLivePreview() }
+            nav("••• More") { showMoreMenu(root) }
+            contentRoot.addView(sidebar, LinearLayout.LayoutParams(dp(76), -1).apply { rightMargin = dp(8) })
+            contentRoot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            contentRoot.addView(contentRoot, LinearLayout.LayoutParams(0, -1, 1f))
+        } else {
+            contentRoot = root
+        }
         val toolbar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(7),dp(5),dp(7),dp(5)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE7ECF7.toInt(),14) }
         fun addToolbarTile(tile: Button) {
             toolbar.addView(tile, LinearLayout.LayoutParams(-2, dp(42)).apply { rightMargin = dp(6) })
         }
-        explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }; addToolbarTile(explorerToggle)
-        addToolbarTile(smallButton("＋ File") { showFileActions() })
-        addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
-        addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
-        addToolbarTile(smallButton("↶ Undo") { undoEdit() })
-        addToolbarTile(smallButton("↷ Redo") { redoEdit() })
-        addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
-        addToolbarTile(smallButton("⌕ Project") { showProjectSearch() })
+        explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }
+        if (landscapeMode) {
+            addToolbarTile(smallButton("⋮") { showMoreMenu(it) })
+        } else {
+            addToolbarTile(explorerToggle)
+            addToolbarTile(smallButton("＋ File") { showFileActions() })
+            addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
+            addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
+            addToolbarTile(smallButton("↶ Undo") { undoEdit() })
+            addToolbarTile(smallButton("↷ Redo") { redoEdit() })
+            addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
+            addToolbarTile(smallButton("⌕ Project") { showProjectSearch() })
+        }
         val toolbarScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(toolbar, LinearLayout.LayoutParams(-2, -1))
         }
-        root.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
+        contentRoot.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
             textSize = 14f
             setTextColor(0xFFFFFFFF.toInt())
             background = roundedSurface(0xFF2563EB.toInt(), 12)
         }
-        root.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+        if (!landscapeMode) contentRoot.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
         val aiActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val shareAiButton = smallButton("✦  Share to ChatGPT") { shareProjectWithChatGPT() }.apply {
             textSize = 11f
@@ -175,12 +211,12 @@ class ProjectEditorActivity : Activity() {
         }
         aiActions.addView(shareAiButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(5) })
         aiActions.addView(importAiButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
-        root.addView(aiActions, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
+        if (!landscapeMode) contentRoot.addView(aiActions, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
         fileLabel=label("Select a source file to start editing",11,false).apply { setPadding(dp(9),dp(7),dp(9),dp(7)); background=roundedSurface(if(darkTheme) 0xFF26333D.toInt() else 0xFFEFF2F8.toInt(),9) }
-        root.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
+        contentRoot.addView(fileLabel,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
         val tabsScroll=HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; addView(tabsBar) }
-        root.addView(tabsScroll,LinearLayout.LayoutParams(-1,dp(42)))
+        contentRoot.addView(tabsScroll,LinearLayout.LayoutParams(-1,dp(42)))
         val workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF202A33.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
         val codeRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.TOP }
         lineNumbers=TextView(this).apply { typeface=Typeface.MONOSPACE; textSize=12f; gravity=Gravity.TOP or Gravity.END; setPadding(dp(8),dp(12),dp(8),dp(12)); text="1" }
@@ -208,14 +244,14 @@ class ProjectEditorActivity : Activity() {
         explorerPanel.addView(explorerScrollView,LinearLayout.LayoutParams(-1,0,1f))
         workArea.addView(explorerPanel,FrameLayout.LayoutParams(dp(205),-1,Gravity.START))
         explorerPanel.translationX=-dp(225).toFloat(); explorerPanel.visibility=View.GONE
-        root.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
+        contentRoot.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
         suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)) }
-        root.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
+        contentRoot.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
         diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE9EEF8.toInt(),12) }
         diagnosticsPanel.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
         diagnosticsPanel.addView(errorsPanel)
-        root.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
+        if (!landscapeMode) contentRoot.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
         val chatWithAiButton = smallButton("✦  CHAT WITH AI  ·  OPEN AI DEVELOPER") {
             if (!saveCurrent(false)) return@smallButton
             startActivityForResult(
@@ -228,9 +264,9 @@ class ProjectEditorActivity : Activity() {
             setTextColor(0xFFFFFFFF.toInt())
             background = roundedSurface(0xFF256B72.toInt(), 12)
         }
-        root.addView(chatWithAiButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(5); bottomMargin = dp(3) })
+        if (!landscapeMode) contentRoot.addView(chatWithAiButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(5); bottomMargin = dp(3) })
         exportButton=smallButton("⇧  SAVE CHANGES & RETURN TO PROJECT") { exportEditedZip() }
-        root.addView(exportButton,LinearLayout.LayoutParams(-1,dp(42)).apply { topMargin=dp(5) })
+        if (!landscapeMode) contentRoot.addView(exportButton,LinearLayout.LayoutParams(-1,dp(42)).apply { topMargin=dp(5) })
         setContentView(root)
         refreshExplorer()
         refreshEditorColors()
@@ -275,6 +311,25 @@ class ProjectEditorActivity : Activity() {
             override fun afterTextChanged(s:Editable?) {}
         })
         updateBuildErrors(); renderTabs()
+    }
+
+    private fun showMoreMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add("＋ Create file / folder").setOnMenuItemClickListener { showFileActions(); true }
+        popup.menu.add("⌕ Find").setOnMenuItemClickListener { showFindReplace(false); true }
+        popup.menu.add("⇄ Replace").setOnMenuItemClickListener { showFindReplace(true); true }
+        popup.menu.add("↶ Undo").setOnMenuItemClickListener { undoEdit(); true }
+        popup.menu.add("↷ Redo").setOnMenuItemClickListener { redoEdit(); true }
+        popup.menu.add("✓ Save").setOnMenuItemClickListener { saveCurrent(true); true }
+        popup.menu.add("⌕ Search project").setOnMenuItemClickListener { showProjectSearch(); true }
+        popup.menu.add("✦ Share to ChatGPT").setOnMenuItemClickListener { shareProjectWithChatGPT(); true }
+        popup.menu.add("⇩ Import AI changes").setOnMenuItemClickListener { chooseAiChangesZip(); true }
+        popup.menu.add("✦ Chat with AI").setOnMenuItemClickListener {
+            if (saveCurrent(false)) startActivityForResult(Intent(this, AiChatActivity::class.java).putExtra("project_root", rootDir.absolutePath), 7105)
+            true
+        }
+        popup.menu.add("⇧ Save changes & return").setOnMenuItemClickListener { exportEditedZip(); true }
+        popup.show()
     }
 
     private fun openLivePreview() {
@@ -1127,6 +1182,26 @@ class ProjectEditorActivity : Activity() {
     ).apply { cornerRadius=dp(radius).toFloat() }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!::editor.isInitialized || !::rootDir.isInitialized) return
+        saveCurrent(false)
+        val active = currentFile
+        val tabs = openTabs.keys.toList()
+        val cursor = editor.selectionStart.coerceAtLeast(0)
+        val codeY = if (::codeScrollView.isInitialized) codeScrollView.scrollY else 0
+        val explorerY = if (::explorerScrollView.isInitialized) explorerScrollView.scrollY else 0
+        val wasExplorerOpen = explorerOpen
+        explorerOpen = false
+        showEditor()
+        tabs.filter { it.isFile }.forEach { openFile(it) }
+        active?.takeIf { it.isFile }?.let { openFile(it) }
+        if (::editor.isInitialized) editor.setSelection(cursor.coerceAtMost(editor.text.length))
+        codeScrollView.post { codeScrollView.scrollTo(0, codeY) }
+        explorerScrollView.post { explorerScrollView.scrollTo(0, explorerY) }
+        if (wasExplorerOpen) toggleExplorer()
+    }
 
     override fun onSaveInstanceState(outState: Bundle) {
         if (::editor.isInitialized && dirty) saveCurrent(false)
