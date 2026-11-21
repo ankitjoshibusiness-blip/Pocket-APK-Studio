@@ -1186,13 +1186,26 @@ class ProjectEditorActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!::editor.isInitialized || !::rootDir.isInitialized) return
-        saveCurrent(false)
+
+        // Capture the live editor buffer before rebuilding the orientation-specific UI.
+        // openFile() saves the previously active editor before switching files, so clear
+        // currentFile after saving; otherwise the newly-created empty EditText can overwrite
+        // the user's source file during the tab-restore loop.
         val active = currentFile
         val tabs = openTabs.keys.toList()
+        val liveText = editor.text.toString()
+        if (active != null) openTabs[active] = liveText
         val cursor = editor.selectionStart.coerceAtLeast(0)
         val codeY = if (::codeScrollView.isInitialized) codeScrollView.scrollY else 0
         val explorerY = if (::explorerScrollView.isInitialized) explorerScrollView.scrollY else 0
         val wasExplorerOpen = explorerOpen
+
+        if (!saveCurrent(false)) {
+            toast("Rotation paused: could not save current file. Your editor text is kept open.")
+            return
+        }
+
+        currentFile = null
         explorerOpen = false
         showEditor()
         tabs.filter { it.isFile }.forEach { openFile(it) }
