@@ -387,25 +387,46 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun promptRename(file: File) {
+        val isDirectory = file.isDirectory
         val box = EditText(this).apply { setText(file.relativeTo(rootDir).invariantSeparatorsPath); setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Rename / Move file").setMessage("Enter the new project-relative path.")
+        AlertDialog.Builder(this).setTitle(if (isDirectory) "Rename / Move folder" else "Rename / Move file")
+            .setMessage("Enter the new project-relative path.")
             .setView(box).setPositiveButton("Save") { _, _ ->
                 val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
                     saveCurrent(false)
+                    val source = file.canonicalFile
                     val target = File(rootDir, path).canonicalFile
                     require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
+                    require(target != source) { "Choose a different destination" }
+                    if (isDirectory) require(!target.path.startsWith(source.path + File.separator)) { "A folder cannot be moved inside itself" }
                     require(!target.exists()) { "Destination already exists" }
+                    val affectedTabs = if (isDirectory) openTabs.entries.filter { it.key.path.startsWith(source.path + File.separator) }.toList()
+                        else openTabs.entries.filter { it.key == source }
+                    val oldActive = currentFile
                     target.parentFile?.mkdirs()
-                    if (!file.renameTo(target)) error("Could not move or rename file")
-                    val oldText = openTabs.remove(file)
-                    if (oldText != null) openTabs[target] = oldText
-                    if (currentFile == file) currentFile = target
+                    if (!source.renameTo(target)) error("Could not move or rename")
+                    affectedTabs.forEach { entry ->
+                        val relativeChild = entry.key.relativeTo(source)
+                        val newFile = File(target, relativeChild.path)
+                        openTabs.remove(entry.key)
+                        openTabs[newFile] = entry.value
+                    }
+                    if (oldActive != null && (oldActive == source || (isDirectory && oldActive.path.startsWith(source.path + File.separator)))) {
+                        val relativeActive = if (oldActive == source) null else oldActive.relativeTo(source)
+                        currentFile = if (relativeActive == null) target else File(target, relativeActive.path)
+                    }
+                    if (isDirectory) {
+                        val oldPrefix = source.relativeTo(rootDir).invariantSeparatorsPath
+                        val newPrefix = target.relativeTo(rootDir).invariantSeparatorsPath
+                        val updated = expandedDirectories.map { if (it == oldPrefix || it.startsWith(oldPrefix + "/")) newPrefix + it.removePrefix(oldPrefix) else it }
+                        expandedDirectories.clear(); expandedDirectories.addAll(updated)
+                    }
                     refreshExplorer()
-                    currentFile?.takeIf { it == target }?.let { openFile(it) }
+                    currentFile?.takeIf { it.isFile }?.let { openFile(it) }
                     renderTabs()
-                    toast("File renamed / moved")
+                    toast(if (isDirectory) "Folder renamed / moved" else "File renamed / moved")
                 } catch (e: Exception) { toast("Rename failed: ${e.message}") }
             }.setNegativeButton("Cancel", null).show()
     }
