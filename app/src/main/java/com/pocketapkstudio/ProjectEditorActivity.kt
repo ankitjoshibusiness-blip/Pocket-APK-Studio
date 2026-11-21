@@ -275,7 +275,7 @@ class ProjectEditorActivity : Activity() {
             val visible = Rect()
             root.getWindowVisibleDisplayFrame(visible)
             val keyboardVisible = root.rootView.height - visible.bottom > dp(160)
-            suggestionsBar.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
+            suggestionsBar.visibility = View.VISIBLE
             diagnosticsPanel.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             exportButton.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             if (keyboardVisible && editor.hasFocus()) {
@@ -923,7 +923,7 @@ class ProjectEditorActivity : Activity() {
         val source = editor.text.toString()
         val tokenStart = source.substring(0, cursor).indexOfLast { !it.isLetterOrDigit() && it != '_' && it != ':' }.let { it + 1 }
         val prefix = source.substring(tokenStart, cursor)
-        val matches = if (prefix.isBlank()) dictionary.take(7) else dictionary.filter { it.startsWith(prefix, ignoreCase = true) && !it.equals(prefix, true) }.take(6)
+        val matches = if (prefix.isBlank()) dictionary.take(7) else dictionary.filter { it.startsWith(prefix, ignoreCase = true) }.take(6)
         matches.forEach { word ->
             val b = smallButton(word) {
                 val end = editor.selectionStart.coerceIn(0, editor.text.length)
