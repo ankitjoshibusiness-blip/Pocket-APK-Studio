@@ -286,7 +286,7 @@ class ProjectEditorActivity : Activity() {
             val visible = Rect()
             root.getWindowVisibleDisplayFrame(visible)
             val keyboardVisible = root.rootView.height - visible.bottom > dp(160)
-            suggestionsBar.visibility = View.VISIBLE
+            suggestionsBar.visibility = View.GONE
             diagnosticsPanel.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             exportButton.visibility = if (keyboardVisible) View.GONE else View.VISIBLE
             if (keyboardVisible && editor.hasFocus()) {
@@ -977,7 +977,7 @@ class ProjectEditorActivity : Activity() {
         val x = editor.totalPaddingLeft + layout.getPrimaryHorizontal(cursor) - editor.scrollX
         val y = editor.totalPaddingTop + layout.getLineTop(line) - editor.scrollY
         inlineGhostView.translationX = x
-        inlineGhostView.translationY = y
+        inlineGhostView.translationY = y.toFloat()
         inlineGhostView.visibility = View.VISIBLE
         inlineGhostView.bringToFront()
     }
