@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -375,7 +376,8 @@ class ProjectEditorActivity : Activity() {
                     require(file.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                     require(!file.exists()) { "File already exists" }
                     require(file.name.contains('.')) { "Add a file extension, e.g. .kt or .xml" }
-                    file.parentFile?.mkdirs()
+                    val parent = file.parentFile
+                    require(parent != null && (parent.mkdirs() || parent.isDirectory)) { "Could not create parent folder" }
                     file.writeText("", Charsets.UTF_8)
                     refreshExplorer()
                     openFile(file)
@@ -454,7 +456,10 @@ class ProjectEditorActivity : Activity() {
             return
         }
         if (source == currentFile) saveCurrent(false)
-        val box = EditText(this).apply { setText(source.relativeTo(rootDir).invariantSeparatorsPath.substringBeforeLast('.', source.name) + "_copy." + source.extension); setSingleLine(true) }
+        val relative = source.relativeTo(rootDir).invariantSeparatorsPath
+        val baseName = if (source.name.startsWith(".") && source.name.count { it == '.' } == 1) source.name else source.name.substringBeforeLast('.', source.name)
+        val defaultCopyName = relative.substringBeforeLast('/') .let { parent -> if (parent.isEmpty()) "" else "$parent/" } + baseName + "_copy" + source.extension.takeIf { it.isNotEmpty() }?.let { ".$it" }.orEmpty()
+        val box = EditText(this).apply { setText(defaultCopyName); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Copy file").setView(box).setPositiveButton("Copy") { _, _ ->
             try {
                 val target = File(rootDir, box.text.toString().trim()).canonicalFile
@@ -553,15 +558,23 @@ class ProjectEditorActivity : Activity() {
         if (requestCode == 7102 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
             try {
-                val name = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.contains('.') } ?: "imported_file.txt"
+                val displayName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+                }
+                val name = (displayName ?: uri.lastPathSegment?.substringAfterLast('/') ?: "imported_file.txt")
+                    .substringAfterLast('/').substringAfterLast('\\').trim().takeIf { it.isNotBlank() } ?: "imported_file.txt"
                 val target = File(rootDir, name).canonicalFile
                 require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid file name" }
                 require(!target.exists()) { "A file with this name already exists in project root" }
                 contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
                     ?: error("Cannot read selected file")
                 refreshExplorer()
-                openFile(target)
-                toast("File imported")
+                if (target.extension.lowercase() in editableExtensions && target.length() <= 1024 * 1024) {
+                    openFile(target)
+                    toast("File imported and opened")
+                } else {
+                    toast("File imported. This file type or size is not supported by the text editor.")
+                }
             } catch (e: Exception) { toast("Import failed: ${e.message}") }
         }
     }
@@ -720,7 +733,22 @@ class ProjectEditorActivity : Activity() {
             .setView(box).setPositiveButton(if (replace) "Replace all" else "Find next") { _, _ ->
                 val needle = find.text.toString()
                 if (needle.isNotEmpty()) {
-                    if (replace) editor.text = android.text.SpannableStringBuilder(editor.text.toString().replace(needle, replacement.text.toString(), ignoreCase = true))
+                    if (replace) {
+                        val source = editor.text.toString()
+                        var occurrences = 0
+                        var offset = 0
+                        while (offset <= source.length - needle.length) {
+                            val at = source.indexOf(needle, offset, ignoreCase = true)
+                            if (at < 0) break
+                            occurrences++
+                            offset = at + needle.length
+                        }
+                        if (occurrences == 0) toast("Text not found")
+                        else {
+                            editor.text = android.text.SpannableStringBuilder(source.replace(needle, replacement.text.toString(), ignoreCase = true))
+                            toast("Replaced $occurrences occurrence(s)")
+                        }
+                    }
                     else {
                         val length = editor.text.length
                         val selectionEnd = editor.selectionEnd.coerceAtLeast(0).coerceAtMost(length)
