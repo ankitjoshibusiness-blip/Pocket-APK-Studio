@@ -252,7 +252,7 @@ class ProjectEditorActivity : Activity() {
         if (count[0] == 0) list.addView(label("This project folder is empty.", 11, false))
     }
 
-    private fun addExplorerDirectoryChildren(directory: File, list: LinearLayout, depth: Int, count: Int) {
+    private fun addExplorerDirectoryChildren(directory: File, list: LinearLayout, depth: Int, count: IntArray) {
         if (count[0] >= 500) return
         val children = directory.listFiles()?.filterNot {
             it.name in setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
