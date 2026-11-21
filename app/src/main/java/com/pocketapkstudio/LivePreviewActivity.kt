@@ -571,8 +571,20 @@ class LivePreviewActivity : Activity() {
         content.removeAllViews()
         title.text = "PREVIEW · " + file.name
         try {
+            val sourceXml = file.readText()
+            val unsupportedLayouts = listOf("ConstraintLayout", "RelativeLayout", "CoordinatorLayout", "MotionLayout")
+                .filter { name -> Regex("<(?:[A-Za-z0-9_.]+:)?${name}\\b").containsMatchIn(sourceXml) }
+            if (unsupportedLayouts.isNotEmpty()) {
+                content.addView(TextView(this).apply {
+                    text = "Approximate layout: ${unsupportedLayouts.joinToString(", ")} positioning rules are not fully simulated. Build & Run to verify exact placement."
+                    textSize = 11f
+                    setTextColor(0xFF6B4B12.toInt())
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    setBackgroundColor(0xFFFFE9B8.toInt())
+                }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            }
             val parser = Xml.newPullParser()
-            file.inputStream().use { parser.setInput(it, "UTF-8") }
+            sourceXml.byteInputStream().use { parser.setInput(it, "UTF-8") }
             val groups = ArrayList<ViewGroup>()
             val groupFlags = ArrayList<Boolean>()
             var rootView: View? = null
@@ -605,7 +617,11 @@ class LivePreviewActivity : Activity() {
                 orientation = if (attr(p, "orientation") == "horizontal") LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
                 gravity = gravity(attr(p, "gravity"))
             }
-            "FrameLayout", "ConstraintLayout", "CoordinatorLayout", "RelativeLayout" -> FrameLayout(this)
+            "FrameLayout", "CoordinatorLayout" -> FrameLayout(this)
+            "ConstraintLayout", "RelativeLayout", "MotionLayout" -> LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.START
+            }
             "ScrollView", "NestedScrollView" -> ScrollView(this).apply { isFillViewport = attr(p, "fillViewport") == "true" }
             "HorizontalScrollView" -> HorizontalScrollView(this)
             "TextView", "CheckedTextView" -> TextView(this)
