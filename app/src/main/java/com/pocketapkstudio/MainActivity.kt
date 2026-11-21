@@ -29,12 +29,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var status: TextView
@@ -211,12 +214,32 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let {
-            selectedUri = it
-            importedZipName = null
-            projectName.text = it.lastPathSegment ?: "Selected project folder"
-            projectType.text = "Folder selected. ZIP import is currently required for local builds."
-            status.text = "Folder access saved. For this version, export the project as a ZIP to build it."
+        uri?.let { treeUri ->
+            try { contentResolver.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            status.text = "Scanning selected project folder…"
+            lifecycleScope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) { zipDocumentTree(treeUri) }
+                    val zipUri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", result.first)
+                    selectedUri = zipUri
+                    importedZipName = null
+                    projectName.text = result.first.name.removeSuffix(".zip")
+                    projectIsGradle = result.second
+                    projectIsFlutter = result.third
+                    projectType.text = when {
+                        result.third -> "Flutter project detected — Flutter build support is not available yet."
+                        result.second -> "Android Gradle project folder ready for editing and local build."
+                        else -> "Folder scanned, but no Gradle settings/build files were found."
+                    }
+                    status.text = if (result.second && !result.third) "Project folder imported successfully." else "Folder scan finished."
+                    if (result.second && !result.third) openProjectEditor(zipUri)
+                } catch (error: Exception) {
+                    projectIsGradle = false
+                    projectIsFlutter = false
+                    status.text = "Could not import folder: " + (error.message ?: "folder access error")
+                    Toast.makeText(this@MainActivity, status.text, Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
@@ -1349,6 +1372,40 @@ class MainActivity : androidx.activity.ComponentActivity() {
         } catch (_: Exception) {
             // Final Termux callback still supplies stdout/stderr if live access is unavailable.
         }
+    }
+
+    private fun zipDocumentTree(treeUri: Uri): Triple<File, Boolean, Boolean> {
+        val root = DocumentFile.fromTreeUri(this, treeUri) ?: error("Cannot access selected folder")
+        require(root.isDirectory) { "Selected item is not a folder" }
+        val output = File(cacheDir, "folder-import-${System.currentTimeMillis()}.zip")
+        var hasGradle = false
+        var hasFlutter = false
+        var count = 0
+        ZipOutputStream(output.outputStream().buffered()).use { zip ->
+            fun addFolder(folder: DocumentFile, prefix: String) {
+                folder.listFiles().forEach { child ->
+                    val name = child.name ?: return@forEach
+                    if (name in setOf(".gradle", "build", ".git", "node_modules", ".idea")) return@forEach
+                    val relative = if (prefix.isBlank()) name else "$prefix/$name"
+                    if (child.isDirectory) {
+                        addFolder(child, relative)
+                    } else if (child.isFile) {
+                        if (relative.endsWith("settings.gradle") || relative.endsWith("settings.gradle.kts") ||
+                            relative.endsWith("build.gradle") || relative.endsWith("build.gradle.kts")) hasGradle = true
+                        if (relative.endsWith("pubspec.yaml") || relative.contains(".dart_tool/")) hasFlutter = true
+                        zip.putNextEntry(ZipEntry(relative))
+                        contentResolver.openInputStream(child.uri)?.use { input -> input.copyTo(zip) }
+                            ?: error("Cannot read project file: $relative")
+                        zip.closeEntry()
+                        count++
+                        require(count <= 30000) { "Folder has more than 30,000 files; import it as a ZIP instead." }
+                    }
+                }
+            }
+            addFolder(root, "")
+        }
+        check(output.isFile && output.length() > 0L) { "Selected folder is empty." }
+        return Triple(output, hasGradle, hasFlutter)
     }
 
     private fun copyZipToDownloads(uri: Uri): String {
