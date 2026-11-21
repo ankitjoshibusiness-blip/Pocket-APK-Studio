@@ -15,7 +15,7 @@ import java.util.zip.ZipOutputStream
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 
-/** Lightweight Android layout/source preview; it does not execute app code. */
+/** Approximate source inspector plus a build-and-run handoff for exact on-device runtime preview. */
 class LivePreviewActivity : Activity() {
     private lateinit var projectRoot: File
     private lateinit var content: LinearLayout
@@ -38,12 +38,12 @@ class LivePreviewActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)); setBackgroundColor(0xFF121922.toInt()) }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(Button(this).apply { text = "‹ Back"; isAllCaps = false; setOnClickListener { finish() } }, LinearLayout.LayoutParams(-2, dp(44)))
-        title = TextView(this).apply { text = "LIVE UI PREVIEW"; textSize = 17f; setTextColor(Color.WHITE); setPadding(dp(12), 0, 0, 0) }
+        title = TextView(this).apply { text = "SOURCE PREVIEW"; textSize = 17f; setTextColor(Color.WHITE); setPadding(dp(12), 0, 0, 0) }
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(Button(this).apply { text = "☷"; contentDescription = "Choose screen"; setOnClickListener { chooseLayout() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
         header.addView(Button(this).apply { text = "↻"; contentDescription = "Refresh preview"; setOnClickListener { refreshCurrentPreview() } }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
-        root.addView(TextView(this).apply { text = "Source preview is an approximation. Use Build & Run on Device for the exact compiled app."; textSize = 11f; setTextColor(0xFFFFD28A.toInt()); setPadding(dp(4), dp(8), dp(4), dp(6)) })
+        root.addView(TextView(this).apply { text = "Approximate source view only. Build & Run creates the APK; install it and launch it for exact Android rendering."; textSize = 11f; setTextColor(0xFFFFD28A.toInt()); setPadding(dp(4), dp(8), dp(4), dp(6)) })
         val deviceControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         fun deviceButton(label: String, width: Int, height: Int, rotate: Boolean = false) = Button(this).apply {
             text = label
@@ -66,7 +66,7 @@ class LivePreviewActivity : Activity() {
         deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
         root.addView(deviceControls, LinearLayout.LayoutParams(-1, -2))
         val buildRunButton = Button(this).apply {
-            text = "Build & Run on Device"
+            text = "Build & Run · Exact Device Preview"
             isAllCaps = false
             setTextColor(Color.WHITE)
             setBackgroundColor(0xFF2563EB.toInt())
@@ -201,7 +201,7 @@ class LivePreviewActivity : Activity() {
         val source = sources.firstOrNull { it.name == "MainActivity.kt" && runCatching { it.readText().contains("setContent") }.getOrDefault(false) }
             ?: sources.firstOrNull { runCatching { it.readText().contains("@Composable") }.getOrDefault(false) }
         if (source == null) {
-            title.text = "LIVE UI PREVIEW"
+            title.text = "SOURCE PREVIEW · APPROXIMATE"
             showMessage("No Compose Kotlin source found. Add a MainActivity or @Composable screen.")
             return
         }
@@ -209,7 +209,7 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun renderComposeFile(source: File) {
-        title.text = "COMPOSE PREVIEW · " + source.name
+        title.text = "SOURCE PREVIEW · " + source.name
         try {
             val code = source.readText()
             val screen = LinearLayout(this).apply {
