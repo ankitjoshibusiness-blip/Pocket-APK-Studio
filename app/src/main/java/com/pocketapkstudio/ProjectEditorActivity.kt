@@ -882,7 +882,7 @@ class ProjectEditorActivity : Activity() {
         autoEditing = true
         try {
             if (typed == '\n') {
-                val previousLineStart = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                val previousLineStart = text.substring(0, start).lastIndexOf('\n').let { if (it < 0) 0 else it + 1 }
                 val previousLine = text.substring(previousLineStart, start)
                 val indent = previousLine.takeWhile { it == ' ' || it == '\t' }
                 val extraIndent = if (previousLine.trimEnd().endsWith("{") || previousLine.trimEnd().endsWith("[") || previousLine.trimEnd().endsWith("(")) "    " else ""
