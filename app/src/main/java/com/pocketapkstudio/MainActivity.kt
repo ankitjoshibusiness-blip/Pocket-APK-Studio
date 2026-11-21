@@ -1264,8 +1264,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton.visibility = View.GONE
         status.text = "Preparing project…"
         logs.text = "Preparing project…"
-        installButton.visibility = View.GONE
-        shareButton.visibility = View.GONE
         runtimePreviewHint.visibility = View.GONE
         runPreviewButton.visibility = View.GONE
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
@@ -1421,10 +1419,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             status.text = "Preview APK not found. Build the project again."
             return
         }
-        val archive = runCatching {
-            @Suppress("DEPRECATION")
-            packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
-        }.getOrNull()
+        @Suppress("DEPRECATION")
+        val archive = runCatching { packageManager.getPackageArchiveInfo(apk.absolutePath, 0) }.getOrNull()
         val targetPackage = archive?.packageName?.takeIf { it.isNotBlank() }
         if (targetPackage == null) {
             status.text = "Could not read the package name from the built APK."
@@ -1434,10 +1430,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             status.text = "The project uses Pocket APK Studio's own applicationId. Change it to a separate package before running a preview."
             return
         }
-        val installed = runCatching {
-            @Suppress("DEPRECATION")
-            packageManager.getPackageInfo(targetPackage, 0)
-        }.getOrNull()
+        @Suppress("DEPRECATION")
+        val installed = runCatching { packageManager.getPackageInfo(targetPackage, 0) }.getOrNull()
         if (installed == null || installed.lastUpdateTime < apk.lastModified()) {
             status.text = "Install the latest APK above first. After installation, return here and tap Open Preview App."
             Toast.makeText(this, "Install the latest APK first, then open the preview app.", Toast.LENGTH_LONG).show()
