@@ -45,6 +45,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var logs: TextView
     private lateinit var installButton: Button
     private lateinit var shareButton: Button
+    private lateinit var runtimePreviewHint: TextView
+    private lateinit var runPreviewButton: Button
     private lateinit var serverStatus: TextView
     private lateinit var previewIcon: ImageView
     private lateinit var previewName: TextView
@@ -113,6 +115,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val available = apk?.isFile == true
             installButton.visibility = if (available) View.VISIBLE else View.GONE
             shareButton.visibility = if (available) View.VISIBLE else View.GONE
+            val showRuntimePreview = available && prefs.getBoolean("runtime_preview_requested", false)
+            if (::runtimePreviewHint.isInitialized) runtimePreviewHint.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
+            if (::runPreviewButton.isInitialized) runPreviewButton.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
             if (available) loadApkPreview(apk!!)
         }
     }
@@ -151,7 +156,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private fun refreshBuildResult() {
         if (!::status.isInitialized || !::buildProgress.isInitialized ||
             !::percentText.isInitialized || !::logs.isInitialized ||
-            !::installButton.isInitialized || !::shareButton.isInitialized) return
+            !::installButton.isInitialized || !::shareButton.isInitialized ||
+            !::runtimePreviewHint.isInitialized || !::runPreviewButton.isInitialized) return
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
         status.text = prefs.getString("last_build_status", "Waiting for a project.")
         val running = prefs.getBoolean("build_running", false)
@@ -165,6 +171,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val available = apk?.isFile == true
         installButton.visibility = if (available) View.VISIBLE else View.GONE
         shareButton.visibility = if (available) View.VISIBLE else View.GONE
+        val showRuntimePreview = available && prefs.getBoolean("runtime_preview_requested", false)
+        runtimePreviewHint.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
+        runPreviewButton.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
     }
 
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -208,7 +217,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             if (result.data?.getBooleanExtra("runtime_preview_build", false) == true) {
                 navigateToWorkflow?.invoke()
                 status.text = "Preparing a real device build from the edited project…"
-                startLocalBuild()
+                startLocalBuild(runtimePreview = true)
             }
         }
     }
@@ -702,8 +711,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildCard.addView(status)
         installButton = actionButton("Install APK") { installBuiltApk() }.apply { visibility = View.GONE }
         shareButton = actionButton("Share APK") { shareBuiltApk() }.apply { visibility = View.GONE }
+        runtimePreviewHint = label(
+            "Install the APK above first. Then return here and open the real compiled app preview.",
+            11, 0xFFFFC98D.toInt(), false
+        ).apply { visibility = View.GONE }
+        runPreviewButton = actionButton("▶  Open Preview App", true) { openBuiltRuntimePreview() }.apply {
+            visibility = View.GONE
+        }
         buildCard.addView(space(6)); buildCard.addView(installButton)
         buildCard.addView(space(6)); buildCard.addView(shareButton)
+        buildCard.addView(space(6)); buildCard.addView(runtimePreviewHint)
+        buildCard.addView(space(4)); buildCard.addView(runPreviewButton)
         workspaceSection("03  BUILD APK", "Build progress, status, install and share", buildCard)
         toolsContent.addView(space(12))
         val logCard = card()
@@ -1224,7 +1242,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun checkBuildServer() { startAutomaticEnvironmentSetup() }
 
-    private fun startLocalBuild() {
+    private fun startLocalBuild(runtimePreview: Boolean = false) {
         val source = selectedUri
         if (source == null) {
             Toast.makeText(this, "Please import a project ZIP first.", Toast.LENGTH_SHORT).show()
@@ -1246,9 +1264,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         shareButton.visibility = View.GONE
         status.text = "Preparing project…"
         logs.text = "Preparing project…"
+        installButton.visibility = View.GONE
+        shareButton.visibility = View.GONE
+        runtimePreviewHint.visibility = View.GONE
+        runPreviewButton.visibility = View.GONE
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
-            .putBoolean("build_running", true).putInt("last_build_percent", 0)
-            .putString("last_build_log", "Preparing project…").apply()
+            .putBoolean("runtime_preview_requested", runtimePreview)
+            .putBoolean("build_running", true)
+            .putInt("last_build_percent", 0)
+            .putString("last_build_log", "Preparing project…")
+            .putString("last_apk_path", null)
+            .apply()
         lifecycleScope.launch {
             try {
                 val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
@@ -1377,6 +1403,56 @@ class MainActivity : androidx.activity.ComponentActivity() {
             startService(intent)
         } catch (e: Exception) {
             Toast.makeText(this, "Could not start Termux build: " + (e.message ?: "unknown error"), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Opens the compiled project app after the user has installed the latest APK.
+     * This is the genuine Compose/runtime path; the in-pane source renderer remains approximate.
+     */
+    private fun openBuiltRuntimePreview() {
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        if (!prefs.getBoolean("runtime_preview_requested", false)) {
+            Toast.makeText(this, "Run Preview is available after Build & Run from Live UI Preview.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val apk = prefs.getString("last_apk_path", null)?.let(::File)
+        if (apk == null || !apk.isFile || apk.length() <= 0L) {
+            status.text = "Preview APK not found. Build the project again."
+            return
+        }
+        val archive = runCatching {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+        }.getOrNull()
+        val targetPackage = archive?.packageName?.takeIf { it.isNotBlank() }
+        if (targetPackage == null) {
+            status.text = "Could not read the package name from the built APK."
+            return
+        }
+        if (targetPackage == packageName) {
+            status.text = "The project uses Pocket APK Studio's own applicationId. Change it to a separate package before running a preview."
+            return
+        }
+        val installed = runCatching {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(targetPackage, 0)
+        }.getOrNull()
+        if (installed == null || installed.lastUpdateTime < apk.lastModified()) {
+            status.text = "Install the latest APK above first. After installation, return here and tap Open Preview App."
+            Toast.makeText(this, "Install the latest APK first, then open the preview app.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val launchIntent = packageManager.getLaunchIntentForPackage(targetPackage)
+        if (launchIntent == null) {
+            status.text = "The installed project has no visible launcher activity. Check for an exported MAIN/LAUNCHER activity in AndroidManifest.xml."
+            Toast.makeText(this, "No launcher activity found in the installed preview app.", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (error: Exception) {
+            status.text = "Could not open preview app: ${error.message ?: error.javaClass.simpleName}"
         }
     }
 
