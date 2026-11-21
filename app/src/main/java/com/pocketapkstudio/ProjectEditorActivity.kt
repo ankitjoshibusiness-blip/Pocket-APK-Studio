@@ -174,7 +174,7 @@ class ProjectEditorActivity : Activity() {
         diagnosticsPanel.addView(errorsPanel)
         root.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
         val chatWithAiButton = smallButton("✦  CHAT WITH AI  ·  OPEN AI DEVELOPER") {
-            saveCurrent(false)
+            if (!saveCurrent(false)) return@smallButton
             startActivityForResult(
                 Intent(this, AiChatActivity::class.java)
                     .putExtra("project_root", rootDir.absolutePath),
@@ -868,7 +868,7 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun shareProjectWithChatGPT() {
-        saveCurrent(false)
+        if (!saveCurrent(false)) return
         try {
             val out = File(cacheDir, "ai-project-source.zip")
             var count = 0
@@ -970,6 +970,8 @@ class ProjectEditorActivity : Activity() {
 
     private fun applyPendingAiChanges() {
         if (pendingAiChanges.isEmpty()) return
+        if (!saveCurrent(false)) return
+        val previouslyOpenFile = currentFile
         try {
             val backupRoot = File(filesDir, "ai-change-backups/${System.currentTimeMillis()}").apply { mkdirs() }
             pendingAiChanges.forEach { (relative, staged) ->
@@ -986,7 +988,11 @@ class ProjectEditorActivity : Activity() {
             val applied = pendingAiChanges.size
             pendingAiChanges.clear()
             refreshExplorer()
-            currentFile?.let { if (it.isFile) openFile(it) }
+            if (previouslyOpenFile != null && previouslyOpenFile.isFile) {
+                openTabs.remove(previouslyOpenFile)
+                currentFile = null
+                openFile(previouslyOpenFile)
+            }
             toast("Applied $applied AI file change(s). Original files backed up.")
         } catch (e: Exception) {
             toast("Could not apply all AI changes: ${e.message}. Check project files and backups.")
@@ -994,7 +1000,7 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun exportEditedZip() {
-        saveCurrent(false)
+        if (!saveCurrent(false)) return
         try {
             val out = File(cacheDir, "edited-project.zip")
             ZipOutputStream(out.outputStream().buffered()).use { zos ->
