@@ -51,6 +51,7 @@ class ProjectEditorActivity : Activity() {
     private val undoHistory = ArrayDeque<String>()
     private val redoHistory = ArrayDeque<String>()
     private var textBeforeChange = ""
+    private var lastUndoAt = 0L
     private val autoSave = Runnable { saveCurrent(false) }
     private val pendingAiChanges = LinkedHashMap<String, File>()
     private val aiSafeExtensions = setOf("kt","java","xml","gradle","kts","properties","txt","md","json","yaml","yml","dart","sh","pro","toml","html","css")
@@ -214,8 +215,13 @@ class ProjectEditorActivity : Activity() {
                 if(!loadingText) {
                     val nextText = s?.toString() ?: ""
                     if (textBeforeChange != nextText) {
-                        undoHistory.addLast(textBeforeChange)
-                        while (undoHistory.size > 100) undoHistory.removeFirst()
+                        val now = System.currentTimeMillis()
+                        // Group rapid keystrokes into one undo step instead of undoing one character at a time.
+                        if (now - lastUndoAt > 700L || undoHistory.isEmpty()) {
+                            undoHistory.addLast(textBeforeChange)
+                            while (undoHistory.size > 100) undoHistory.removeFirst()
+                        }
+                        lastUndoAt = now
                         redoHistory.clear()
                     }
                     dirty=true; currentFile?.let { openTabs[it]=nextText }
@@ -586,6 +592,7 @@ class ProjectEditorActivity : Activity() {
         currentFile = file
         if (!openTabs.containsKey(file)) openTabs[file] = file.readText(Charsets.UTF_8)
         undoHistory.clear(); redoHistory.clear()
+        lastUndoAt = 0L
         loadingText = true
         editor.setText(openTabs[file] ?: "")
         editor.setSelection(editor.text.length)
@@ -624,6 +631,7 @@ class ProjectEditorActivity : Activity() {
     private fun undoEdit() {
         if (undoHistory.isEmpty()) { toast("Nothing to undo"); return }
         val previous = undoHistory.removeLast()
+        lastUndoAt = 0L
         redoHistory.addLast(editor.text.toString())
         loadingText = true; editor.setText(previous); editor.setSelection(editor.text.length); loadingText = false
         currentFile?.let { openTabs[it] = previous }; dirty = true
@@ -634,6 +642,7 @@ class ProjectEditorActivity : Activity() {
     private fun redoEdit() {
         if (redoHistory.isEmpty()) { toast("Nothing to redo"); return }
         val next = redoHistory.removeLast()
+        lastUndoAt = 0L
         undoHistory.addLast(editor.text.toString())
         loadingText = true; editor.setText(next); editor.setSelection(editor.text.length); loadingText = false
         currentFile?.let { openTabs[it] = next }; dirty = true
@@ -735,7 +744,9 @@ class ProjectEditorActivity : Activity() {
                     saveCurrent(false)
                     val matches = ArrayList<Pair<File, Int>>()
                     val labels = ArrayList<String>()
-                    rootDir.walkTopDown().filter { file ->
+                    rootDir.walkTopDown().onEnter { directory ->
+                        directory == rootDir || directory.name !in setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
+                    }.filter { file ->
                         file.isFile && file.extension.lowercase() in editableExtensions && file.length() <= 1024 * 1024
                     }.forEach { file ->
                         if (matches.size >= 300) return@forEach
@@ -745,7 +756,7 @@ class ProjectEditorActivity : Activity() {
                             val at = content.indexOf(query, offset, ignoreCase = true)
                             if (at < 0) break
                             val line = content.substring(0, at).count { it == '\n' } + 1
-                            val lineStart = content.lastIndexOf('\n', (at - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                            val lineStart = if (at == 0) 0 else content.lastIndexOf('\n', at - 1).let { if (it < 0) 0 else it + 1 }
                             val lineEnd = content.indexOf('\n', at).let { if (it < 0) content.length else it }
                             val preview = content.substring(lineStart, lineEnd).trim().take(90)
                             matches.add(file to at)
