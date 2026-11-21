@@ -106,8 +106,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 return
             }
             status.text = prefs.getString("last_build_status", "Build finished. Check result.")
-            buildProgress.visibility = View.VISIBLE
-            buildProgress.isIndeterminate = false
+            buildProgress.visibility = if (prefs.getBoolean("build_running", false)) View.VISIBLE else View.GONE
+            buildProgress.isIndeterminate = prefs.getBoolean("build_running", false)
             buildProgress.progress = prefs.getInt("last_build_percent", 0)
             percentText.text = "${buildProgress.progress}%"
             logs.text = prefs.getString("last_build_log", "No build logs yet.")
@@ -1279,8 +1279,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 importedZipName = fileName
                 launchTermuxBuild(fileName)
             } catch (e: Exception) {
+                val message = "Could not prepare project ZIP: ${e.message ?: "storage error"}"
+                getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                    .putBoolean("build_running", false)
+                    .putString("last_build_status", message)
+                    .putString("last_build_log", message)
+                    .putInt("last_build_percent", 0)
+                    .putString("last_apk_path", null)
+                    .apply()
                 buildProgress.visibility = View.GONE
-                status.text = "Could not prepare ZIP: ${e.message ?: "storage error"}"
+                status.text = message
+                logs.text = message
             }
         }
     }
@@ -1400,7 +1409,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
         try {
             startService(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "Could not start Termux build: " + (e.message ?: "unknown error"), Toast.LENGTH_LONG).show()
+            val message = "Could not start Termux build: " + (e.message ?: "unknown error")
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putBoolean("build_running", false)
+                .putString("last_build_status", message)
+                .putString("last_build_log", message)
+                .putInt("last_build_percent", 0)
+                .putString("last_apk_path", null)
+                .apply()
+            if (::buildProgress.isInitialized) buildProgress.visibility = View.GONE
+            if (::status.isInitialized) status.text = message
+            if (::logs.isInitialized) logs.text = message
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
 
