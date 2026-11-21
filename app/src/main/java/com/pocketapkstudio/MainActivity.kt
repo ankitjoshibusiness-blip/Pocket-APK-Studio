@@ -66,6 +66,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var recoveryStageText: TextView
     private lateinit var recoveryLogText: TextView
     private val recoveryHandler = Handler(Looper.getMainLooper())
+    private val buildLogHandler = Handler(Looper.getMainLooper())
+    private val buildLogPollTask = object : Runnable {
+        override fun run() {
+            readBuildLiveLog()
+            if (getSharedPreferences("build_state", MODE_PRIVATE).getBoolean("build_running", false)) {
+                buildLogHandler.postDelayed(this, 1000)
+            }
+        }
+    }
     private val recoveryPollTask = object : Runnable {
         override fun run() {
             readRecoveryProgress()
@@ -133,6 +142,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         refreshBuildResult()
         refreshRecoveryResult()
         refreshEnvironmentSetupResult()
+        if (getSharedPreferences("build_state", MODE_PRIVATE).getBoolean("build_running", false)) {
+            buildLogHandler.removeCallbacks(buildLogPollTask)
+            buildLogHandler.post(buildLogPollTask)
+        }
     }
 
     private fun refreshEnvironmentSetupResult() {
@@ -149,6 +162,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     override fun onStop() {
         recoveryHandler.removeCallbacks(recoveryPollTask)
+        buildLogHandler.removeCallbacks(buildLogPollTask)
         try { unregisterReceiver(buildResultReceiver) } catch (_: Exception) { }
         super.onStop()
     }
@@ -1266,13 +1280,19 @@ class MainActivity : androidx.activity.ComponentActivity() {
         logs.text = "Preparing project…"
         runtimePreviewHint.visibility = View.GONE
         runPreviewButton.visibility = View.GONE
-        getSharedPreferences("build_state", MODE_PRIVATE).edit()
+        val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        buildPrefs.edit()
             .putBoolean("runtime_preview_requested", runtimePreview)
             .putBoolean("build_running", true)
             .putInt("last_build_percent", 0)
             .putString("last_build_log", "Preparing project…")
             .putString("last_apk_path", null)
             .apply()
+        runCatching { prepareBuildLiveLog() }.onFailure { error ->
+            buildPrefs.edit().putString("last_build_log", "Preparing project…\\nLive log file unavailable: ${error.message}").apply()
+        }
+        buildLogHandler.removeCallbacks(buildLogPollTask)
+        buildLogHandler.post(buildLogPollTask)
         lifecycleScope.launch {
             try {
                 val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
@@ -1291,6 +1311,43 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 status.text = message
                 logs.text = message
             }
+        }
+    }
+
+    private fun prepareBuildLiveLog() {
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/"
+        contentResolver.delete(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+            arrayOf("build-live.log", folder)
+        )
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "build-live.log")
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: error("Could not create live build log")
+        contentResolver.openOutputStream(uri)?.use { it.write("Build starting…\\n".toByteArray()) }
+            ?: error("Could not initialize live build log")
+        getSharedPreferences("build_state", MODE_PRIVATE).edit()
+            .putString("live_build_log_uri", uri.toString()).apply()
+    }
+
+    private fun readBuildLiveLog() {
+        if (!::logs.isInitialized) return
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val uriText = prefs.getString("live_build_log_uri", null) ?: return
+        try {
+            val text = contentResolver.openInputStream(Uri.parse(uriText))
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (text.isNotBlank()) {
+                val visible = text.takeLast(40000)
+                logs.text = visible
+                prefs.edit().putString("last_build_log", visible).apply()
+            }
+        } catch (_: Exception) {
+            // Final Termux callback still supplies stdout/stderr if live access is unavailable.
         }
     }
 
@@ -1332,6 +1389,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val sharedZip = "/sdcard/Download/PocketAPKStudio/$zipName"
         val command = """
             set -e
+            LIVE_LOG="/sdcard/Download/PocketAPKStudio/build-live.log"
+            mkdir -p "/sdcard/Download/PocketAPKStudio"
+            : > "$LIVE_LOG"
+            exec > >(tee -a "$LIVE_LOG") 2>&1
             echo "Pocket APK Studio: background Android build started"
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
             proot-distro login ubuntu -- bash -lc '
