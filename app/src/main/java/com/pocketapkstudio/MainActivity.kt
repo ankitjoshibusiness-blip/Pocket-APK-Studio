@@ -176,8 +176,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
             !::installButton.isInitialized || !::shareButton.isInitialized ||
             !::runtimePreviewHint.isInitialized || !::runPreviewButton.isInitialized) return
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
-        status.text = prefs.getString("last_build_status", "Waiting for a project.")
         val running = prefs.getBoolean("build_running", false)
+        status.text = if (running) "Build running — check live logs below." else
+            (prefs.getString("last_build_status", "Waiting for a project.") ?: "Waiting for a project.")
         buildProgress.visibility = if (running) View.VISIBLE else View.GONE
         buildProgress.isIndeterminate = running
         val progress = prefs.getInt("last_build_percent", 0)
@@ -1307,6 +1308,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildPrefs.edit()
             .putBoolean("runtime_preview_requested", runtimePreview)
             .putBoolean("build_running", true)
+            .putString("last_build_status", "Build running — preparing project…")
             .putInt("last_build_percent", 0)
             .putString("last_build_log", "Preparing project…")
             .putString("last_apk_path", null)
