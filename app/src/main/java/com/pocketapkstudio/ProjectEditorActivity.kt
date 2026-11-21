@@ -448,14 +448,21 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun copyFile(file: File) {
-        val box = EditText(this).apply { setText(file.relativeTo(rootDir).invariantSeparatorsPath.substringBeforeLast('.', file.name) + "_copy." + file.extension); setSingleLine(true) }
+        val source = file.canonicalFile
+        if (!source.isFile || !source.path.startsWith(rootDir.canonicalPath + File.separator)) {
+            toast("Invalid project file")
+            return
+        }
+        if (source == currentFile) saveCurrent(false)
+        val box = EditText(this).apply { setText(source.relativeTo(rootDir).invariantSeparatorsPath.substringBeforeLast('.', source.name) + "_copy." + source.extension); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Copy file").setView(box).setPositiveButton("Copy") { _, _ ->
             try {
                 val target = File(rootDir, box.text.toString().trim()).canonicalFile
                 require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                 require(!target.exists()) { "Destination already exists" }
-                target.parentFile?.mkdirs()
-                file.copyTo(target)
+                val parent = target.parentFile
+                require(parent != null && (parent.mkdirs() || parent.isDirectory)) { "Could not create destination folder" }
+                source.copyTo(target)
                 refreshExplorer()
                 toast("File copied")
             } catch (e: Exception) { toast("Copy failed: ${e.message}") }
@@ -496,7 +503,8 @@ class ProjectEditorActivity : Activity() {
                 val target = File(rootDir, path).canonicalFile
                 require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                 require(!target.exists()) { "File already exists" }
-                target.parentFile?.mkdirs()
+                val parent = target.parentFile
+                require(parent != null && (parent.mkdirs() || parent.isDirectory)) { "Could not create destination folder" }
                 target.writeText(editor.text.toString(), Charsets.UTF_8)
                 openFile(target)
                 refreshExplorer()
@@ -644,6 +652,7 @@ class ProjectEditorActivity : Activity() {
         val next = redoHistory.removeLast()
         lastUndoAt = 0L
         undoHistory.addLast(editor.text.toString())
+        while (undoHistory.size > 100) undoHistory.removeFirst()
         loadingText = true; editor.setText(next); editor.setSelection(editor.text.length); loadingText = false
         currentFile?.let { openTabs[it] = next }; dirty = true
         updateLineNumbers(); updateSuggestions(); highlightCode()
@@ -707,18 +716,19 @@ class ProjectEditorActivity : Activity() {
         val replacement = EditText(this).apply { hint = "Replace with"; isSingleLine = true; visibility = if (replace) View.VISIBLE else View.GONE }
         box.addView(replacement)
         AlertDialog.Builder(this).setTitle(if (replace) "Find & Replace" else "Find")
+            .setMessage(if (replace) "Replace matches in the currently open file. Search is case-insensitive." else "Search in the currently open file. Search is case-insensitive.")
             .setView(box).setPositiveButton(if (replace) "Replace all" else "Find next") { _, _ ->
                 val needle = find.text.toString()
                 if (needle.isNotEmpty()) {
-                    if (replace) editor.text = android.text.SpannableStringBuilder(editor.text.toString().replace(needle, replacement.text.toString()))
+                    if (replace) editor.text = android.text.SpannableStringBuilder(editor.text.toString().replace(needle, replacement.text.toString(), ignoreCase = true))
                     else {
                         val length = editor.text.length
                         val selectionEnd = editor.selectionEnd.coerceAtLeast(0).coerceAtMost(length)
                         val selectionStart = editor.selectionStart.coerceAtLeast(0).coerceAtMost(length)
                         val start = if (selectionEnd > selectionStart) selectionEnd else selectionStart
                         val source = editor.text.toString()
-                        val found = source.indexOf(needle, start)
-                        val at = if (found >= 0) found else source.indexOf(needle, 0)
+                        val found = source.indexOf(needle, start, ignoreCase = true)
+                        val at = if (found >= 0) found else source.indexOf(needle, 0, ignoreCase = true)
                         if (at >= 0) {
                             editor.requestFocus()
                             editor.setSelection(at, at + needle.length)
