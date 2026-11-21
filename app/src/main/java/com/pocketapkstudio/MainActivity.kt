@@ -1412,9 +1412,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun copyZipToDownloads(uri: Uri): String {
         val original = queryDisplayName(uri) ?: "android-project.zip"
-        val safeName = original.replace(Regex("[^A-Za-z0-9._-]"), "_").let {
+        val normalizedName = original.replace(Regex("[^A-Za-z0-9._-]"), "_").let {
             if (it.endsWith(".zip", true)) it else "$it.zip"
         }
+        // A unique name prevents MediaStore auto-renaming the file while the
+        // Termux command still tries to read the original name.
+        val safeName = "project-${System.currentTimeMillis()}-$normalizedName"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
