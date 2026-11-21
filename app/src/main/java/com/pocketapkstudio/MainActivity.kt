@@ -1448,8 +1448,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             set -e
             LIVE_LOG="/sdcard/Download/PocketAPKStudio/build-live.log"
             mkdir -p "/sdcard/Download/PocketAPKStudio"
-            : > "$LIVE_LOG"
-            exec > >(tee -a "$LIVE_LOG") 2>&1
+            : > "@D@LIVE_LOG"
+            exec > >(tee -a "@D@LIVE_LOG") 2>&1
             echo "Pocket APK Studio: background Android build started"
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
             proot-distro login ubuntu -- bash -lc '
