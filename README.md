@@ -27,7 +27,7 @@ The Pocket APK Studio app itself is configured for compile SDK 35, Android Gradl
 
 ## Preview limitations
 
-The in-pane Live UI Preview is a static source approximation. It does not execute the imported app, Compose code, custom views, runtime data, navigation, or third-party widgets. XML layouts are mapped to a limited set of native preview controls and may differ from the real app. Use **Build & Run on Device**, install the produced APK, and open the compiled app for an exact runtime check.
+The in-pane **Source Preview** is an approximation; it does not execute imported app code. XML layouts and Compose source are mapped to a limited set of native controls and can differ from the real app. For an exact result, choose **Build & Run · Exact Device Preview**. Pocket APK Studio sends the project through the local Gradle build pipeline, then Android installs the produced APK. Tap **Run Exact Device Preview** to launch that installed app on the same phone. This is real Android runtime rendering on the device, not an embedded Android emulator. The app is not displayed inside the editor pane.
 
 The preview is not a build validator: a rendered preview does not guarantee Kotlin/Java compilation, resource linking, manifest validation, dependency resolution, or Gradle task success. Those checks happen during the actual Gradle build and their errors are shown in Build Logs.
 
