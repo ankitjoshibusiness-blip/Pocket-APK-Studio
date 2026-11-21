@@ -38,6 +38,8 @@ class ProjectEditorActivity : Activity() {
     private lateinit var errorsPanel: TextView
     private lateinit var root: LinearLayout
     private lateinit var explorerPanel: LinearLayout
+    private lateinit var explorerScrollView: ScrollView
+    private lateinit var codeScrollView: ScrollView
     private lateinit var explorerToggle: Button
     private lateinit var diagnosticsPanel: LinearLayout
     private lateinit var exportButton: Button
@@ -99,6 +101,9 @@ class ProjectEditorActivity : Activity() {
                     }
                 }
             } ?: if (!restoreWorkspace) error("Cannot read ZIP") else Unit
+            if (restoreWorkspace) {
+                savedInstanceState?.getStringArrayList("expanded_directories")?.let { expandedDirectories.addAll(it) }
+            }
             showEditor()
             if (restoreWorkspace) {
                 val savedTabs = savedInstanceState?.getStringArrayList("open_tabs") ?: arrayListOf()
@@ -111,6 +116,14 @@ class ProjectEditorActivity : Activity() {
                 activePath?.let { relative ->
                     val active = File(rootDir, relative).canonicalFile
                     if (active.isFile && active.path.startsWith(rootDir.canonicalPath + File.separator)) openFile(active)
+                }
+                val cursor = savedInstanceState?.getInt("editor_cursor", -1) ?: -1
+                if (cursor >= 0 && ::editor.isInitialized) editor.setSelection(cursor.coerceAtMost(editor.text.length))
+                savedInstanceState?.getInt("code_scroll_y", 0)?.let { y -> codeScrollView.post { codeScrollView.scrollTo(0, y) } }
+                savedInstanceState?.getInt("explorer_scroll_y", 0)?.let { y -> explorerScrollView.post { explorerScrollView.scrollTo(0, y) } }
+                if (savedInstanceState?.getBoolean("explorer_open", false) == true) {
+                    explorerOpen = false
+                    toggleExplorer()
                 }
             }
         } catch (e: Exception) {
@@ -179,8 +192,8 @@ class ProjectEditorActivity : Activity() {
             inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
         codeRow.addView(editor,LinearLayout.LayoutParams(0,-1,1f))
-        val codeScroll=ScrollView(this).apply { addView(codeRow) }
-        workArea.addView(codeScroll,FrameLayout.LayoutParams(-1,-1))
+        codeScrollView=ScrollView(this).apply { isFillViewport = true; addView(codeRow) }
+        workArea.addView(codeScrollView,FrameLayout.LayoutParams(-1,-1))
         explorerPanel=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10))
             background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFF0F3FA.toInt(),12); elevation=dp(14).toFloat()
@@ -189,10 +202,10 @@ class ProjectEditorActivity : Activity() {
         explorerHeader.addView(label("PROJECT EXPLORER",11,true),LinearLayout.LayoutParams(0,dp(36),1f))
         explorerHeader.addView(smallButton("×") { toggleExplorer() })
         explorerPanel.addView(explorerHeader)
-        val explorerScroll=ScrollView(this)
+        explorerScrollView=ScrollView(this)
         val explorerFiles=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        explorerScroll.addView(explorerFiles)
-        explorerPanel.addView(explorerScroll,LinearLayout.LayoutParams(-1,0,1f))
+        explorerScrollView.addView(explorerFiles)
+        explorerPanel.addView(explorerScrollView,LinearLayout.LayoutParams(-1,0,1f))
         workArea.addView(explorerPanel,FrameLayout.LayoutParams(dp(205),-1,Gravity.START))
         explorerPanel.translationX=-dp(225).toFloat(); explorerPanel.visibility=View.GONE
         root.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
@@ -286,8 +299,7 @@ class ProjectEditorActivity : Activity() {
 
     private fun refreshExplorer() {
         if (!::explorerPanel.isInitialized) return
-        val scroll = explorerPanel.getChildAt(1) as? ScrollView ?: return
-        val list = scroll.getChildAt(0) as? LinearLayout ?: return
+        val list = explorerScrollView.getChildAt(0) as? LinearLayout ?: return
         list.removeAllViews()
         val count = intArrayOf(0)
         addExplorerDirectoryChildren(rootDir, list, 0, count)
@@ -1117,6 +1129,7 @@ class ProjectEditorActivity : Activity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onSaveInstanceState(outState: Bundle) {
+        if (::editor.isInitialized && dirty) saveCurrent(false)
         super.onSaveInstanceState(outState)
         outState.putBoolean("workspace_loaded", ::rootDir.isInitialized && rootDir.isDirectory)
         if (::rootDir.isInitialized && rootDir.isDirectory) {
@@ -1126,6 +1139,11 @@ class ProjectEditorActivity : Activity() {
             outState.putString("active_file", currentFile?.let {
                 runCatching { it.relativeTo(rootDir).invariantSeparatorsPath }.getOrNull()
             })
+            outState.putStringArrayList("expanded_directories", ArrayList(expandedDirectories))
+            outState.putBoolean("explorer_open", explorerOpen)
+            if (::explorerScrollView.isInitialized) outState.putInt("explorer_scroll_y", explorerScrollView.scrollY)
+            if (::codeScrollView.isInitialized) outState.putInt("code_scroll_y", codeScrollView.scrollY)
+            if (::editor.isInitialized) outState.putInt("editor_cursor", editor.selectionStart.coerceAtLeast(0))
         }
     }
 
