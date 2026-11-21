@@ -305,8 +305,11 @@ class ProjectEditorActivity : Activity() {
             .setMessage("This permanently removes the folder and all files inside it.")
             .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
                 try {
-                    val removed = directory.walkTopDown().filter { it.isFile }.toSet()
-                    require(directory.isDirectory && directory.deleteRecursively()) { "Could not delete folder" }
+                    val safeDirectory = directory.canonicalFile
+                    require(safeDirectory != rootDir.canonicalFile && safeDirectory.path.startsWith(rootDir.canonicalPath + File.separator)) { "Cannot delete the project root" }
+                    saveCurrent(false)
+                    val removed = safeDirectory.walkTopDown().filter { it.isFile }.toSet()
+                    require(safeDirectory.isDirectory && safeDirectory.deleteRecursively()) { "Could not delete folder" }
                     removed.forEach { openTabs.remove(it) }
                     if (currentFile in removed) {
                         currentFile = null
@@ -315,6 +318,7 @@ class ProjectEditorActivity : Activity() {
                         loadingText = false
                         fileLabel.text = "Select a source file to start editing"
                         dirty = false
+                        undoHistory.clear(); redoHistory.clear()
                     }
                     val rel = directory.relativeTo(rootDir).invariantSeparatorsPath
                     expandedDirectories.removeAll { it == rel || it.startsWith(rel + "/") }
@@ -450,15 +454,19 @@ class ProjectEditorActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Delete ${file.name}?").setMessage("This permanently removes the file from this project.")
             .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
                 try {
-                    require(file.isFile && file.delete()) { "Could not delete file" }
-                    openTabs.remove(file)
-                    if (currentFile == file) {
+                    val safeFile = file.canonicalFile
+                    require(safeFile.isFile && safeFile.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid project file" }
+                    if (safeFile == currentFile) saveCurrent(false)
+                    require(safeFile.delete()) { "Could not delete file" }
+                    openTabs.remove(safeFile)
+                    if (currentFile == safeFile) {
                         currentFile = null
                         loadingText = true
                         editor.setText("")
                         loadingText = false
                         fileLabel.text = "Select a source file to start editing"
                         dirty = false
+                        undoHistory.clear(); redoHistory.clear()
                     }
                     refreshExplorer()
                     renderTabs()
