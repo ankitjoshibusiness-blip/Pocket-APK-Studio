@@ -21,6 +21,7 @@ class LivePreviewActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var title: TextView
     private lateinit var previewScroll: ScrollView
+    private lateinit var previewHorizontal: HorizontalScrollView
     private var previewWidthDp = 360
     private var previewHeightDp = 800
     private var layouts: List<File> = emptyList()
@@ -59,6 +60,7 @@ class LivePreviewActivity : Activity() {
                 applyDeviceProfile()
             }
         }
+        deviceControls.addView(deviceButton("Compact", 320, 740), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Phone", 360, 800), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Tablet", 600, 900), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
@@ -73,8 +75,18 @@ class LivePreviewActivity : Activity() {
         root.addView(buildRunButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(7); bottomMargin = dp(8) })
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFFE0E5EC.toInt()) }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
-        previewScroll = ScrollView(this).apply { isFillViewport = true }
-        previewScroll.addView(content)
+        previewHorizontal = HorizontalScrollView(this).apply {
+            isFillViewport = false
+            isHorizontalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(content, FrameLayout.LayoutParams(-2, -2))
+        }
+        previewScroll = ScrollView(this).apply {
+            isFillViewport = false
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(previewHorizontal, FrameLayout.LayoutParams(-1, -2))
+        }
         frame.addView(previewScroll, FrameLayout.LayoutParams(-1, -1))
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -128,6 +140,8 @@ class LivePreviewActivity : Activity() {
         content.minimumHeight = dp(previewHeightDp)
         content.requestLayout()
         title.text = "LIVE UI PREVIEW · ${previewWidthDp}×${previewHeightDp} dp"
+        previewHorizontal.post { previewHorizontal.scrollTo(0, 0) }
+        previewScroll.post { previewScroll.scrollTo(0, 0) }
     }
 
     private fun findLayouts() {
