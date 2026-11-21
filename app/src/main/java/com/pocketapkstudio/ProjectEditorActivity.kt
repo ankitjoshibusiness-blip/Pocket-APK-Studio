@@ -598,13 +598,16 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun showFilePicker() {
-        val files = rootDir.walkTopDown().filter { it.isFile }.toList()
+        val excludedDirectories = setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
+        val files = rootDir.walkTopDown().onEnter { directory ->
+            directory == rootDir || directory.name !in excludedDirectories
+        }.filter { it.isFile }.take(500).toList()
+        if (files.isEmpty()) { toast("No project files found"); return }
         val labels = files.map { (if (it.extension.lowercase() in editableExtensions) "▤ " else "▧ ") + it.relativeTo(rootDir).invariantSeparatorsPath }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Project Explorer").setItems(labels) { _, which ->
+        AlertDialog.Builder(this).setTitle("Project Files (${files.size}${if (files.size == 500) "+" else ""})").setItems(labels) { _, which ->
             val file = files[which]
-            if (file.extension.lowercase() !in editableExtensions || file.length() > 1024 * 1024) {
-                Toast.makeText(this, "This file cannot be opened in the text editor.", Toast.LENGTH_SHORT).show()
-            } else openFile(file)
+            if (file.extension.lowercase() !in editableExtensions || file.length() > 1024 * 1024) toast("This file cannot be opened in the text editor.")
+            else openFile(file)
         }.setNegativeButton("Close", null).show()
     }
 
@@ -822,13 +825,17 @@ class ProjectEditorActivity : Activity() {
     private fun saveCurrent(showMessage: Boolean) {
         val file = currentFile ?: return
         handler.removeCallbacks(autoSave)
+        val content = editor.text.toString()
         try {
-            file.writeText(editor.text.toString(), Charsets.UTF_8)
-            openTabs[file] = editor.text.toString()
+            require(file.canonicalPath.startsWith(rootDir.canonicalPath + File.separator)) { "File is outside the project" }
+            file.writeText(content, Charsets.UTF_8)
+            openTabs[file] = content
             dirty = false
-            if (showMessage) Toast.makeText(this, "Saved: ${file.name}", Toast.LENGTH_SHORT).show()
+            if (showMessage) toast("Saved: ${file.name}")
         } catch (e: Exception) {
-            if (showMessage) Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+            dirty = true
+            openTabs[file] = content
+            toast("Save failed: ${e.message ?: "Unknown error"}")
         }
     }
 
