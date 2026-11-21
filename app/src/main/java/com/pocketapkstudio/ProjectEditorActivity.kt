@@ -803,26 +803,72 @@ class ProjectEditorActivity : Activity() {
     private fun highlightCode() {
         if (loadingText || !::editor.isInitialized) return
         val source = editor.text.toString()
-        val cursor = editor.selectionStart.coerceAtLeast(0)
-        val styled = SpannableString(source)
-        val keywordColor = if (darkTheme) 0xFFB7A3D0.toInt() else 0xFF7B2CBF.toInt()
-        val stringColor = if (darkTheme) 0xFFA9C99B.toInt() else 0xFF26733A.toInt()
+        if (source.isEmpty()) return
+
+        val ext = currentFile?.extension?.lowercase() ?: ""
+        val keywordColor = if (darkTheme) 0xFFC7A7F5.toInt() else 0xFF7B2CBF.toInt()
+        val stringColor = if (darkTheme) 0xFFA9D18E.toInt() else 0xFF26733A.toInt()
         val commentColor = if (darkTheme) 0xFF8295A8.toInt() else 0xFF687786.toInt()
-        val numberColor = if (darkTheme) 0xFFD6A080.toInt() else 0xFFB45309.toInt()
-        val patterns = listOf(
-            Pair("\\b(class|object|fun|val|var|if|else|when|for|while|return|public|private|protected|override|import|package|interface|suspend|const|lateinit|new|static|void|int|String|true|false|null)\\b", keywordColor),
-            Pair("""\"([^\\"]|\\.)*\"|'([^\\']|\\.)*'""", stringColor),
-            Pair("//[^\\n]*|/\\*[\\s\\S]*?\\*/", commentColor),
-            Pair("\\b\\d+\\b", numberColor)
-        )
+        val numberColor = if (darkTheme) 0xFFE6A477.toInt() else 0xFFB45309.toInt()
+        val typeColor = if (darkTheme) 0xFF80CBC4.toInt() else 0xFF087F8C.toInt()
+        val tagColor = if (darkTheme) 0xFF80B7F0.toInt() else 0xFF1769AA.toInt()
+        val attributeColor = if (darkTheme) 0xFFE6C27A.toInt() else 0xFF996515.toInt()
+        val annotationColor = if (darkTheme) 0xFFE0A0C0.toInt() else 0xFFAD3975.toInt()
+
+        val patterns = mutableListOf<Pair<String, Int>>()
+        when (ext) {
+            "kt" -> {
+                patterns += Pair("""//[^\n]*|/\*[\s\S]*?\*/""", commentColor)
+                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'|""" + "'''" + """[\s\S]*?""" + "'''", stringColor)
+                patterns += Pair("""@\w+""", annotationColor)
+                patterns += Pair("""\b(package|import|as|class|object|interface|typealias|fun|val|var|if|else|when|for|while|do|return|break|continue|throw|try|catch|finally|this|super|is|in|as|public|private|protected|internal|override|open|abstract|final|data|sealed|enum|annotation|companion|suspend|inline|noinline|crossinline|reified|const|lateinit|by|init|constructor|where|true|false|null)\b""", keywordColor)
+                patterns += Pair("""\b(String|Int|Long|Short|Byte|Float|Double|Boolean|Char|Unit|Any|Nothing|List|MutableList|Set|Map|Array|Pair|Triple)\b""", typeColor)
+            }
+            "java" -> {
+                patterns += Pair("""//[^\n]*|/\*[\s\S]*?\*/""", commentColor)
+                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'""", stringColor)
+                patterns += Pair("""@\w+""", annotationColor)
+                patterns += Pair("""\b(package|import|class|interface|enum|extends|implements|public|private|protected|static|final|abstract|void|new|this|super|return|if|else|switch|case|default|for|while|do|break|continue|try|catch|finally|throw|throws|synchronized|volatile|transient|native|instanceof|var|true|false|null)\b""", keywordColor)
+                patterns += Pair("""\b(String|Integer|Long|Short|Byte|Float|Double|Boolean|Character|Object|List|ArrayList|Map|HashMap|Set|void)\b""", typeColor)
+            }
+            "xml" -> {
+                patterns += Pair("""<!--[\s\S]*?-->""", commentColor)
+                patterns += Pair(""""([^"\\]|\\.)*|'([^'\\]|\\.)*'""", stringColor)
+                patterns += Pair("""</?[A-Za-z_][\w:.-]*|/?>""", tagColor)
+                patterns += Pair("""\b[A-Za-z_][\w:.-]*(?=\s*=)""", attributeColor)
+                patterns += Pair("""\b(true|false|match_parent|wrap_content|dp|sp|px)\b""", keywordColor)
+            }
+            "gradle", "kts" -> {
+                patterns += Pair("""//[^\n]*|/\*[\s\S]*?\*/""", commentColor)
+                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'""", stringColor)
+                patterns += Pair("""@\w+""", annotationColor)
+                patterns += Pair("""\b(plugins|pluginManagement|dependencies|implementation|api|compileOnly|runtimeOnly|testImplementation|android|repositories|mavenCentral|google|namespace|compileSdk|minSdk|targetSdk|defaultConfig|applicationId|versionCode|versionName|buildTypes|release|debug|signingConfig|tasks|register|include|project|id|version|alias|kotlin|java|true|false|null)\b""", keywordColor)
+            }
+            else -> {
+                patterns += Pair("""//[^\n]*|/\*[\s\S]*?\*/|#[^\n]*""", commentColor)
+                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'""", stringColor)
+                patterns += Pair("""\b(class|object|fun|val|var|if|else|when|for|while|return|public|private|protected|override|import|package|interface|suspend|const|lateinit|new|static|void|int|String|true|false|null)\b""", keywordColor)
+            }
+        }
+        patterns += Pair("""\b\d+(?:\.\d+)?\b""", numberColor)
+
+        val styled = SpannableString(source)
         patterns.forEach { (pattern, color) ->
             val matcher = Pattern.compile(pattern).matcher(source)
-            while (matcher.find()) styled.setSpan(ForegroundColorSpan(color), matcher.start(), matcher.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            while (matcher.find()) {
+                if (matcher.start() < matcher.end()) {
+                    styled.setSpan(ForegroundColorSpan(color), matcher.start(), matcher.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
         }
+        val cursor = editor.selectionStart.coerceAtLeast(0)
+        val selectionEnd = editor.selectionEnd.coerceAtLeast(cursor)
+        val scrollY = editor.scrollY
         loadingText = true
         editor.setText(styled)
-        editor.setSelection(cursor.coerceAtMost(editor.text.length))
+        editor.setSelection(cursor.coerceAtMost(editor.text.length), selectionEnd.coerceAtMost(editor.text.length))
         loadingText = false
+        editor.post { editor.scrollTo(editor.scrollX, scrollY) }
     }
 
     private fun updateSuggestions() {
