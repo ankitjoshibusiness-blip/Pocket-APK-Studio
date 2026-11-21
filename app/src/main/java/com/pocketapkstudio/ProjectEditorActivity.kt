@@ -36,6 +36,10 @@ class ProjectEditorActivity : Activity() {
     private lateinit var fileLabel: TextView
     private lateinit var tabsBar: LinearLayout
     private lateinit var suggestionsBar: LinearLayout
+    private lateinit var editorContainer: FrameLayout
+    private lateinit var inlineGhostView: TextView
+    private var inlineCompletionSuffix = ""
+    private var inlineCompletionTokenStart = -1
     private lateinit var errorsPanel: TextView
     private lateinit var root: LinearLayout
     private lateinit var contentRoot: LinearLayout
@@ -228,7 +232,15 @@ class ProjectEditorActivity : Activity() {
             isVerticalScrollBarEnabled=true; background=null
             inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
-        codeRow.addView(editor,LinearLayout.LayoutParams(0,-1,1f))
+        editorContainer=FrameLayout(this)
+        editorContainer.addView(editor,FrameLayout.LayoutParams(-1,-1))
+        inlineGhostView=TextView(this).apply {
+            typeface=Typeface.MONOSPACE; textSize=13f; setPadding(0,0,0,0)
+            setTextColor(if(darkTheme) 0xFF87939D.toInt() else 0xFF9AA4AF.toInt())
+            alpha=0.78f; isClickable=false; isFocusable=false; visibility=View.GONE
+        }
+        editorContainer.addView(inlineGhostView,FrameLayout.LayoutParams(-2,-2))
+        codeRow.addView(editorContainer,LinearLayout.LayoutParams(0,-1,1f))
         codeScrollView=ScrollView(this).apply { isFillViewport = true; addView(codeRow) }
         workArea.addView(codeScrollView,FrameLayout.LayoutParams(-1,-1))
         explorerPanel=LinearLayout(this).apply {
@@ -246,8 +258,7 @@ class ProjectEditorActivity : Activity() {
         workArea.addView(explorerPanel,FrameLayout.LayoutParams(dp(205),-1,Gravity.START))
         explorerPanel.translationX=-dp(225).toFloat(); explorerPanel.visibility=View.GONE
         contentRoot.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
-        suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)) }
-        contentRoot.addView(suggestionsBar,LinearLayout.LayoutParams(-1,dp(40)))
+        suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)); visibility=View.GONE }
         diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE9EEF8.toInt(),12) }
         diagnosticsPanel.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
@@ -293,8 +304,18 @@ class ProjectEditorActivity : Activity() {
                 if (!loadingText) textBeforeChange = s?.toString() ?: ""
             }
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
-                if(!loadingText) {
+                if(!loadingText && !autoEditing) {
                     val nextText = s?.toString() ?: ""
+                    if (count == 1 && before == 0 && start in nextText.indices && nextText[start] == ' ' && inlineCompletionSuffix.isNotEmpty()) {
+                        val suffix = inlineCompletionSuffix
+                        autoEditing = true
+                        try {
+                            editor.text.replace(start, start + 1, suffix + " ")
+                            editor.setSelection(start + suffix.length + 1)
+                        } finally { autoEditing = false }
+                        updateInlineCompletion()
+                        return
+                    }
                     if (textBeforeChange != nextText) {
                         val now = System.currentTimeMillis()
                         // Group rapid keystrokes into one undo step instead of undoing one character at a time.
@@ -307,11 +328,21 @@ class ProjectEditorActivity : Activity() {
                     }
                     dirty=true; currentFile?.let { openTabs[it]=nextText }
                     applyTypingAssist(start, before, count, nextText)
-                    updateLineNumbers(); updateSuggestions(); handler.removeCallbacks(autoSave); handler.postDelayed(autoSave,900); highlightCode()
+                    updateLineNumbers(); updateSuggestions(); handler.removeCallbacks(autoSave); handler.postDelayed(autoSave,900); highlightCode(); editor.post { updateInlineCompletion() }
                 }
             }
             override fun afterTextChanged(s:Editable?) {}
         })
+        editor.setOnKeyListener { _, keyCode, event ->
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && inlineCompletionSuffix.isNotEmpty() && (keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == android.view.KeyEvent.KEYCODE_TAB)) {
+                acceptInlineCompletion(false); true
+            } else false
+        }
+        editor.setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) editor.post { updateInlineCompletion() }
+            false
+        }
+        editor.setOnScrollChangeListener { _, _, _, _, _ -> updateInlineCompletion() }
         updateBuildErrors(); renderTabs()
     }
 
@@ -909,37 +940,66 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun updateSuggestions() {
-        if (!::suggestionsBar.isInitialized || !::editor.isInitialized) return
-        suggestionsBar.removeAllViews()
-        val ext = currentFile?.extension?.lowercase() ?: ""
-        val dictionary = when (ext) {
-            "kt" -> listOf("fun", "val", "var", "class", "object", "override", "private", "public", "return", "if", "else", "when", "for", "while", "import", "package", "suspend", "data")
-            "java" -> listOf("public", "private", "protected", "class", "interface", "void", "static", "final", "return", "new", "if", "else", "for", "while", "import", "package")
+        updateInlineCompletion()
+    }
+
+    private fun completionWords(): List<String> {
+        return when (currentFile?.extension?.lowercase() ?: "") {
+            "kt" -> listOf("function", "fun", "val", "var", "class", "object", "override", "private", "public", "return", "if", "else", "when", "for", "while", "import", "package", "suspend", "data")
+            "java" -> listOf("function", "public", "private", "protected", "class", "interface", "void", "static", "final", "return", "new", "if", "else", "for", "while", "import", "package")
             "xml" -> listOf("LinearLayout", "ConstraintLayout", "TextView", "EditText", "Button", "ImageView", "android:layout_width", "android:layout_height", "android:id", "match_parent", "wrap_content")
             "gradle", "kts" -> listOf("plugins", "dependencies", "implementation", "api", "android", "repositories", "mavenCentral", "google", "compileSdk", "minSdk", "targetSdk", "namespace")
-            else -> listOf("TODO", "if", "else", "return", "class", "function", "true", "false", "null")
+            else -> listOf("function", "TODO", "if", "else", "return", "class", "true", "false", "null")
         }
+    }
+
+    private fun updateInlineCompletion() {
+        if (!::inlineGhostView.isInitialized || !::editor.isInitialized) return
         val cursor = editor.selectionStart.coerceIn(0, editor.text.length)
         val source = editor.text.toString()
         val tokenStart = source.substring(0, cursor).indexOfLast { !it.isLetterOrDigit() && it != '_' && it != ':' }.let { it + 1 }
         val prefix = source.substring(tokenStart, cursor)
-        val matches = if (prefix.isBlank()) dictionary.take(7) else dictionary.filter { it.startsWith(prefix, ignoreCase = true) }.take(6)
-        matches.forEach { word ->
-            val b = smallButton(word) {
-                val end = editor.selectionStart.coerceIn(0, editor.text.length)
-                val start = editor.text.toString().substring(0, end).indexOfLast { !it.isLetterOrDigit() && it != '_' && it != ':' }.let { it + 1 }
-                autoEditing = true
-                try {
-                    editor.text.replace(start, end, word)
-                    editor.setSelection(start + word.length)
-                } finally {
-                    autoEditing = false
-                }
-                updateSuggestions()
-                highlightCode()
-            }
-            suggestionsBar.addView(b, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(5) })
+        val candidate = if (prefix.isNotEmpty() && prefix.length <= 32) {
+            completionWords().firstOrNull { it.startsWith(prefix, ignoreCase = true) && it.length > prefix.length }
+        } else null
+        if (candidate == null || !editor.hasFocus() || editor.layout == null) {
+            inlineCompletionSuffix = ""
+            inlineCompletionTokenStart = -1
+            inlineGhostView.text = ""
+            inlineGhostView.visibility = View.GONE
+            return
         }
+        inlineCompletionSuffix = candidate.substring(prefix.length)
+        inlineCompletionTokenStart = tokenStart
+        inlineGhostView.text = inlineCompletionSuffix
+        val layout = editor.layout ?: return
+        val line = layout.getLineForOffset(cursor)
+        val x = editor.totalPaddingLeft + layout.getPrimaryHorizontal(cursor) - editor.scrollX
+        val y = editor.totalPaddingTop + layout.getLineTop(line) - editor.scrollY
+        inlineGhostView.translationX = x
+        inlineGhostView.translationY = y
+        inlineGhostView.visibility = View.VISIBLE
+        inlineGhostView.bringToFront()
+    }
+
+    private fun acceptInlineCompletion(addSpace: Boolean) {
+        val suffix = inlineCompletionSuffix
+        if (suffix.isEmpty()) return
+        val cursor = editor.selectionStart.coerceIn(0, editor.text.length)
+        val start = inlineCompletionTokenStart
+        if (start < 0 || start > cursor) return
+        val currentPrefix = editor.text.substring(start, cursor)
+        if (currentPrefix.isEmpty()) return
+        autoEditing = true
+        try {
+            val addition = suffix + if (addSpace) " " else ""
+            editor.text.insert(cursor, addition)
+            editor.setSelection(cursor + addition.length)
+        } finally { autoEditing = false }
+        inlineCompletionSuffix = ""
+        inlineCompletionTokenStart = -1
+        updateInlineCompletion()
+        editor.invalidate()
     }
 
     private fun showFindReplace(replace: Boolean) {
