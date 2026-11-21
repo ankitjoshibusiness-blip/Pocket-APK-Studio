@@ -51,6 +51,7 @@ class ProjectEditorActivity : Activity() {
     private val openTabs = LinkedHashMap<File, String>()
     private val handler = Handler(Looper.getMainLooper())
     private var loadingText = false
+    private var autoEditing = false
     private var darkTheme = true
     private var dirty = false
     private val expandedDirectories = linkedSetOf<String>()
@@ -305,6 +306,7 @@ class ProjectEditorActivity : Activity() {
                         redoHistory.clear()
                     }
                     dirty=true; currentFile?.let { openTabs[it]=nextText }
+                    applyTypingAssist(start, before, count, nextText)
                     updateLineNumbers(); updateSuggestions(); handler.removeCallbacks(autoSave); handler.postDelayed(autoSave,900); highlightCode()
                 }
             }
@@ -871,23 +873,72 @@ class ProjectEditorActivity : Activity() {
         editor.post { editor.scrollTo(editor.scrollX, scrollY) }
     }
 
-    private fun updateSuggestions() {
-        suggestionsBar.removeAllViews()
-        val words = when (currentFile?.extension?.lowercase()) {
-            "kt" -> listOf("fun", "val", "var", "class", "override", "private", "return", "if")
-            "java" -> listOf("public", "private", "class", "void", "return", "new", "if")
-            "xml" -> listOf("<LinearLayout", "<TextView", "<Button", "android:layout_width", "android:layout_height")
-            "gradle", "kts" -> listOf("plugins", "dependencies", "implementation", "android", "repositories")
-            "json" -> listOf("\"name\"", "\"version\"", "\"true\"")
-            else -> listOf("TODO", "if", "else", "return", "class", "function")
-        }
-        words.forEach { word ->
-            val b = smallButton(word) {
-                val start = editor.selectionStart.coerceAtLeast(0)
-                editor.text.insert(start, word)
-                editor.setSelection((start + word.length).coerceAtMost(editor.text.length))
+    private fun applyTypingAssist(start: Int, before: Int, count: Int, text: String) {
+        if (autoEditing || loadingText || count != 1 || before != 0 || start < 0 || start >= text.length) return
+        val typed = text[start]
+        val editable = editor.text
+        val cursor = (start + 1).coerceAtMost(editable.length)
+        val closing = mapOf('(' to ')', '[' to ']', '{' to '}', '"' to '"', '\'' to '\'')
+        autoEditing = true
+        try {
+            if (typed == '\n') {
+                val previousLineStart = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                val previousLine = text.substring(previousLineStart, start)
+                val indent = previousLine.takeWhile { it == ' ' || it == '\t' }
+                val extraIndent = if (previousLine.trimEnd().endsWith("{") || previousLine.trimEnd().endsWith("[") || previousLine.trimEnd().endsWith("(")) "    " else ""
+                val addition = indent + extraIndent
+                if (addition.isNotEmpty()) {
+                    editable.insert(cursor, addition)
+                    editor.setSelection(cursor + addition.length)
+                }
+            } else if (typed in closing.keys) {
+                val next = editable.getOrNull(cursor)
+                if (next != closing[typed]) {
+                    editable.insert(cursor, closing.getValue(typed).toString())
+                    editor.setSelection(cursor)
+                }
+            } else if (typed in listOf(')', ']', '}', '"', '\'')) {
+                if (editable.getOrNull(cursor) == typed) editor.setSelection(cursor + 1)
+            } else if (typed == '\t') {
+                editable.replace(start, start + 1, "    ")
+                editor.setSelection(start + 4)
             }
-            suggestionsBar.addView(b)
+        } finally {
+            autoEditing = false
+        }
+    }
+
+    private fun updateSuggestions() {
+        if (!::suggestionsBar.isInitialized || !::editor.isInitialized) return
+        suggestionsBar.removeAllViews()
+        val ext = currentFile?.extension?.lowercase() ?: ""
+        val dictionary = when (ext) {
+            "kt" -> listOf("fun", "val", "var", "class", "object", "override", "private", "public", "return", "if", "else", "when", "for", "while", "import", "package", "suspend", "data")
+            "java" -> listOf("public", "private", "protected", "class", "interface", "void", "static", "final", "return", "new", "if", "else", "for", "while", "import", "package")
+            "xml" -> listOf("LinearLayout", "ConstraintLayout", "TextView", "EditText", "Button", "ImageView", "android:layout_width", "android:layout_height", "android:id", "match_parent", "wrap_content")
+            "gradle", "kts" -> listOf("plugins", "dependencies", "implementation", "api", "android", "repositories", "mavenCentral", "google", "compileSdk", "minSdk", "targetSdk", "namespace")
+            else -> listOf("TODO", "if", "else", "return", "class", "function", "true", "false", "null")
+        }
+        val cursor = editor.selectionStart.coerceIn(0, editor.text.length)
+        val source = editor.text.toString()
+        val tokenStart = source.substring(0, cursor).indexOfLast { !it.isLetterOrDigit() && it != '_' && it != ':' }.let { it + 1 }
+        val prefix = source.substring(tokenStart, cursor)
+        val matches = if (prefix.isBlank()) dictionary.take(7) else dictionary.filter { it.startsWith(prefix, ignoreCase = true) && !it.equals(prefix, true) }.take(6)
+        matches.forEach { word ->
+            val b = smallButton(word) {
+                val end = editor.selectionStart.coerceIn(0, editor.text.length)
+                val start = editor.text.toString().substring(0, end).indexOfLast { !it.isLetterOrDigit() && it != '_' && it != ':' }.let { it + 1 }
+                autoEditing = true
+                try {
+                    editor.text.replace(start, end, word)
+                    editor.setSelection(start + word.length)
+                } finally {
+                    autoEditing = false
+                }
+                updateSuggestions()
+                highlightCode()
+            }
+            suggestionsBar.addView(b, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(5) })
         }
     }
 
