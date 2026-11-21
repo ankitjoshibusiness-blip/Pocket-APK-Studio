@@ -64,9 +64,12 @@ class ProjectEditorActivity : Activity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val source = intent.getStringExtra("zip_uri")?.let { Uri.parse(it) }
         if (source == null) { finish(); return }
-        rootDir = File(cacheDir, "editor-project").apply { deleteRecursively(); mkdirs() }
+        rootDir = File(cacheDir, "editor-project")
+        val restoreWorkspace = savedInstanceState?.getBoolean("workspace_loaded", false) == true && rootDir.isDirectory
+        if (!restoreWorkspace) rootDir.deleteRecursively()
+        rootDir.mkdirs()
         try {
-            contentResolver.openInputStream(source)?.use { input ->
+            if (!restoreWorkspace) contentResolver.openInputStream(source)?.use { input ->
                 ZipInputStream(input).use { zip ->
                     var entry = zip.nextEntry
                     var count = 0
@@ -95,8 +98,21 @@ class ProjectEditorActivity : Activity() {
                         entry = zip.nextEntry
                     }
                 }
-            } ?: error("Cannot read ZIP")
+            } ?: if (!restoreWorkspace) error("Cannot read ZIP") else Unit
             showEditor()
+            if (restoreWorkspace) {
+                val savedTabs = savedInstanceState?.getStringArrayList("open_tabs") ?: arrayListOf()
+                val activePath = savedInstanceState?.getString("active_file")
+                savedTabs.forEach { relative ->
+                    val file = File(rootDir, relative).canonicalFile
+                    if (file.isFile && file.path.startsWith(rootDir.canonicalPath + File.separator) &&
+                        file.extension.lowercase() in editableExtensions && file.length() <= 1024 * 1024) openFile(file)
+                }
+                activePath?.let { relative ->
+                    val active = File(rootDir, relative).canonicalFile
+                    if (active.isFile && active.path.startsWith(rootDir.canonicalPath + File.separator)) openFile(active)
+                }
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "ZIP open failed: ${e.message}", Toast.LENGTH_LONG).show()
             finish()
@@ -1099,6 +1115,19 @@ class ProjectEditorActivity : Activity() {
     ).apply { cornerRadius=dp(radius).toFloat() }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("workspace_loaded", ::rootDir.isInitialized && rootDir.isDirectory)
+        if (::rootDir.isInitialized && rootDir.isDirectory) {
+            outState.putStringArrayList("open_tabs", ArrayList(openTabs.keys.mapNotNull { file ->
+                runCatching { file.relativeTo(rootDir).invariantSeparatorsPath }.getOrNull()
+            }))
+            outState.putString("active_file", currentFile?.let {
+                runCatching { it.relativeTo(rootDir).invariantSeparatorsPath }.getOrNull()
+            })
+        }
+    }
 
     override fun onDestroy() {
         handler.removeCallbacks(autoSave)
