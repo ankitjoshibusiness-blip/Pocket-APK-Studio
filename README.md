@@ -1,35 +1,39 @@
 # Pocket APK Studio
 
-Pocket APK Studio is designed to prepare and build Android projects locally on an Android phone.
+Pocket APK Studio is an Android-phone workspace for importing, editing, previewing and building Android Gradle projects through a local Termux + Ubuntu toolchain.
 
-## Version 1.1 — Native Android build bridge groundwork
-- Dark dashboard and ZIP/folder import.
-- ZIP project inspection for Gradle and Flutter markers.
-- Copies a selected Android Gradle ZIP to shared Downloads.
-- Can hand off a Gradle build command to Termux:RunCommand and Ubuntu PRoot.
-- Does not claim a build succeeded: check the Gradle output in Termux for `BUILD SUCCESS`.
+## Current build pipeline
 
-## Local Android build prerequisites
-This version uses the user's local Termux + Ubuntu environment as the compiler host. It is not yet a self-contained compiler bundled inside the APK.
+- Import an Android project from a ZIP or a folder selected through Android's Storage Access Framework. Folder imports are packaged into a ZIP while excluding generated folders such as `.gradle`, `build`, `.git`, `node_modules` and `.idea`.
+- Edit the imported project in the in-app editor.
+- Build debug APKs locally through Termux:RunCommand and Ubuntu PRoot.
+- Build output is written to `Downloads/PocketAPKStudio/build-live.log` and displayed in the Workspace Build Logs panel while the command runs. The final Termux callback remains the authoritative result and includes stdout/stderr.
+- A successful state is shown only when Gradle exits successfully and a non-empty APK is verified at the reported path.
+
+## Local build prerequisites
+
+This is not a compiler bundled inside the APK. The phone must have the local build environment:
 
 1. Install Termux and the matching Termux:RunCommand add-on from the same trusted source.
-2. In Termux, run `termux-setup-storage` and grant storage access.
-3. In Termux `~/.termux/termux.properties`, set `allow-external-apps = true`, then restart Termux.
-4. Install `proot-distro` in Termux and install/login to Ubuntu.
-5. Inside Ubuntu, install Java 17, Gradle 8.9, `wget`, `unzip`, and the Android SDK command-line tools.
-6. Install Android Platform 35 and Platform Tools using `sdkmanager`.
-7. Use ARM64-compatible Android Build Tools 34.0.4 in `$ANDROID_HOME/build-tools/34.0.4`. The standard Linux SDK Build Tools downloaded by `sdkmanager` are x86-64 binaries and cannot run directly in an ARM64-only Ubuntu environment.
-8. Set `ANDROID_HOME` in the Ubuntu login shell and accept Android SDK licences.
+2. In Termux, run `termux-setup-storage` and grant shared-storage access.
+3. In `~/.termux/termux.properties`, set `allow-external-apps = true`, then restart Termux.
+4. Install `proot-distro` in Termux and install/login to the Ubuntu distribution named `ubuntu`.
+5. Inside Ubuntu, install Java 17, `curl`, `wget`, `unzip`, `zip`, and Gradle 8.9 (unless the imported project includes `gradlew`).
+6. Install Android SDK command-line tools, Android Platform 35, Platform Tools and Build Tools 35.0.0; accept SDK licences.
+7. The local build bridge downloads and verifies an ARM64-compatible `aapt2` binary and configures Gradle's `android.aapt2FromMavenOverride` for it. The standard SDK Build Tools package is still installed for the other SDK utilities.
+8. Keep `ANDROID_HOME=/root/Android/Sdk` available inside Ubuntu.
 
-The app project itself is configured for compile SDK 35, Android Gradle Plugin 8.7.3, Java 17 and Build Tools 34.0.4. Gradle 8.9 is required by this Android Gradle Plugin version.
+The Pocket APK Studio app itself is configured for compile SDK 35, Android Gradle Plugin 8.7.3, Kotlin 2.0.21, Java 17 and Gradle 8.9. GitHub Actions uses the same Android Platform 35 / Build Tools 35.0.0 versions for the app's CI build.
 
-The bridge expects the Ubuntu distribution name `ubuntu`, the command `proot-distro`, and the ZIP at `/sdcard/Download/PocketAPKStudio/`. The Android app's Build button starts the build command, but cannot currently stream terminal logs back into the app.
+## Preview limitations
 
-## Not yet implemented
-- A compiler bundled fully inside the APK.
-- In-app build log streaming, APK discovery/install/share.
-- Recursive folder import/build.
-- Flutter SDK/Dart local build support.
-- Automatic SDK download and setup.
+The in-pane Live UI Preview is a static source approximation. It does not execute the imported app, Compose code, custom views, runtime data, navigation, or third-party widgets. XML layouts are mapped to a limited set of native preview controls and may differ from the real app. Use **Build & Run on Device**, install the produced APK, and open the compiled app for an exact runtime check.
 
-Never display a successful build state until a real APK has been produced and verified.
+The preview is not a build validator: a rendered preview does not guarantee Kotlin/Java compilation, resource linking, manifest validation, dependency resolution, or Gradle task success. Those checks happen during the actual Gradle build and their errors are shown in Build Logs.
+
+## Current limitations
+
+- Flutter/Dart projects can be identified but cannot be built by the current local pipeline; Flutter SDK integration is not included.
+- The APK build task currently runs `assembleDebug`; release signing and release APK generation are not configured.
+- Some source-preview widgets and Android layout classes are approximated rather than executed.
+- Build progress is based on live process output; it is not a precise Gradle task percentage.
