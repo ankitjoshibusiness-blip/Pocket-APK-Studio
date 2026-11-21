@@ -21,6 +21,7 @@ import android.widget.*
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.LinkedHashMap
+import java.util.ArrayDeque
 import java.util.regex.Pattern
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -46,6 +47,10 @@ class ProjectEditorActivity : Activity() {
     private var loadingText = false
     private var darkTheme = true
     private var dirty = false
+    private val expandedDirectories = linkedSetOf<String>()
+    private val undoHistory = ArrayDeque<String>()
+    private val redoHistory = ArrayDeque<String>()
+    private var textBeforeChange = ""
     private val autoSave = Runnable { saveCurrent(false) }
     private val pendingAiChanges = LinkedHashMap<String, File>()
     private val aiSafeExtensions = setOf("kt","java","xml","gradle","kts","properties","txt","md","json","yaml","yml","dart","sh","pro","toml","html","css")
@@ -97,6 +102,8 @@ class ProjectEditorActivity : Activity() {
         addToolbarTile(smallButton("＋ File") { showFileActions() })
         addToolbarTile(smallButton("⌕ Find") { showFindReplace(false) })
         addToolbarTile(smallButton("⇄ Replace") { showFindReplace(true) })
+        addToolbarTile(smallButton("↶ Undo") { undoEdit() })
+        addToolbarTile(smallButton("↷ Redo") { redoEdit() })
         addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
         root.addView(toolbar,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
@@ -195,10 +202,18 @@ class ProjectEditorActivity : Activity() {
             }
         }
         editor.addTextChangedListener(object:TextWatcher {
-            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {
+                if (!loadingText) textBeforeChange = s?.toString() ?: ""
+            }
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
                 if(!loadingText) {
-                    dirty=true; currentFile?.let { openTabs[it]=s?.toString() ?: "" }
+                    val nextText = s?.toString() ?: ""
+                    if (textBeforeChange != nextText) {
+                        undoHistory.addLast(textBeforeChange)
+                        while (undoHistory.size > 100) undoHistory.removeFirst()
+                        redoHistory.clear()
+                    }
+                    dirty=true; currentFile?.let { openTabs[it]=nextText }
                     updateLineNumbers(); updateSuggestions(); handler.removeCallbacks(autoSave); handler.postDelayed(autoSave,900); highlightCode()
                 }
             }
@@ -232,21 +247,80 @@ class ProjectEditorActivity : Activity() {
         val scroll = explorerPanel.getChildAt(1) as? ScrollView ?: return
         val list = scroll.getChildAt(0) as? LinearLayout ?: return
         list.removeAllViews()
-        rootDir.walkTopDown().filter { it.isFile }.take(500).forEach { file ->
+        val count = intArrayOf(0)
+        addExplorerDirectoryChildren(rootDir, list, 0, count)
+        if (count[0] == 0) list.addView(label("This project folder is empty.", 11, false))
+    }
+
+    private fun addExplorerDirectoryChildren(directory: File, list: LinearLayout, depth: Int, count: Int) {
+        if (count[0] >= 500) return
+        val children = directory.listFiles()?.filterNot {
+            it.name in setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
+        }?.sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() })) ?: return
+        children.filter { it.isDirectory }.forEach { dir ->
+            if (count[0] >= 500) return
+            count[0]++
+            val relative = dir.relativeTo(rootDir).invariantSeparatorsPath
+            val expanded = relative in expandedDirectories
+            val row = smallButton((if (expanded) "▾  " else "▸  ") + dir.name) {
+                if (expanded) expandedDirectories.remove(relative) else expandedDirectories.add(relative)
+                refreshExplorer()
+            }
+            row.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            row.setPadding(dp(8 + depth * 13), 0, dp(6), 0)
+            row.maxLines = 1
+            row.setOnLongClickListener {
+                AlertDialog.Builder(this).setTitle(dir.name)
+                    .setItems(arrayOf("Create file here", "Create folder here", "Rename folder", "Delete folder")) { _, action ->
+                        when (action) {
+                            0 -> promptCreateFile(relative + "/")
+                            1 -> promptCreateFolder(relative + "/")
+                            2 -> promptRename(dir)
+                            3 -> confirmDeleteDirectory(dir)
+                        }
+                    }.setNegativeButton("Cancel", null).show()
+                true
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, dp(36)).apply { bottomMargin = dp(2) })
+            if (expanded) addExplorerDirectoryChildren(dir, list, depth + 1, count)
+        }
+        children.filter { it.isFile }.forEach { file ->
+            if (count[0] >= 500) return
+            count[0]++
             val editable = file.extension.lowercase() in editableExtensions
-            val item = smallButton((if (editable) "▤ " else "▧ ") + file.relativeTo(rootDir).invariantSeparatorsPath) {
-                if (!editable || file.length() > 1024 * 1024) {
-                    Toast.makeText(this, "This file cannot be opened in the text editor.", Toast.LENGTH_SHORT).show()
-                } else {
-                    openFile(file)
-                    if (explorerOpen) toggleExplorer()
-                }
+            val item = smallButton((if (editable) "▤  " else "▧  ") + file.name) {
+                if (!editable || file.length() > 1024 * 1024) toast("This file cannot be opened in the text editor.")
+                else { openFile(file); if (explorerOpen) toggleExplorer() }
             }
             item.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            item.setPadding(dp(12 + depth * 13), 0, dp(6), 0)
             item.maxLines = 1
             item.setOnLongClickListener { showFileContextMenu(file); true }
-            list.addView(item, LinearLayout.LayoutParams(-1, dp(38)).apply { bottomMargin = dp(6) })
+            list.addView(item, LinearLayout.LayoutParams(-1, dp(36)).apply { bottomMargin = dp(2) })
         }
+    }
+
+    private fun confirmDeleteDirectory(directory: File) {
+        AlertDialog.Builder(this).setTitle("Delete folder ${directory.name}?")
+            .setMessage("This permanently removes the folder and all files inside it.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
+                try {
+                    val removed = directory.walkTopDown().filter { it.isFile }.toSet()
+                    require(directory.isDirectory && directory.deleteRecursively()) { "Could not delete folder" }
+                    removed.forEach { openTabs.remove(it) }
+                    if (currentFile in removed) {
+                        currentFile = null
+                        loadingText = true
+                        editor.setText("")
+                        loadingText = false
+                        fileLabel.text = "Select a source file to start editing"
+                        dirty = false
+                    }
+                    val rel = directory.relativeTo(rootDir).invariantSeparatorsPath
+                    expandedDirectories.removeAll { it == rel || it.startsWith(rel + "/") }
+                    refreshExplorer(); renderTabs(); toast("Folder deleted")
+                } catch (e: Exception) { toast("Delete failed: ${e.message}") }
+            }.show()
     }
 
     private fun showFileActions() {
@@ -275,8 +349,8 @@ class ProjectEditorActivity : Activity() {
         }.setNegativeButton("Cancel", null).show()
     }
 
-    private fun promptCreateFile() {
-        val box = EditText(this).apply { hint = "e.g. app/src/main/java/NewFile.kt"; setSingleLine(true) }
+    private fun promptCreateFile(initialPath: String = "") {
+        val box = EditText(this).apply { hint = "e.g. app/src/main/java/NewFile.kt"; setText(initialPath); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Create new file").setMessage("Enter a project-relative path and file name.")
             .setView(box).setPositiveButton("Create") { _, _ ->
                 val path = box.text.toString().trim().replace('\\', '/')
@@ -295,8 +369,8 @@ class ProjectEditorActivity : Activity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
-    private fun promptCreateFolder() {
-        val box = EditText(this).apply { hint = "e.g. app/src/main/res/drawable"; setSingleLine(true) }
+    private fun promptCreateFolder(initialPath: String = "") {
+        val box = EditText(this).apply { hint = "e.g. app/src/main/res/drawable"; setText(initialPath); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Create new folder").setView(box)
             .setPositiveButton("Create") { _, _ ->
                 val path = box.text.toString().trim().replace('\\', '/')
@@ -476,6 +550,7 @@ class ProjectEditorActivity : Activity() {
         saveCurrent(false)
         currentFile = file
         if (!openTabs.containsKey(file)) openTabs[file] = file.readText(Charsets.UTF_8)
+        undoHistory.clear(); redoHistory.clear()
         loadingText = true
         editor.setText(openTabs[file] ?: "")
         editor.setSelection(editor.text.length)
@@ -490,11 +565,45 @@ class ProjectEditorActivity : Activity() {
 
     private fun renderTabs() {
         tabsBar.removeAllViews()
-        openTabs.keys.forEach { file ->
+        openTabs.keys.toList().forEach { file ->
             val active = file == currentFile
-            val tab = smallButton((if (active) "● " else "") + file.name) { openFile(file) }
-            tabsBar.addView(tab)
+            val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val tab = smallButton((if (active) "● " else "") + file.name + if (active && dirty) " •" else "") { openFile(file) }
+            tabRow.addView(tab, LinearLayout.LayoutParams(-2, dp(36)))
+            tabRow.addView(smallButton("×") { closeTab(file) }, LinearLayout.LayoutParams(dp(32), dp(36)))
+            tabsBar.addView(tabRow, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(5) })
         }
+    }
+
+    private fun closeTab(file: File) {
+        if (file == currentFile) {
+            saveCurrent(false); openTabs.remove(file); currentFile = null
+            loadingText = true; editor.setText(""); loadingText = false
+            dirty = false; fileLabel.text = "Select a source file to start editing"
+            undoHistory.clear(); redoHistory.clear()
+            val next = openTabs.keys.lastOrNull()
+            if (next != null) openFile(next) else { updateLineNumbers(); updateSuggestions(); renderTabs() }
+        } else { openTabs.remove(file); renderTabs() }
+    }
+
+    private fun undoEdit() {
+        if (undoHistory.isEmpty()) { toast("Nothing to undo"); return }
+        val previous = undoHistory.removeLast()
+        redoHistory.addLast(editor.text.toString())
+        loadingText = true; editor.setText(previous); editor.setSelection(editor.text.length); loadingText = false
+        currentFile?.let { openTabs[it] = previous }; dirty = true
+        updateLineNumbers(); updateSuggestions(); highlightCode()
+        handler.removeCallbacks(autoSave); handler.postDelayed(autoSave, 900); renderTabs()
+    }
+
+    private fun redoEdit() {
+        if (redoHistory.isEmpty()) { toast("Nothing to redo"); return }
+        val next = redoHistory.removeLast()
+        undoHistory.addLast(editor.text.toString())
+        loadingText = true; editor.setText(next); editor.setSelection(editor.text.length); loadingText = false
+        currentFile?.let { openTabs[it] = next }; dirty = true
+        updateLineNumbers(); updateSuggestions(); highlightCode()
+        handler.removeCallbacks(autoSave); handler.postDelayed(autoSave, 900); renderTabs()
     }
 
     private fun updateLineNumbers() {
