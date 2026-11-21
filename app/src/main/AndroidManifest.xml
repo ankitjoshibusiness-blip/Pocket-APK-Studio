@@ -24,7 +24,8 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
-        <service android:name=".TermuxResultService" android:exported="false" />\n        <activity android:name=".LivePreviewActivity" android:exported="false" />
+        <service android:name=".TermuxResultService" android:exported="false" />
+        <activity android:name=".LivePreviewActivity" android:exported="false" />
         <activity android:name=".AiChatActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".ProjectEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity
