@@ -108,7 +108,7 @@ class ProjectEditorActivity : Activity() {
         addToolbarTile(smallButton("⌕ Project") { showProjectSearch() })
         val toolbarScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            addView(toolbar, HorizontalScrollView.LayoutParams(-2, -1))
+            addView(toolbar, LinearLayout.LayoutParams(-2, -1))
         }
         root.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
