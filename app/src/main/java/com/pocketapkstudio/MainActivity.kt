@@ -753,7 +753,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             "Install the APK above first. Then return here and open the real compiled app preview.",
             11, 0xFFFFC98D.toInt(), false
         ).apply { visibility = View.GONE }
-        runPreviewButton = actionButton("▶  Open Preview App", true) { openBuiltRuntimePreview() }.apply {
+        runPreviewButton = actionButton("▶  Run Exact Device Preview", true) { openBuiltRuntimePreview() }.apply {
             visibility = View.GONE
         }
         buildCard.addView(space(6)); buildCard.addView(installButton)
@@ -1551,10 +1551,23 @@ class MainActivity : androidx.activity.ComponentActivity() {
      * Opens the compiled project app after the user has installed the latest APK.
      * This is the genuine Compose/runtime path; the in-pane source renderer remains approximate.
      */
+    private fun sha256(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun openBuiltRuntimePreview() {
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
         if (!prefs.getBoolean("runtime_preview_requested", false)) {
-            Toast.makeText(this, "Run Preview is available after Build & Run from Live UI Preview.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Run Exact Device Preview is available after Build & Run from Source Preview.", Toast.LENGTH_LONG).show()
             return
         }
         val apk = prefs.getString("last_apk_path", null)?.let(::File)
@@ -1575,9 +1588,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         @Suppress("DEPRECATION")
         val installed = runCatching { packageManager.getPackageInfo(targetPackage, 0) }.getOrNull()
-        if (installed == null || installed.lastUpdateTime < apk.lastModified()) {
-            status.text = "Install the latest APK above first. After installation, return here and tap Open Preview App."
-            Toast.makeText(this, "Install the latest APK first, then open the preview app.", Toast.LENGTH_LONG).show()
+        val installedApkPath = installed?.applicationInfo?.sourceDir
+        val installedMatches = installedApkPath != null &&
+            runCatching { sha256(File(installedApkPath)) == sha256(apk) }.getOrDefault(false)
+        if (!installedMatches) {
+            status.text = "The latest build is not installed. Opening Android's installer…"
+            Toast.makeText(this, "Install this build, then return and tap Run Exact Device Preview.", Toast.LENGTH_LONG).show()
+            installBuiltApk()
             return
         }
         val launchIntent = packageManager.getLaunchIntentForPackage(targetPackage)
