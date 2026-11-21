@@ -176,7 +176,7 @@ class ProjectEditorActivity : Activity() {
         }
         explorerToggle=smallButton("☰  Explorer") { toggleExplorer() }
         if (landscapeMode) {
-            addToolbarTile(smallButton("⋮") { showMoreMenu(it) })
+            addToolbarTile(smallButton("⋮") { showMoreMenu(toolbar) })
         } else {
             addToolbarTile(explorerToggle)
             addToolbarTile(smallButton("＋ File") { showFileActions() })
