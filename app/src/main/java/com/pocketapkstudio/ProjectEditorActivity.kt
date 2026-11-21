@@ -386,6 +386,7 @@ class ProjectEditorActivity : Activity() {
                 val path = box.text.toString().trim().replace('\\', '/')
                 if (path.isBlank()) return@setPositiveButton
                 try {
+                    if (!saveCurrent(false)) return@setPositiveButton
                     val file = File(rootDir, path).canonicalFile
                     require(file.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                     require(!file.exists()) { "File already exists" }
@@ -519,6 +520,7 @@ class ProjectEditorActivity : Activity() {
             val path = box.text.toString().trim().replace('\\', '/')
             if (path.isBlank()) return@setPositiveButton
             try {
+                if (!saveCurrent(false)) return@setPositiveButton
                 val target = File(rootDir, path).canonicalFile
                 require(target.path.startsWith(rootDir.canonicalPath + File.separator)) { "Invalid path" }
                 require(!target.exists()) { "File already exists" }
@@ -556,6 +558,7 @@ class ProjectEditorActivity : Activity() {
                 return
             }
             refreshExplorer()
+            if (!saveCurrent(false)) return
             val fileToReload = currentFile
             if (fileToReload != null && fileToReload.isFile) {
                 openTabs.remove(fileToReload)
