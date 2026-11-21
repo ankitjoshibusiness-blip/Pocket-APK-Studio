@@ -27,7 +27,7 @@
         <service android:name=".TermuxResultService" android:exported="false" />
         <activity android:name=".LivePreviewActivity" android:exported="false" />
         <activity android:name=".AiChatActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name=".ProjectEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ProjectEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
