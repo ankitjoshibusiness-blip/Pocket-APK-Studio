@@ -127,7 +127,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val available = apk?.isFile == true
             installButton.visibility = if (available) View.VISIBLE else View.GONE
             shareButton.visibility = if (available) View.VISIBLE else View.GONE
-            val showRuntimePreview = available && prefs.getBoolean("runtime_preview_requested", false)
+            val showRuntimePreview = available
             if (::runtimePreviewHint.isInitialized) runtimePreviewHint.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
             if (::runPreviewButton.isInitialized) runPreviewButton.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
             if (available) loadApkPreview(apk!!)
@@ -189,7 +189,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val available = apk?.isFile == true
         installButton.visibility = if (available) View.VISIBLE else View.GONE
         shareButton.visibility = if (available) View.VISIBLE else View.GONE
-        val showRuntimePreview = available && prefs.getBoolean("runtime_preview_requested", false)
+        val showRuntimePreview = available
         runtimePreviewHint.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
         runPreviewButton.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
     }
@@ -760,7 +760,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildCard.addView(space(6)); buildCard.addView(shareButton)
         buildCard.addView(space(6)); buildCard.addView(runtimePreviewHint)
         buildCard.addView(space(4)); buildCard.addView(runPreviewButton)
-        workspaceSection("03  BUILD APK", "Build progress, status, install and share", buildCard)
+        workspaceSection("03  BUILD APK", "Build progress, status, install and share", buildCard, true)
         toolsContent.addView(space(12))
         val logCard = card()
         logCard.addView(label("BUILD LOGS", 12, 0xFF9AA7FF.toInt(), true))
@@ -778,7 +778,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard)
+        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard, true)
         homeContent.addView(space(18))
 
         val setupCard = card()
@@ -1566,10 +1566,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun openBuiltRuntimePreview() {
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
-        if (!prefs.getBoolean("runtime_preview_requested", false)) {
-            Toast.makeText(this, "Run Exact Device Preview is available after Build & Run from Source Preview.", Toast.LENGTH_LONG).show()
-            return
-        }
         val apk = prefs.getString("last_apk_path", null)?.let(::File)
         if (apk == null || !apk.isFile || apk.length() <= 0L) {
             status.text = "Preview APK not found. Build the project again."
