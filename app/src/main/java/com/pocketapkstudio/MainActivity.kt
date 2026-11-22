@@ -1554,9 +1554,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 else
                     echo "android.aapt2FromMavenOverride=@D@AAPT2" >> "@D@HOME/.gradle/gradle.properties"
                 fi
-                PROJECT="@D@HOME/pocket-apk-studio/project"
-                mkdir -p "@D@PROJECT"
-                rm -rf "@D@PROJECT"/*
+                PROJECT="/root/pocket-apk-studio/project"
+                mkdir -p "$PROJECT"
+                if [ ! -d "$PROJECT" ]; then echo "ERROR: project workspace could not be created: $PROJECT"; exit 26; fi
+                echo "Project workspace: $PROJECT"
+                rm -rf "$PROJECT"/*
                 unzip -q -o "/mnt/shared/Download/PocketAPKStudio/$zipName" -d "@D@PROJECT"
 
                 # Align Java and Kotlin bytecode targets for modern Kotlin/AGP projects.
