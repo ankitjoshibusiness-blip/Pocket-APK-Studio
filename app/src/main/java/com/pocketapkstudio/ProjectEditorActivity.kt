@@ -288,14 +288,14 @@ class ProjectEditorActivity : Activity() {
         }
         val explorerHeader=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL }
         explorerHeader.addView(label("PROJECT EXPLORER",11,true),LinearLayout.LayoutParams(0,dp(36),1f))
-        explorerHeader.addView(smallButton("×") { toggleExplorer() })
+        explorerHeader.addView(smallButton("← Editor") { toggleExplorer() })
         explorerPanel.addView(explorerHeader)
         explorerScrollView=ScrollView(this)
         val explorerFiles=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         explorerScrollView.addView(explorerFiles)
         explorerPanel.addView(explorerScrollView,LinearLayout.LayoutParams(-1,0,1f))
-        workArea.addView(explorerPanel,FrameLayout.LayoutParams(dp(205),-1,Gravity.START))
-        explorerPanel.translationX=-dp(225).toFloat(); explorerPanel.visibility=View.GONE
+        workArea.addView(explorerPanel,FrameLayout.LayoutParams(-1,-1))
+        explorerPanel.visibility=View.GONE
         contentRoot.addView(workArea,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(5); bottomMargin=dp(7) })
         suggestionsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; setPadding(dp(3),dp(2),dp(3),dp(2)); visibility=View.GONE }
         diagnosticsPanel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(11),dp(8),dp(11),dp(8)); background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFE9EEF8.toInt(),12) }
@@ -597,17 +597,17 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun toggleExplorer() {
-        explorerOpen=!explorerOpen
-        if(explorerOpen) {
-            refreshExplorer(); explorerPanel.visibility=View.VISIBLE; explorerPanel.translationX=-dp(225).toFloat()
-            explorerPanel.animate().translationX(0f).setDuration(280L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-            explorerToggle.text="☰  Explorer  ▾"
+        explorerOpen = !explorerOpen
+        if (explorerOpen) {
+            refreshExplorer()
+            explorerPanel.visibility = View.VISIBLE
+            explorerPanel.bringToFront()
+            explorerToggle.text = "☰  Explorer  ▾"
         } else {
-            explorerPanel.animate().translationX(-dp(225).toFloat()).setDuration(240L).setInterpolator(android.view.animation.AccelerateInterpolator()).withEndAction { explorerPanel.visibility=View.GONE }.start()
-            explorerToggle.text="☰  Explorer"
+            explorerPanel.visibility = View.GONE
+            explorerToggle.text = "☰  Explorer"
         }
     }
-
     private fun refreshExplorer() {
         if (!::explorerPanel.isInitialized) return
         val list = explorerScrollView.getChildAt(0) as? LinearLayout ?: return
