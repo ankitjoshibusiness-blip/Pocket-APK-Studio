@@ -444,7 +444,7 @@ class ProjectEditorActivity : Activity() {
             append(" android:layout_width=\"match_parent\" android:layout_height=\"wrap_content\"")
             if (tag != "ImageView") append(" android:text=\"").append(textValue).append("\"")
             if (tag == "ImageView") append(" android:contentDescription=\"Image\"")
-            append(" />\\n")
+            append(" />\n")
         }
         val updated = if (closing != null) {
             source.substring(0, closing.range.first) + component + source.substring(closing.range.first)
@@ -454,7 +454,7 @@ class ProjectEditorActivity : Activity() {
                 toast("Could not safely add a component to this XML layout")
                 return
             }
-            val expanded = "<" + rootTag + selfClosing.groupValues[1] + ">\\n" + component + "</" + rootTag + ">"
+            val expanded = "<" + rootTag + selfClosing.groupValues[1] + ">\n" + component + "</" + rootTag + ">"
             source.substring(0, selfClosing.range.first) + expanded + source.substring(selfClosing.range.last + 1)
         }
         applyDesignXml(updated)
@@ -531,13 +531,12 @@ class ProjectEditorActivity : Activity() {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Apply") { _, _ ->
                 val source = editor.text.toString()
-                val pattern = Regex("<(?:[A-Za-z0-9_.]+\\.)?" + Regex.escape(tag) + "(\\s[^>]*?)?\\s*/?>")
-                val matches = pattern.findAll(source).toList()
-                if (index !in matches.indices) {
+                val allComponents = Regex("<(?:[A-Za-z0-9_.]+\\.)?(TextView|Button|EditText|ImageView|CheckBox|Switch|RadioButton|ProgressBar)(\\s[^>]*?)?\\s*/?>").findAll(source).toList()
+                if (index !in allComponents.indices || allComponents[index].groupValues[1] != tag) {
                     toast("Component changed; reopen Design preview")
                     return@setPositiveButton
                 }
-                val match = matches[index]
+                val match = allComponents[index]
                 var element = match.value
                 val escaped = input.text.toString().replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
                 val textAttr = Regex("""android:text\s*=\s*["'][^"']*["']""")
