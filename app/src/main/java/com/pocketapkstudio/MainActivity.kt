@@ -424,7 +424,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 if (prefs.getBoolean("build_running", false)) {
                     val live = prefs.getString("last_build_log", "").orEmpty()
                     if (live.isBlank() || live.contains("Build starting…") || live.contains("Build starting...")) {
-                        val message = "Termux did not return build output. Open Termux > Settings > allow external apps, enable it, then retry. Also confirm Termux has storage permission and Ubuntu is installed."
+                        val message = "No result received from Termux within 30 seconds. Check: (1) Termux ~/.termux/termux.properties contains allow-external-apps=true, then run termux-reload-settings; (2) Android Settings > Apps > Pocket APK Studio > Permissions > Additional permissions > Run commands in Termux environment is allowed; (3) Termux is installed and opened once. Retry after checking these items."
                         prefs.edit()
                             .putBoolean("build_running", false)
                             .putString("last_build_status", message)
@@ -441,8 +441,25 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }
             }, 30000L)
         } catch (e: Exception) {
-            serverStatus.text = "Could not start Termux setup: " +
-                (e.message ?: "check Termux permissions and allow-external-apps setting")
+            val detail = e.message ?: e.javaClass.simpleName
+            val message = when (e) {
+                is SecurityException -> "Termux rejected the command: RUN_COMMAND permission is not granted to Pocket APK Studio. Open Android Settings > Apps > Pocket APK Studio > Permissions > Additional permissions > Run commands in Termux environment, allow it, then retry."
+                else -> "Could not start Termux command service: $detail. Confirm Termux is installed and allow-external-apps=true is set in ~/.termux/termux.properties."
+            }
+            val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("build_running", false)
+                .putString("last_build_status", message)
+                .putString("last_build_log", message)
+                .putInt("last_build_percent", 0)
+                .putString("last_apk_path", null)
+                .apply()
+            buildLogHandler.removeCallbacks(buildLogPollTask)
+            if (::buildProgress.isInitialized) buildProgress.visibility = View.GONE
+            if (::status.isInitialized) status.text = message
+            if (::logs.isInitialized) logs.text = message
+            if (::percentText.isInitialized) percentText.text = "BUILD NOT STARTED"
+            if (::serverStatus.isInitialized) serverStatus.text = message
         }
     }
 
