@@ -1563,7 +1563,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
                 # Align Java and Kotlin bytecode targets for modern Kotlin/AGP projects.
                 # Only the extracted working copy is changed; the user's original ZIP stays intact.
-                APP_GRADLE=@D@(find "@D@PROJECT" -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit)
+                APP_GRADLE=$(find /root/pocket-apk-studio/project -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit)
                 if [ -n "@D@APP_GRADLE" ]; then
                     if [[ "@D@APP_GRADLE" == *.kts ]]; then
                         if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
@@ -1585,7 +1585,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     echo "WARNING: app/build.gradle(.kts) not found; leaving project Gradle configuration unchanged"
                 fi
 
-                SETTINGS=@D@(find "@D@PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+                SETTINGS=$(find /root/pocket-apk-studio/project -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
                 test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
                 cd "@D@(dirname "@D@SETTINGS")"
                 if [ -f ./gradlew ]; then
