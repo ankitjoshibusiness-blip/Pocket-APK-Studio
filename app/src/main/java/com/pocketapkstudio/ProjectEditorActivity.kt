@@ -38,6 +38,11 @@ class ProjectEditorActivity : Activity() {
     private lateinit var tabsBar: LinearLayout
     private lateinit var suggestionsBar: LinearLayout
     private lateinit var editorContainer: FrameLayout
+    private lateinit var workArea: FrameLayout
+    private lateinit var designPanel: LinearLayout
+    private lateinit var designCanvas: LinearLayout
+    private lateinit var designToggleButton: Button
+    private var designMode = false
     private lateinit var inlineGhostView: TextView
     private var inlineCompletionSuffix = ""
     private var inlineCompletionTokenStart = -1
@@ -201,6 +206,9 @@ class ProjectEditorActivity : Activity() {
             isHorizontalScrollBarEnabled = false
             addView(toolbar, LinearLayout.LayoutParams(-2, -1))
         }
+        designToggleButton = smallButton("▣  Design") { toggleXmlDesign() }
+        designToggleButton.visibility = View.GONE
+        addToolbarTile(designToggleButton)
         contentRoot.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
             textSize = 14f
@@ -227,7 +235,7 @@ class ProjectEditorActivity : Activity() {
         tabsBar=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
         val tabsScroll=HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; addView(tabsBar) }
         contentRoot.addView(tabsScroll,LinearLayout.LayoutParams(-1,dp(42)))
-        val workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF202A33.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
+        workArea=FrameLayout(this).apply { background=roundedSurface(if(darkTheme) 0xFF202A33.toInt() else 0xFFFFFFFF.toInt(),14); clipToOutline=true }
         val codeRow=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.TOP }
         lineNumbers=TextView(this).apply { typeface=Typeface.MONOSPACE; textSize=12f; gravity=Gravity.TOP or Gravity.END; setPadding(dp(8),dp(12),dp(8),dp(12)); text="1" }
         codeRow.addView(lineNumbers,LinearLayout.LayoutParams(dp(42),-1))
@@ -248,6 +256,32 @@ class ProjectEditorActivity : Activity() {
         codeRow.addView(editorContainer,LinearLayout.LayoutParams(0,-1,1f))
         codeScrollView=ScrollView(this).apply { isFillViewport = true; addView(codeRow) }
         workArea.addView(codeScrollView,FrameLayout.LayoutParams(-1,-1))
+        designPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            visibility = View.GONE
+            setBackgroundColor(if (darkTheme) 0xFF172131.toInt() else 0xFFF5F7FB.toInt())
+        }
+        designPanel.addView(label("XML VISUAL DESIGNER · Preview & Components", 12, true), LinearLayout.LayoutParams(-1, -2))
+        val palette = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("＋ Text", "＋ Button", "＋ Input", "＋ Image").forEachIndexed { index, title ->
+            palette.addView(smallButton(title) {
+                appendXmlDesignComponent(listOf("TextView", "Button", "EditText", "ImageView")[index])
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(4) })
+        }
+        designPanel.addView(palette, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5); bottomMargin = dp(8) })
+        val previewScroll = ScrollView(this).apply { isFillViewport = true }
+        designCanvas = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            setPadding(dp(14), dp(18), dp(14), dp(18))
+            background = roundedSurface(if (darkTheme) 0xFF263445.toInt() else 0xFFE3E9F2.toInt(), 12)
+        }
+        previewScroll.addView(designCanvas)
+        designPanel.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        designPanel.addView(label("Tap a component to edit its text. Palette buttons add components to the XML.", 10, false),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        workArea.addView(designPanel, FrameLayout.LayoutParams(-1, -1))
         explorerPanel=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(10),dp(10),dp(10),dp(10))
             background=roundedSurface(if(darkTheme) 0xFF2B3742.toInt() else 0xFFF0F3FA.toInt(),12); elevation=dp(14).toFloat()
@@ -372,6 +406,148 @@ class ProjectEditorActivity : Activity() {
         }
         popup.menu.add("⇧ Save changes & return").setOnMenuItemClickListener { exportEditedZip(); true }
         popup.show()
+    }
+
+    private fun toggleXmlDesign() {
+        if (currentFile?.extension?.equals("xml", true) != true) {
+            toast("Open an XML layout file first")
+            return
+        }
+        if (designMode) {
+            designMode = false
+            designPanel.visibility = View.GONE
+            codeScrollView.visibility = View.VISIBLE
+            designToggleButton.text = "▣  Design"
+            editor.requestFocus()
+        } else {
+            if (!saveCurrent(false)) return
+            designMode = true
+            renderXmlDesignPreview()
+            codeScrollView.visibility = View.GONE
+            designPanel.visibility = View.VISIBLE
+            designToggleButton.text = "</>  Code"
+        }
+    }
+
+    private fun appendXmlDesignComponent(tag: String) {
+        val source = editor.text.toString()
+        val rootMatch = Regex("<([A-Za-z_][A-Za-z0-9_.]*)(\\s[^>]*?)?>").find(source)
+        if (rootMatch == null) {
+            toast("XML root layout not found. Add a root ViewGroup first.")
+            return
+        }
+        val rootTag = rootMatch.groupValues[1]
+        val closing = Regex("</" + Regex.escape(rootTag) + "\\s*>").find(source)
+        val textValue = when (tag) { "TextView" -> "New Text"; "Button" -> "New Button"; else -> "" }
+        val component = buildString {
+            append("    <").append(tag)
+            append(" android:layout_width=\"match_parent\" android:layout_height=\"wrap_content\"")
+            if (tag != "ImageView") append(" android:text=\"").append(textValue).append("\"")
+            if (tag == "ImageView") append(" android:contentDescription=\"Image\"")
+            append(" />\\n")
+        }
+        val updated = if (closing != null) {
+            source.substring(0, closing.range.first) + component + source.substring(closing.range.first)
+        } else {
+            val selfClosing = Regex("<" + Regex.escape(rootTag) + "([^>]*)/>").find(source)
+            if (selfClosing == null) {
+                toast("Could not safely add a component to this XML layout")
+                return
+            }
+            val expanded = "<" + rootTag + selfClosing.groupValues[1] + ">\\n" + component + "</" + rootTag + ">"
+            source.substring(0, selfClosing.range.first) + expanded + source.substring(selfClosing.range.last + 1)
+        }
+        applyDesignXml(updated)
+        toast(tag + " added to XML")
+    }
+
+    private fun applyDesignXml(updated: String) {
+        loadingText = true
+        editor.setText(updated)
+        editor.setSelection(editor.text.length)
+        loadingText = false
+        currentFile?.let { openTabs[it] = updated }
+        dirty = true
+        updateLineNumbers()
+        highlightCode()
+        handler.removeCallbacks(autoSave)
+        handler.postDelayed(autoSave, 500)
+        renderTabs()
+        if (designMode) renderXmlDesignPreview()
+    }
+
+    private fun renderXmlDesignPreview() {
+        if (!::designCanvas.isInitialized || currentFile?.extension?.equals("xml", true) != true) return
+        designCanvas.removeAllViews()
+        val source = editor.text.toString()
+        val phoneBg = if (darkTheme) 0xFF101820.toInt() else 0xFFFFFFFF.toInt()
+        val phone = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(18), dp(14), dp(18))
+            background = roundedSurface(phoneBg, 20)
+            elevation = dp(3).toFloat()
+        }
+        phone.addView(label("PREVIEW · " + (currentFile?.name ?: "layout.xml"), 10, true), LinearLayout.LayoutParams(-1, dp(30)))
+        val componentPattern = Regex("<(?:[A-Za-z0-9_.]+\\.)?(TextView|Button|EditText|ImageView|CheckBox|Switch|RadioButton|ProgressBar)(\\s[^>]*?)?\\s*/?>")
+        val matches = componentPattern.findAll(source).toList()
+        if (matches.isEmpty()) {
+            phone.addView(label("No supported UI components found. Use the palette above to add Text, Button, Input or Image.", 12, false),
+                LinearLayout.LayoutParams(-1, dp(100)))
+        } else {
+            matches.forEachIndexed { index, match ->
+                val tag = match.groupValues[1]
+                val attrs = match.groupValues.getOrElse(2) { "" }
+                val text = Regex("""android:text\s*=\s*["']([^"']*)["']""").find(attrs)?.groupValues?.get(1).orEmpty()
+                val view: View = when (tag) {
+                    "Button" -> Button(this).apply { this.text = text.ifBlank { "Button" }; isAllCaps = false }
+                    "EditText" -> EditText(this).apply { hint = text.ifBlank { "Enter text" }; textSize = 14f; isSingleLine = true }
+                    "ImageView" -> TextView(this).apply { this.text = "▧  Image"; gravity = Gravity.CENTER; textSize = 14f }
+                    "CheckBox" -> CheckBox(this).apply { this.text = text.ifBlank { "Option" } }
+                    "Switch" -> Switch(this).apply { this.text = text.ifBlank { "Switch" } }
+                    "RadioButton" -> RadioButton(this).apply { this.text = text.ifBlank { "Option" } }
+                    "ProgressBar" -> ProgressBar(this)
+                    else -> TextView(this).apply { this.text = text.ifBlank { "TextView" }; textSize = 16f }
+                }
+                view.setOnClickListener { editXmlDesignComponent(index, tag, text) }
+                phone.addView(view, LinearLayout.LayoutParams(-1, if (tag == "ImageView") dp(92) else dp(52)).apply { bottomMargin = dp(7) })
+            }
+        }
+        designCanvas.addView(phone, LinearLayout.LayoutParams(-1, -2))
+        designCanvas.addView(label(matches.size.toString() + " supported component(s) detected", 10, false),
+            LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(8) })
+    }
+
+    private fun editXmlDesignComponent(index: Int, tag: String, currentText: String) {
+        if (tag == "ImageView" || tag == "ProgressBar") {
+            toast(tag + " properties are not editable yet")
+            return
+        }
+        val input = EditText(this).apply {
+            setText(currentText)
+            hint = "Component text"
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this).setTitle("Edit " + tag).setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Apply") { _, _ ->
+                val source = editor.text.toString()
+                val pattern = Regex("<(?:[A-Za-z0-9_.]+\\.)?" + Regex.escape(tag) + "(\\s[^>]*?)?\\s*/?>")
+                val matches = pattern.findAll(source).toList()
+                if (index !in matches.indices) {
+                    toast("Component changed; reopen Design preview")
+                    return@setPositiveButton
+                }
+                val match = matches[index]
+                var element = match.value
+                val escaped = input.text.toString().replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+                val textAttr = Regex("""android:text\s*=\s*["'][^"']*["']""")
+                element = if (textAttr.containsMatchIn(element)) {
+                    textAttr.replace(element, "android:text=\"$escaped\"")
+                } else {
+                    element.replace(Regex("\\s*/?>$")) { suffix -> " android:text=\"$escaped\"" + suffix.value }
+                }
+                applyDesignXml(source.substring(0, match.range.first) + element + source.substring(match.range.last + 1))
+            }.show()
     }
 
     private fun openLivePreview() {
@@ -784,6 +960,14 @@ class ProjectEditorActivity : Activity() {
         loadingText = false
         dirty = false
         fileLabel.text = file.relativeTo(rootDir).invariantSeparatorsPath
+        if (::designToggleButton.isInitialized) {
+            designToggleButton.visibility = if (file.extension.equals("xml", true)) View.VISIBLE else View.GONE
+            if (!file.extension.equals("xml", true) && designMode) {
+                designMode = false
+                codeScrollView.visibility = View.VISIBLE
+                designPanel.visibility = View.GONE
+            }
+        }
         updateLineNumbers()
         updateSuggestions()
         highlightCode()
