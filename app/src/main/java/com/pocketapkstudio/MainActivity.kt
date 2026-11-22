@@ -1448,16 +1448,26 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun launchTermuxBuild(zipName: String) {
-        val sharedZip = "/sdcard/Download/PocketAPKStudio/$zipName"
+        val sharedZip = "/mnt/shared/Download/PocketAPKStudio/$zipName"
         val command = """
             set -e
-            LIVE_LOG="/sdcard/Download/PocketAPKStudio/build-live.log"
-            mkdir -p "/sdcard/Download/PocketAPKStudio"
+            SHARED="/storage/emulated/0"
+            LOG_DIR="@D@SHARED/Download/PocketAPKStudio"
+            LIVE_LOG="@D@LOG_DIR/build-live.log"
+            mkdir -p "@D@LOG_DIR"
             : > "@D@LIVE_LOG"
             exec > >(tee -a "@D@LIVE_LOG") 2>&1
             echo "Pocket APK Studio: background Android build started"
+            if [ ! -d "@D@SHARED/Download" ]; then
+                echo "ERROR: Termux shared storage is not ready. Open Termux, run termux-setup-storage, allow storage access, then retry."
+                exit 24
+            fi
+            if [ ! -r "@D@SHARED/Download/PocketAPKStudio/$zipName" ]; then
+                echo "ERROR: Imported project ZIP is not readable in Termux shared storage: $zipName"
+                exit 25
+            fi
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
-            proot-distro login ubuntu -- bash -lc '
+            proot-distro login ubuntu --bind "@D@SHARED:/mnt/shared" -- bash -lc '
                 set -e
                 export ANDROID_HOME=/root/Android/Sdk
                 export ANDROID_SDK_ROOT=/root/Android/Sdk
@@ -1491,7 +1501,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 PROJECT="@D@HOME/pocket-apk-studio/project"
                 mkdir -p "@D@PROJECT"
                 rm -rf "@D@PROJECT"/*
-                unzip -q -o "@ZIP@" -d "@D@PROJECT"
+                unzip -q -o "/mnt/shared/Download/PocketAPKStudio/$zipName" -d "@D@PROJECT"
                 SETTINGS=@D@(find "@D@PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
                 test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
                 cd "@D@(dirname "@D@SETTINGS")"
@@ -1502,12 +1512,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
                     gradle --no-daemon --max-workers=2 assembleDebug
                 fi
-                mkdir -p /sdcard/Download/PocketAPKStudio/Builds
+                mkdir -p /mnt/shared/Download/PocketAPKStudio/Builds
                 APK_COUNT=0
                 while IFS= read -r APK; do
                     [ -n "@D@APK" ] || continue
-                    cp "@D@APK" /sdcard/Download/PocketAPKStudio/Builds/
-                    echo "APK_SAVED=/sdcard/Download/PocketAPKStudio/Builds/@D@(basename "@D@APK")"
+                    cp "@D@APK" /mnt/shared/Download/PocketAPKStudio/Builds/
+                    echo "APK_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Builds/@D@(basename "@D@APK")"
                     APK_COUNT=@D@((APK_COUNT + 1))
                 done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
                 test "@D@APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
