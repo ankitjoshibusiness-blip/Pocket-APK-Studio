@@ -1563,7 +1563,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
                 # Align Java and Kotlin bytecode targets for modern Kotlin/AGP projects.
                 # Only the extracted working copy is changed; the user's original ZIP stays intact.
-                APP_GRADLE=$(find /root/pocket-apk-studio/project -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit)
+                echo "DIAGNOSTIC: PROJECT=[$PROJECT]"
+                if [ -z "$PROJECT" ] || [ ! -d "$PROJECT" ]; then
+                    echo "ERROR: Project workspace path is empty or missing: [$PROJECT]"
+                    exit 27
+                fi
+                APP_GRADLE=$(find "$PROJECT" -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit 2> /tmp/pas-find-app.err) || {
+                    echo "ERROR: Could not scan project for app Gradle files"
+                    cat /tmp/pas-find-app.err
+                    exit 28
+                }
+                echo "DIAGNOSTIC: APP_GRADLE=[$APP_GRADLE]"
                 if [ -n "@D@APP_GRADLE" ]; then
                     if [[ "@D@APP_GRADLE" == *.kts ]]; then
                         if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
@@ -1585,7 +1595,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     echo "WARNING: app/build.gradle(.kts) not found; leaving project Gradle configuration unchanged"
                 fi
 
-                SETTINGS=$(find /root/pocket-apk-studio/project -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
+                SETTINGS=$(find "$PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit 2> /tmp/pas-find-settings.err) || {
+                    echo "ERROR: Could not scan project for settings.gradle"
+                    cat /tmp/pas-find-settings.err
+                    exit 29
+                }
+                echo "DIAGNOSTIC: SETTINGS=[$SETTINGS]"
                 test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
                 cd "@D@(dirname "@D@SETTINGS")"
                 if [ -f ./gradlew ]; then
