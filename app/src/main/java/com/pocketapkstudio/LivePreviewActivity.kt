@@ -22,6 +22,8 @@ class LivePreviewActivity : Activity() {
     private lateinit var title: TextView
     private lateinit var previewScroll: ScrollView
     private lateinit var previewHorizontal: HorizontalScrollView
+    private lateinit var deviceViewport: FrameLayout
+    private lateinit var deviceContentScroll: ScrollView
     private var previewWidthDp = 360
     private var previewHeightDp = 800
     private var layouts: List<File> = emptyList()
@@ -65,6 +67,12 @@ class LivePreviewActivity : Activity() {
         deviceControls.addView(deviceButton("Tablet", 600, 900), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
         root.addView(deviceControls, LinearLayout.LayoutParams(-1, -2))
+        root.addView(Button(this).apply {
+            text = "Custom viewport size (dp)"
+            isAllCaps = false
+            contentDescription = "Set a custom device preview width and height in dp"
+            setOnClickListener { showCustomDeviceDialog() }
+        }, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(3); bottomMargin = dp(4) })
         val buildRunButton = Button(this).apply {
             text = "Build & Run · Exact Device Preview"
             isAllCaps = false
@@ -74,12 +82,30 @@ class LivePreviewActivity : Activity() {
         }
         root.addView(buildRunButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(7); bottomMargin = dp(8) })
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFFE0E5EC.toInt()) }
-        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
+        content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        deviceContentScroll = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(content, FrameLayout.LayoutParams(-1, -2))
+        }
+        deviceViewport = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), 0xFF8795A7.toInt())
+            }
+            clipToOutline = true
+            addView(deviceContentScroll, FrameLayout.LayoutParams(-1, -1))
+        }
         previewHorizontal = HorizontalScrollView(this).apply {
             isFillViewport = false
             isHorizontalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            addView(content, FrameLayout.LayoutParams(-2, -2))
+            addView(deviceViewport, FrameLayout.LayoutParams(dp(previewWidthDp), dp(previewHeightDp)))
         }
         previewScroll = ScrollView(this).apply {
             isFillViewport = false
@@ -131,15 +157,71 @@ class LivePreviewActivity : Activity() {
         }
     }
 
+    private fun showCustomDeviceDialog() {
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(8), dp(22), dp(4))
+        }
+        val widthInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+            hint = "Width: 240–1200 dp"
+            setText(previewWidthDp.toString())
+        }
+        val heightInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+            hint = "Height: 320–2400 dp"
+            setText(previewHeightDp.toString())
+        }
+        form.addView(TextView(this).apply { text = "Width (dp)"; textSize = 12f })
+        form.addView(widthInput, LinearLayout.LayoutParams(-1, dp(48)))
+        form.addView(TextView(this).apply { text = "Height (dp)"; textSize = 12f; setPadding(0, dp(8), 0, 0) })
+        form.addView(heightInput, LinearLayout.LayoutParams(-1, dp(48)))
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Custom device viewport")
+            .setView(form)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Apply", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val width = widthInput.text.toString().toIntOrNull()
+                val height = heightInput.text.toString().toIntOrNull()
+                if (width == null || width !in 240..1200) {
+                    widthInput.error = "Enter 240–1200 dp"
+                    return@setOnClickListener
+                }
+                if (height == null || height !in 320..2400) {
+                    heightInput.error = "Enter 320–2400 dp"
+                    return@setOnClickListener
+                }
+                previewWidthDp = width
+                previewHeightDp = height
+                applyDeviceProfile()
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
     private fun applyDeviceProfile() {
-        if (!::content.isInitialized) return
-        content.layoutParams = (content.layoutParams ?: FrameLayout.LayoutParams(-1, -2)).apply {
+        if (!::deviceViewport.isInitialized) return
+        deviceViewport.layoutParams = (deviceViewport.layoutParams ?: FrameLayout.LayoutParams(
+            dp(previewWidthDp), dp(previewHeightDp)
+        )).apply {
             width = dp(previewWidthDp)
+            height = dp(previewHeightDp)
+        }
+        content.layoutParams = (content.layoutParams ?: FrameLayout.LayoutParams(-1, -2)).apply {
+            width = -1
             height = -2
         }
-        content.minimumHeight = dp(previewHeightDp)
         content.requestLayout()
+        deviceViewport.requestLayout()
         title.text = "LIVE UI PREVIEW · ${previewWidthDp}×${previewHeightDp} dp"
+        deviceContentScroll.post { deviceContentScroll.scrollTo(0, 0) }
         previewHorizontal.post { previewHorizontal.scrollTo(0, 0) }
         previewScroll.post { previewScroll.scrollTo(0, 0) }
     }
