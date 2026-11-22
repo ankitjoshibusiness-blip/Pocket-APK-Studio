@@ -18,6 +18,7 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.UnderlineSpan
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.graphics.Rect
 import android.view.WindowManager
 import android.widget.*
