@@ -15,6 +15,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
+import android.text.style.UnderlineSpan
 import android.view.Gravity
 import android.view.View
 import android.graphics.Rect
@@ -41,6 +42,8 @@ class ProjectEditorActivity : Activity() {
     private var inlineCompletionSuffix = ""
     private var inlineCompletionTokenStart = -1
     private lateinit var errorsPanel: TextView
+    private lateinit var problemPanel: TextView
+    private var editorProblems: List<Pair<Int, String>> = emptyList()
     private lateinit var root: LinearLayout
     private lateinit var contentRoot: LinearLayout
     private var landscapeMode = false
@@ -263,6 +266,8 @@ class ProjectEditorActivity : Activity() {
         diagnosticsPanel.addView(label("⌁  BUILD OUTPUT / PROBLEMS",10,true))
         errorsPanel=label("No recent build errors. Tap to view diagnostics.",11,false).apply { maxLines=3; setOnClickListener { showBuildErrors() } }
         diagnosticsPanel.addView(errorsPanel)
+        problemPanel = label("No code issues detected.", 11, false).apply { maxLines = 4; setTextColor(if (darkTheme) 0xFFFF8A80.toInt() else 0xFFB3261E.toInt()) }
+        diagnosticsPanel.addView(problemPanel)
         if (!landscapeMode) contentRoot.addView(diagnosticsPanel,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3) })
         val chatWithAiButton = smallButton("✦  CHAT WITH AI  ·  OPEN AI DEVELOPER") {
             if (!saveCurrent(false)) return@smallButton
@@ -901,7 +906,84 @@ class ProjectEditorActivity : Activity() {
         editor.setText(styled)
         editor.setSelection(cursor.coerceAtMost(editor.text.length), selectionEnd.coerceAtMost(editor.text.length))
         loadingText = false
+        updateEditorDiagnostics()
         editor.post { editor.scrollTo(editor.scrollX, scrollY) }
+    }
+
+    private fun updateEditorDiagnostics() {
+        if (!::editor.isInitialized || !::problemPanel.isInitialized) return
+        val source = editor.text.toString()
+        val ext = currentFile?.extension?.lowercase() ?: ""
+        val stack = ArrayDeque<Pair<Char, Int>>()
+        val issues = mutableListOf<Pair<Int, String>>()
+        var quote: Char? = null
+        var quoteStart = -1
+        var escaped = false
+        var lineComment = false
+        var blockComment = false
+        var xmlComment = false
+        var i = 0
+        while (i < source.length) {
+            val c = source[i]
+            val next = source.getOrNull(i + 1)
+            if (xmlComment) {
+                if (c == '-' && next == '-' && source.getOrNull(i + 2) == '>') { xmlComment = false; i += 3; continue }
+                i++; continue
+            }
+            if (lineComment) {
+                if (c == '\n') lineComment = false
+                i++; continue
+            }
+            if (blockComment) {
+                if (c == '*' && next == '/') { blockComment = false; i += 2; continue }
+                i++; continue
+            }
+            if (quote != null) {
+                if (escaped) escaped = false
+                else if (c == '\\') escaped = true
+                else if (c == quote) quote = null
+                i++; continue
+            }
+            if (ext == "xml" && c == '<' && source.startsWith("<!--", i)) { xmlComment = true; i += 4; continue }
+            if (ext != "xml" && c == '/' && next == '/') { lineComment = true; i += 2; continue }
+            if (ext != "xml" && c == '/' && next == '*') { blockComment = true; i += 2; continue }
+            if (c == '"' || c == '\'') { quote = c; quoteStart = i; i++; continue }
+            if (c == '(' || c == '[' || c == '{') stack.addLast(c to i)
+            else if (c == ')' || c == ']' || c == '}') {
+                val expected = when (c) { ')' -> '('; ']' -> '['; else -> '{' }
+                if (stack.isEmpty() || stack.last().first != expected) {
+                    issues += i to ("Unexpected '" + c + "' — no matching opening bracket")
+                } else stack.removeLast()
+            }
+            i++
+        }
+        if (quote != null) issues += quoteStart.coerceAtLeast(0) to "Unclosed string literal"
+        if (blockComment) issues += source.lastIndexOf("/*").coerceAtLeast(0) to "Unclosed block comment"
+        if (xmlComment) issues += source.lastIndexOf("<!--").coerceAtLeast(0) to "Unclosed XML comment"
+        stack.forEach { (ch, pos) ->
+            val close = when (ch) { '(' -> ')'; '[' -> ']'; else -> '}' }
+            issues += pos to ("Missing closing '" + close + "'")
+        }
+        editorProblems = issues.distinctBy { it.first to it.second }.sortedBy { it.first }
+        val red = if (darkTheme) 0xFFFF7777.toInt() else 0xFFB3261E.toInt()
+        val editable = editor.text
+        editorProblems.forEach { (position, _) ->
+            if (position in 0 until editable.length) {
+                editable.setSpan(UnderlineSpan(), position, position + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                editable.setSpan(ForegroundColorSpan(red), position, position + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        val lineIssues = editorProblems.map { (position, message) ->
+            val line = source.substring(0, position.coerceIn(0, source.length)).count { it == '\n' } + 1
+            line to message
+        }
+        val lineCount = source.count { it == '\n' } + 1
+        lineNumbers.text = (1..lineCount).joinToString("\n") { line ->
+            if (lineIssues.any { it.first == line }) "! " + line else "  " + line
+        }
+        problemPanel.text = if (lineIssues.isEmpty()) "✓ No code issues detected." else
+            lineIssues.take(4).joinToString("\n") { (line, message) -> "Line " + line + ": " + message } +
+                if (lineIssues.size > 4) "\n+ " + (lineIssues.size - 4) + " more issue(s)" else ""
     }
 
     private fun applyTypingAssist(start: Int, before: Int, count: Int, text: String) {
