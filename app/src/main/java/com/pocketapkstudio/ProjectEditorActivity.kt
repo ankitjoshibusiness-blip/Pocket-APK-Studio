@@ -194,6 +194,8 @@ class ProjectEditorActivity : Activity() {
             addToolbarTile(smallButton("↷ Redo") { redoEdit() })
             addToolbarTile(smallButton("✓ Save") { saveCurrent(true) })
             addToolbarTile(smallButton("⌕ Project") { showProjectSearch() })
+            addToolbarTile(smallButton("↗ Definition") { showSymbolNavigation(false) })
+            addToolbarTile(smallButton("⌁ References") { showSymbolNavigation(true) })
         }
         val toolbarScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -1190,8 +1192,14 @@ class ProjectEditorActivity : Activity() {
         }
         val source = editor.text.toString()
         val cursor = editor.selectionStart.coerceIn(0, source.length)
-        val start = cursor.coerceAtMost(source.length - 1).coerceAtLeast(0)
-        if (source.isEmpty() || !(source[start].isLetterOrDigit() || source[start] == '_')) {
+        if (source.isEmpty()) {
+            toast("Place the cursor on a symbol name")
+            return
+        }
+        val current = cursor.coerceAtMost(source.length - 1)
+        val start = if (source[current].isLetterOrDigit() || source[current] == '_') current
+            else (cursor - 1).takeIf { it >= 0 && (source[it].isLetterOrDigit() || source[it] == '_') } ?: -1
+        if (start < 0) {
             toast("Place the cursor on a symbol name")
             return
         }
