@@ -415,6 +415,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         try {
             startService(intent)
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("last_build_status", "Termux command sent. Waiting for build output…")
+                .putString("last_build_log", "Termux command sent.\nIf no output appears, check Termux RUN_COMMAND access and allow-external-apps.")
+                .apply()
+            Handler(Looper.getMainLooper()).postDelayed({
+                val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+                if (prefs.getBoolean("build_running", false)) {
+                    val live = prefs.getString("last_build_log", "").orEmpty()
+                    if (live.isBlank() || live.contains("Build starting…") || live.contains("Build starting...")) {
+                        val message = "Termux did not return build output. Open Termux > Settings > allow external apps, enable it, then retry. Also confirm Termux has storage permission and Ubuntu is installed."
+                        prefs.edit()
+                            .putBoolean("build_running", false)
+                            .putString("last_build_status", message)
+                            .putString("last_build_log", message)
+                            .putInt("last_build_percent", 0)
+                            .putString("last_apk_path", null)
+                            .apply()
+                        buildLogHandler.removeCallbacks(buildLogPollTask)
+                        if (::buildProgress.isInitialized) buildProgress.visibility = View.GONE
+                        if (::status.isInitialized) status.text = message
+                        if (::logs.isInitialized) logs.text = message
+                        if (::percentText.isInitialized) percentText.text = "BUILD NOT STARTED"
+                    }
+                }
+            }, 30000L)
         } catch (e: Exception) {
             serverStatus.text = "Could not start Termux setup: " +
                 (e.message ?: "check Termux permissions and allow-external-apps setting")
@@ -1320,8 +1345,21 @@ class MainActivity : androidx.activity.ComponentActivity() {
         buildLogHandler.post(buildLogPollTask)
         lifecycleScope.launch {
             try {
+                status.text = "Copying project ZIP to shared Downloads…"
+                logs.text = "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio."
+                buildPrefs.edit()
+                    .putString("last_build_status", "Copying project ZIP to shared Downloads…")
+                    .putString("last_build_log", "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio.")
+                    .apply()
                 val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
                 importedZipName = fileName
+                val copied = "Project ZIP copied: $fileName\nStarting Termux build service…"
+                status.text = "Starting Termux build…"
+                logs.text = copied
+                buildPrefs.edit()
+                    .putString("last_build_status", "Starting Termux build…")
+                    .putString("last_build_log", copied)
+                    .apply()
                 launchTermuxBuild(fileName)
             } catch (e: Exception) {
                 val message = "Could not prepare project ZIP: ${e.message ?: "storage error"}"
@@ -1332,6 +1370,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .putInt("last_build_percent", 0)
                     .putString("last_apk_path", null)
                     .apply()
+                buildLogHandler.removeCallbacks(buildLogPollTask)
                 buildProgress.visibility = View.GONE
                 status.text = message
                 logs.text = message
