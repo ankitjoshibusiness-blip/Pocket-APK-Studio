@@ -1558,6 +1558,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 mkdir -p "@D@PROJECT"
                 rm -rf "@D@PROJECT"/*
                 unzip -q -o "/mnt/shared/Download/PocketAPKStudio/$zipName" -d "@D@PROJECT"
+
+                # Align Java and Kotlin bytecode targets for modern Kotlin/AGP projects.
+                # Only the extracted working copy is changed; the user's original ZIP stays intact.
+                APP_GRADLE=@D@(find "@D@PROJECT" -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit)
+                if [ -n "@D@APP_GRADLE" ]; then
+                    if [[ "@D@APP_GRADLE" == *.kts ]]; then
+                        if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
+                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }' "@D@APP_GRADLE"
+                        fi
+                        if ! grep -q 'kotlinOptions' "@D@APP_GRADLE" && grep -q 'org.jetbrains.kotlin' "@D@APP_GRADLE"; then
+                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    kotlinOptions { jvmTarget = "17" }' "@D@APP_GRADLE"
+                        fi
+                    else
+                        if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
+                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }' "@D@APP_GRADLE"
+                        fi
+                        if ! grep -q 'kotlinOptions' "@D@APP_GRADLE" && grep -q 'org.jetbrains.kotlin' "@D@APP_GRADLE"; then
+                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    kotlinOptions { jvmTarget = "17" }' "@D@APP_GRADLE"
+                        fi
+                    fi
+                    echo "Applied Java/Kotlin JVM target compatibility check to @D@APP_GRADLE"
+                else
+                    echo "WARNING: app/build.gradle(.kts) not found; leaving project Gradle configuration unchanged"
+                fi
+
                 SETTINGS=@D@(find "@D@PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
                 test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
                 cd "@D@(dirname "@D@SETTINGS")"
@@ -2284,6 +2309,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     namespace = "$pkg"
                     compileSdk = 35
                     defaultConfig { applicationId = "$pkg"; minSdk = $minSdk; targetSdk = 35; versionCode = 1; versionName = "$version" }
+                    compileOptions {
+                        sourceCompatibility = JavaVersion.VERSION_17
+                        targetCompatibility = JavaVersion.VERSION_17
+                    }
+                    ${if(kotlin) "kotlinOptions { jvmTarget = \"17\" }" else ""}
                 }
             """)
             val permission=if(template=="WebView App") "<uses-permission android:name=\"android.permission.INTERNET\"/>" else ""
