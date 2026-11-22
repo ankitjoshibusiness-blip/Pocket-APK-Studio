@@ -622,18 +622,33 @@ class ProjectEditorActivity : Activity() {
         val children = directory.listFiles()?.filterNot {
             it.name in setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
         }?.sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() })) ?: return
+
+        fun explorerRow(text: String, indent: Int, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                this.text = text
+                textSize = 12f
+                setTextColor(if (darkTheme) 0xFFE8EEFF.toInt() else 0xFF263653.toInt())
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                includeFontPadding = true
+                setPadding(dp(10 + indent * 13), dp(7), dp(8), dp(7))
+                background = roundedSurface(if (darkTheme) 0xFF3C4A56.toInt() else 0xFFDCE5F7.toInt(), 10)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
+        }
+
         children.filter { it.isDirectory }.forEach { dir ->
             if (count[0] >= 500) return
             count[0]++
             val relative = dir.relativeTo(rootDir).invariantSeparatorsPath
             val expanded = relative in expandedDirectories
-            val row = smallButton((if (expanded) "▾  " else "▸  ") + dir.name) {
+            val row = explorerRow((if (expanded) "▾  " else "▸  ") + dir.name, depth) {
                 if (expanded) expandedDirectories.remove(relative) else expandedDirectories.add(relative)
                 refreshExplorer()
             }
-            row.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            row.setPadding(dp(8 + depth * 13), 0, dp(6), 0)
-            row.maxLines = 1
             row.setOnLongClickListener {
                 AlertDialog.Builder(this).setTitle(dir.name)
                     .setItems(arrayOf("Create file here", "Create folder here", "Rename folder", "Delete folder")) { _, action ->
@@ -646,22 +661,25 @@ class ProjectEditorActivity : Activity() {
                     }.setNegativeButton("Cancel", null).show()
                 true
             }
-            list.addView(row, LinearLayout.LayoutParams(-1, dp(36)).apply { bottomMargin = dp(2) })
+            list.addView(row, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(3) })
             if (expanded) addExplorerDirectoryChildren(dir, list, depth + 1, count)
         }
+
         children.filter { it.isFile }.forEach { file ->
             if (count[0] >= 500) return
             count[0]++
             val editable = file.extension.lowercase() in editableExtensions
-            val item = smallButton((if (editable) "▤  " else "▧  ") + file.name) {
-                if (!editable || file.length() > 1024 * 1024) toast("This file cannot be opened in the text editor.")
-                else { openFile(file); if (explorerOpen) toggleExplorer() }
+            val prefix = if (editable) "▤  " else "▧  "
+            val item = explorerRow(prefix + file.name, depth + 1) {
+                if (!editable || file.length() > 1024 * 1024) {
+                    toast("This file cannot be opened in the text editor.")
+                } else {
+                    openFile(file)
+                    if (explorerOpen) toggleExplorer()
+                }
             }
-            item.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            item.setPadding(dp(12 + depth * 13), 0, dp(6), 0)
-            item.maxLines = 1
             item.setOnLongClickListener { showFileContextMenu(file); true }
-            list.addView(item, LinearLayout.LayoutParams(-1, dp(36)).apply { bottomMargin = dp(2) })
+            list.addView(item, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(3) })
         }
     }
 
