@@ -360,6 +360,8 @@ class ProjectEditorActivity : Activity() {
         popup.menu.add("↷ Redo").setOnMenuItemClickListener { redoEdit(); true }
         popup.menu.add("✓ Save").setOnMenuItemClickListener { saveCurrent(true); true }
         popup.menu.add("⌕ Search project").setOnMenuItemClickListener { showProjectSearch(); true }
+        popup.menu.add("↗ Go to Definition").setOnMenuItemClickListener { showSymbolNavigation(false); true }
+        popup.menu.add("⌁ Find References").setOnMenuItemClickListener { showSymbolNavigation(true); true }
         popup.menu.add("✦ Share to ChatGPT").setOnMenuItemClickListener { shareProjectWithChatGPT(); true }
         popup.menu.add("⇩ Import AI changes").setOnMenuItemClickListener { chooseAiChangesZip(); true }
         popup.menu.add("✦ Chat with AI").setOnMenuItemClickListener {
@@ -1179,6 +1181,73 @@ class ProjectEditorActivity : Activity() {
                         }.setNegativeButton("Close", null).show()
                 } catch (e: Exception) { toast("Project search failed: ${e.message}") }
             }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showSymbolNavigation(findReferences: Boolean) {
+        if (currentFile == null) {
+            toast("Open a source file first")
+            return
+        }
+        val source = editor.text.toString()
+        val cursor = editor.selectionStart.coerceIn(0, source.length)
+        val start = cursor.coerceAtMost(source.length - 1).coerceAtLeast(0)
+        if (source.isEmpty() || !(source[start].isLetterOrDigit() || source[start] == '_')) {
+            toast("Place the cursor on a symbol name")
+            return
+        }
+        var left = start
+        var right = start + 1
+        while (left > 0 && (source[left - 1].isLetterOrDigit() || source[left - 1] == '_')) left--
+        while (right < source.length && (source[right].isLetterOrDigit() || source[right] == '_')) right++
+        val symbol = source.substring(left, right)
+        if (symbol.isBlank() || symbol.first().isDigit()) {
+            toast("Place the cursor on a valid symbol name")
+            return
+        }
+        if (!saveCurrent(false)) return
+
+        val declaration = Regex(
+            """\b(?:fun|class|interface|object|enum\s+class|data\s+class|sealed\s+class|annotation\s+class|val|var|const\s+val|typealias|def|function)\s+${Regex.escape(symbol)}\b"""
+        )
+        val exactWord = Regex("""\b${Regex.escape(symbol)}\b""")
+        val matches = ArrayList<Triple<File, Int, String>>()
+        rootDir.walkTopDown().onEnter { dir ->
+            dir == rootDir || dir.name !in setOf(".git", ".gradle", ".idea", "build", "node_modules", ".dart_tool")
+        }.filter { file ->
+            file.isFile && file.extension.lowercase() in editableExtensions && file.length() <= 1024 * 1024
+        }.forEach { file ->
+            if (matches.size >= 200) return@forEach
+            val content = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
+            val regex = if (findReferences) exactWord else declaration
+            regex.findAll(content).forEach { match ->
+                if (matches.size >= 200) return@forEach
+                val offset = match.range.first
+                val line = content.substring(0, offset).count { it == '\n' } + 1
+                val lineStart = content.lastIndexOf('\n', (offset - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+                val lineEnd = content.indexOf('\n', offset).let { if (it < 0) content.length else it }
+                val preview = content.substring(lineStart, lineEnd).trim().take(100)
+                matches.add(Triple(file, offset, "${file.relativeTo(rootDir).invariantSeparatorsPath}:$line  $preview"))
+            }
+        }
+        if (matches.isEmpty()) {
+            toast(if (findReferences) "No references found for '$symbol'" else "Definition not found for '$symbol'")
+            return
+        }
+        val title = if (findReferences) "References to '$symbol'" else "Definitions of '$symbol'"
+        val labels = matches.map { it.third }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("$title (${matches.size}${if (matches.size == 200) "+" else ""})")
+            .setItems(labels) { _, index ->
+                val (file, offset) = matches[index]
+                openFile(file)
+                editor.requestFocus()
+                val end = (offset + symbol.length).coerceAtMost(editor.text.length)
+                editor.setSelection(offset.coerceAtMost(end), end)
+                editor.post {
+                    val line = editor.layout?.getLineForOffset(offset.coerceAtMost(editor.text.length)) ?: 0
+                    val y = editor.layout?.getLineTop(line) ?: 0
+                    editor.requestRectangleOnScreen(Rect(0, y, editor.width, y + dp(32)), false)
+                }
+            }.setNegativeButton("Close", null).show()
     }
 
     private fun saveCurrent(showMessage: Boolean): Boolean {
