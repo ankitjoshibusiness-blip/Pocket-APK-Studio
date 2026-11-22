@@ -518,35 +518,74 @@ class ProjectEditorActivity : Activity() {
     }
 
     private fun editXmlDesignComponent(index: Int, tag: String, currentText: String) {
-        if (tag == "ImageView" || tag == "ProgressBar") {
-            toast(tag + " properties are not editable yet")
+        val source = editor.text.toString()
+        val componentPattern = Regex("<(?:[A-Za-z0-9_.]+\\.)?(TextView|Button|EditText|ImageView|CheckBox|Switch|RadioButton|ProgressBar)(\\s[^>]*?)?\\s*/?>")
+        val matches = componentPattern.findAll(source).toList()
+        if (index !in matches.indices || matches[index].groupValues[1] != tag) {
+            toast("Component changed; reopen Design preview")
             return
         }
-        val input = EditText(this).apply {
-            setText(currentText)
-            hint = "Component text"
-            setSelection(text.length)
+        val originalElement = matches[index].value
+        fun readAttr(name: String, fallback: String = ""): String {
+            return Regex("""\\b${Regex.escape(name)}\\s*=\\s*["']([^"']*)["']""")
+                .find(originalElement)?.groupValues?.get(1) ?: fallback
         }
-        AlertDialog.Builder(this).setTitle("Edit " + tag).setView(input)
+        fun field(hintText: String, value: String): EditText = EditText(this).apply {
+            hint = hintText
+            setSingleLine(true)
+            setText(value)
+            textSize = 14f
+        }
+        val textField = field("Text / Hint", currentText)
+        val sizeField = field("Text size (e.g. 16sp)", readAttr("android:textSize"))
+        val colorField = field("Text color (e.g. #FF0000)", readAttr("android:textColor"))
+        val widthField = field("Width (match_parent / wrap_content / 120dp)", readAttr("android:layout_width", "match_parent"))
+        val heightField = field("Height (wrap_content / 48dp)", readAttr("android:layout_height", "wrap_content"))
+        val marginField = field("Margin (e.g. 8dp)", readAttr("android:layout_margin"))
+        val paddingField = field("Padding (e.g. 8dp)", readAttr("android:padding"))
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(6), dp(18), dp(2))
+            listOf(textField, sizeField, colorField, widthField, heightField, marginField, paddingField).forEach {
+                addView(it, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(3) })
+            }
+        }
+        val scroll = ScrollView(this).apply { addView(fields) }
+        AlertDialog.Builder(this)
+            .setTitle("Properties · $tag")
+            .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Apply") { _, _ ->
-                val source = editor.text.toString()
-                val allComponents = Regex("<(?:[A-Za-z0-9_.]+\\.)?(TextView|Button|EditText|ImageView|CheckBox|Switch|RadioButton|ProgressBar)(\\s[^>]*?)?\\s*/?>").findAll(source).toList()
-                if (index !in allComponents.indices || allComponents[index].groupValues[1] != tag) {
+                val latest = editor.text.toString()
+                val latestMatches = componentPattern.findAll(latest).toList()
+                if (index !in latestMatches.indices || latestMatches[index].groupValues[1] != tag) {
                     toast("Component changed; reopen Design preview")
                     return@setPositiveButton
                 }
-                val match = allComponents[index]
-                var element = match.value
-                val escaped = input.text.toString().replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
-                val textAttr = Regex("""android:text\s*=\s*["'][^"']*["']""")
-                element = if (textAttr.containsMatchIn(element)) {
-                    textAttr.replace(element, "android:text=\"$escaped\"")
-                } else {
-                    element.replace(Regex("\\s*/?>$")) { suffix -> " android:text=\"$escaped\"" + suffix.value }
+                var element = latestMatches[index].value
+                fun writeAttr(name: String, value: String) {
+                    val attrPattern = Regex("""\\b${Regex.escape(name)}\\s*=\\s*["'][^"']*["']""")
+                    val escaped = value.trim().replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+                    element = if (attrPattern.containsMatchIn(element)) {
+                        attrPattern.replace(element, "$name=\"$escaped\"")
+                    } else if (value.isNotBlank()) {
+                        element.replace(Regex("\\s*/?>$")) { suffix -> " $name=\"$escaped\"" + suffix.value }
+                    } else element
                 }
-                applyDesignXml(source.substring(0, match.range.first) + element + source.substring(match.range.last + 1))
-            }.show()
+                if (tag != "ImageView" && tag != "ProgressBar") {
+                    writeAttr(if (tag == "EditText") "android:hint" else "android:text", textField.text.toString())
+                }
+                writeAttr("android:textSize", sizeField.text.toString())
+                writeAttr("android:textColor", colorField.text.toString())
+                writeAttr("android:layout_width", widthField.text.toString())
+                writeAttr("android:layout_height", heightField.text.toString())
+                writeAttr("android:layout_margin", marginField.text.toString())
+                writeAttr("android:padding", paddingField.text.toString())
+                val match = latestMatches[index]
+                applyDesignXml(latest.substring(0, match.range.first) + element + latest.substring(match.range.last + 1))
+                toast("Component properties updated")
+            }
+            .show()
     }
 
     private fun openLivePreview() {
