@@ -1506,7 +1506,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 exit 25
             fi
             command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
-            proot-distro login ubuntu --bind "@D@SHARED:/mnt/shared" -- bash -lc '
+            proot-distro login --bind "@D@SHARED:/mnt/shared" ubuntu -- bash -lc '
                 set -e
                 export ANDROID_HOME=/root/Android/Sdk
                 export ANDROID_SDK_ROOT=/root/Android/Sdk
