@@ -479,42 +479,161 @@ class ProjectEditorActivity : Activity() {
     private fun renderXmlDesignPreview() {
         if (!::designCanvas.isInitialized || currentFile?.extension?.equals("xml", true) != true) return
         designCanvas.removeAllViews()
-        val source = editor.text.toString()
-        val phoneBg = if (darkTheme) 0xFF101820.toInt() else 0xFFFFFFFF.toInt()
         val phone = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(18), dp(14), dp(18))
-            background = roundedSurface(phoneBg, 20)
+            background = roundedSurface(if (darkTheme) 0xFF101820.toInt() else 0xFFFFFFFF.toInt(), 20)
             elevation = dp(3).toFloat()
         }
         phone.addView(label("PREVIEW · " + (currentFile?.name ?: "layout.xml"), 10, true), LinearLayout.LayoutParams(-1, dp(30)))
-        val componentPattern = Regex("<(?:[A-Za-z0-9_.]+\\.)?(TextView|Button|EditText|ImageView|CheckBox|Switch|RadioButton|ProgressBar)(\\s[^>]*?)?\\s*/?>")
-        val matches = componentPattern.findAll(source).toList()
-        if (matches.isEmpty()) {
-            phone.addView(label("No supported UI components found. Use the palette above to add Text, Button, Input or Image.", 12, false),
-                LinearLayout.LayoutParams(-1, dp(100)))
-        } else {
-            matches.forEachIndexed { index, match ->
-                val tag = match.groupValues[1]
-                val attrs = match.groupValues.getOrElse(2) { "" }
-                val text = Regex("""android:text\s*=\s*["']([^"']*)["']""").find(attrs)?.groupValues?.get(1).orEmpty()
-                val view: View = when (tag) {
-                    "Button" -> Button(this).apply { this.text = text.ifBlank { "Button" }; isAllCaps = false }
-                    "EditText" -> EditText(this).apply { hint = text.ifBlank { "Enter text" }; textSize = 14f; isSingleLine = true }
-                    "ImageView" -> TextView(this).apply { this.text = "▧  Image"; gravity = Gravity.CENTER; textSize = 14f }
-                    "CheckBox" -> CheckBox(this).apply { this.text = text.ifBlank { "Option" } }
-                    "Switch" -> Switch(this).apply { this.text = text.ifBlank { "Switch" } }
-                    "RadioButton" -> RadioButton(this).apply { this.text = text.ifBlank { "Option" } }
-                    "ProgressBar" -> ProgressBar(this)
-                    else -> TextView(this).apply { this.text = text.ifBlank { "TextView" }; textSize = 16f }
+        try {
+            val parser = android.util.Xml.newPullParser()
+            parser.setInput(java.io.StringReader(editor.text.toString()))
+            val parents = ArrayDeque<ViewGroup>()
+            var rootView: View? = null
+            var componentIndex = 0
+            var event = parser.eventType
+            while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    org.xmlpull.v1.XmlPullParser.START_TAG -> {
+                        val tag = parser.name.substringAfterLast('.')
+                        val view = createXmlPreviewView(tag, parser)
+                        if (view != null) {
+                            if (tag in setOf("TextView", "Button", "EditText", "ImageView", "CheckBox", "Switch", "RadioButton", "ProgressBar")) {
+                                val index = componentIndex++
+                                val text = if (view is TextView) {
+                                    if (tag == "EditText") view.hint?.toString().orEmpty() else view.text?.toString().orEmpty()
+                                } else ""
+                                view.setOnClickListener { editXmlDesignComponent(index, tag, text) }
+                            }
+                            val parent = parents.lastOrNull()
+                            if (parent == null) rootView = view else parent.addView(view, createXmlPreviewLayoutParams(parent, parser))
+                            if (view is ViewGroup) parents.addLast(view)
+                        }
+                    }
+                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (parents.isNotEmpty()) parents.removeLast()
                 }
-                view.setOnClickListener { editXmlDesignComponent(index, tag, text) }
-                phone.addView(view, LinearLayout.LayoutParams(-1, if (tag == "ImageView") dp(92) else dp(52)).apply { bottomMargin = dp(7) })
+                event = parser.next()
             }
+            if (rootView != null) phone.addView(rootView, LinearLayout.LayoutParams(-1, -2))
+            else phone.addView(label("No supported layout root found.", 12, false), LinearLayout.LayoutParams(-1, dp(90)))
+        } catch (e: Exception) {
+            phone.addView(label("XML Preview error: " + (e.message ?: "Invalid or unsupported XML"), 12, false),
+                LinearLayout.LayoutParams(-1, dp(90)))
         }
         designCanvas.addView(phone, LinearLayout.LayoutParams(-1, -2))
-        designCanvas.addView(label(matches.size.toString() + " supported component(s) detected", 10, false),
-            LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(8) })
+        designCanvas.addView(label("Native Android preview. Project-specific resources and advanced constraints may differ from a real build.", 10, false),
+            LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
+    }
+
+    private fun createXmlPreviewView(tag: String, parser: org.xmlpull.v1.XmlPullParser): View? {
+        fun attr(name: String): String? {
+            for (i in 0 until parser.attributeCount) if (parser.getAttributeName(i) == name) return parser.getAttributeValue(i)
+            return null
+        }
+        val view: View = when (tag) {
+            "LinearLayout" -> LinearLayout(this).apply { orientation = if (attr("orientation") == "horizontal") 0 else 1 }
+            "FrameLayout" -> FrameLayout(this)
+            "RelativeLayout" -> RelativeLayout(this)
+            "ScrollView" -> ScrollView(this)
+            "HorizontalScrollView" -> HorizontalScrollView(this)
+            "TextView" -> TextView(this)
+            "Button" -> Button(this).apply { isAllCaps = attr("textAllCaps") != "false" }
+            "EditText" -> EditText(this)
+            "ImageView" -> ImageView(this).apply { setImageResource(android.R.drawable.ic_menu_gallery); scaleType = ImageView.ScaleType.CENTER_INSIDE }
+            "CheckBox" -> CheckBox(this)
+            "Switch" -> Switch(this)
+            "RadioButton" -> RadioButton(this)
+            "ProgressBar" -> ProgressBar(this)
+            else -> return null
+        }
+        if (view is TextView) {
+            val text = attr(if (tag == "EditText") "hint" else "text")
+            if (text != null) { if (tag == "EditText") view.hint = text else view.text = text }
+            attr("textSize")?.removeSuffix("sp")?.toFloatOrNull()?.let { view.textSize = it }
+            attr("textColor")?.let { resolvePreviewColor(it)?.let(view::setTextColor) }
+            attr("hintTextColor")?.let { resolvePreviewColor(it)?.let(view::setHintTextColor) }
+        }
+        attr("background")?.let { resolvePreviewColor(it)?.let(view::setBackgroundColor) }
+        attr("backgroundTint")?.let { raw ->
+            resolvePreviewColor(raw)?.let { color ->
+                if (android.os.Build.VERSION.SDK_INT >= 21) view.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
+            }
+        }
+        attr("padding")?.let { raw -> previewDimension(raw, 0).let { view.setPadding(it, it, it, it) } }
+        attr("gravity")?.let { gravity ->
+            if (view is TextView) view.gravity = when (gravity) {
+                "center" -> Gravity.CENTER
+                "center_vertical" -> Gravity.CENTER_VERTICAL
+                "center_horizontal" -> Gravity.CENTER_HORIZONTAL
+                "end", "right" -> Gravity.END
+                else -> Gravity.START
+            }
+        }
+        return view
+    }
+
+    private fun createXmlPreviewLayoutParams(parent: ViewGroup, parser: org.xmlpull.v1.XmlPullParser): ViewGroup.LayoutParams {
+        fun attr(name: String): String? {
+            for (i in 0 until parser.attributeCount) if (parser.getAttributeName(i) == name) return parser.getAttributeValue(i)
+            return null
+        }
+        fun size(name: String, fallback: Int) = previewDimension(attr(name), fallback)
+        val width = size("layout_width", ViewGroup.LayoutParams.MATCH_PARENT)
+        val height = size("layout_height", ViewGroup.LayoutParams.WRAP_CONTENT)
+        val params: ViewGroup.LayoutParams = when (parent) {
+            is LinearLayout -> LinearLayout.LayoutParams(width, height)
+            is FrameLayout -> FrameLayout.LayoutParams(width, height)
+            is RelativeLayout -> RelativeLayout.LayoutParams(width, height)
+            else -> ViewGroup.LayoutParams(width, height)
+        }
+        val margin = previewDimension(attr("layout_margin"), 0)
+        if (params is ViewGroup.MarginLayoutParams) params.setMargins(
+            previewDimension(attr("layout_marginLeft"), margin), previewDimension(attr("layout_marginTop"), margin),
+            previewDimension(attr("layout_marginRight"), margin), previewDimension(attr("layout_marginBottom"), margin))
+        if (params is LinearLayout.LayoutParams) {
+            params.weight = attr("layout_weight")?.toFloatOrNull() ?: 0f
+            params.gravity = when (attr("layout_gravity")) {
+                "center" -> Gravity.CENTER
+                "center_horizontal" -> Gravity.CENTER_HORIZONTAL
+                "center_vertical" -> Gravity.CENTER_VERTICAL
+                "end", "right" -> Gravity.END
+                else -> -1
+            }
+        }
+        return params
+    }
+
+    private fun previewDimension(raw: String?, fallback: Int): Int {
+        if (raw.isNullOrBlank()) return fallback
+        if (raw == "match_parent" || raw == "fill_parent") return ViewGroup.LayoutParams.MATCH_PARENT
+        if (raw == "wrap_content") return ViewGroup.LayoutParams.WRAP_CONTENT
+        val number = Regex("""^-?\d+(?:\.\d+)?""").find(raw)?.value?.toFloatOrNull() ?: return fallback
+        return if (raw.endsWith("dp") || raw.endsWith("sp")) dp(number.toInt()) else number.toInt()
+    }
+
+    private fun resolvePreviewColor(raw: String): Int? {
+        val value = raw.trim()
+        return try {
+            when {
+                value.startsWith("#") -> android.graphics.Color.parseColor(value)
+                value.startsWith("@android:color/") -> {
+                    val id = resources.getIdentifier(value.substringAfterLast('/'), "color", "android")
+                    if (id == 0) null else resources.getColor(id)
+                }
+                value.startsWith("@color/") -> {
+                    val name = value.substringAfterLast('/')
+                    val file = rootDir.walkTopDown().maxDepth(6).firstOrNull {
+                        it.isFile && it.name == "colors.xml" && it.path.contains("/values")
+                    }
+                    val color = file?.readText()?.let {
+                        Regex("""<color\s+name=["']\${Regex.escape(name)}["']\s*>([^<]+)</color>""").find(it)?.groupValues?.get(1)?.trim()
+                    }
+                    color?.takeIf { it.startsWith("#") }?.let { android.graphics.Color.parseColor(it) }
+                }
+                else -> android.graphics.Color.parseColor(value)
+            }
+        } catch (_: Exception) { null }
     }
 
     private fun editXmlDesignComponent(index: Int, tag: String, currentText: String) {
