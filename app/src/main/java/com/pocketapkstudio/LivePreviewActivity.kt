@@ -505,7 +505,7 @@ class LivePreviewActivity : Activity() {
         }.distinctBy { it.first }
 
         val included = linkedSetOf(entryFile)
-        repeat(8) {
+        for (pass in 0 until 8) {
             val combined = included.mapNotNull { sourceText[it] }.joinToString("\n\n")
             var added = false
             for ((functionName, declarationFile) in declarations) {
@@ -516,7 +516,7 @@ class LivePreviewActivity : Activity() {
                     added = true
                 }
             }
-            if (!added) return@repeat
+            if (!added || included.size >= 30) break
         }
         return included.mapNotNull { file ->
             if (file.isFile) file else null
@@ -629,13 +629,13 @@ class LivePreviewActivity : Activity() {
                             val body = code.substring(lambdaStart, lambdaEnd + 1)
                             val textLabel = Regex("""Text\s*\(\s*"""").find(body)
                                 ?.let { firstLiteral(body.substring(it.range.first)) }
-                            val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                            val iconName = Regex("""Icons\.(?:(?:AutoMirrored\.)?(?:Default|Filled|Outlined|Rounded|Sharp|TwoTone))\.(\w+)""")
                                 .find(body)?.groupValues?.get(1)
                             label = textLabel ?: label ?: iconGlyph(iconName)
                             endOfElement = lambdaEnd
                         }
                     } else if (kind in setOf("IconButton", "FilledIconButton")) {
-                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                        val iconName = Regex("""Icons\.(?:(?:AutoMirrored\.)?(?:Default|Filled|Outlined|Rounded|Sharp|TwoTone))\.(\w+)""")
                             .find(callArgs)?.groupValues?.get(1)
                         label = label ?: iconGlyph(iconName)
                     }
@@ -705,15 +705,21 @@ class LivePreviewActivity : Activity() {
                     "Box", "BoxWithConstraints" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
                     "Icon" -> {
-                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                        val iconName = Regex("""Icons\.(?:(?:AutoMirrored\.)?(?:Default|Filled|Outlined|Rounded|Sharp|TwoTone))\.(\w+)""")
                             .find(callArgs)?.groupValues?.get(1) ?: "Star"
                         val glyph = iconGlyph(iconName)
                         TextView(this).apply {
                             text = glyph
                             textSize = Regex("""size\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 22f
                             gravity = Gravity.CENTER
-                            val tint = Regex("""tint\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").find(callArgs)?.groupValues?.get(1)
-                            setTextColor(tint?.let { runCatching { Color.parseColor("#" + it.takeLast(6)) }.getOrNull() } ?: themeOnBackground)
+                            val directTint = Regex("""tint\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""")
+                                .find(callArgs)?.groupValues?.get(1)
+                            val themeTint = Regex("""tint\s*=\s*MaterialTheme\.colorScheme\.(\w+)""")
+                                .find(callArgs)?.groupValues?.get(1)
+                            val resolvedTint = directTint?.let {
+                                runCatching { Color.parseColor("#" + it.takeLast(6)) }.getOrNull()
+                            } ?: themeTint?.let { colorMap[it] } ?: themeOnBackground
+                            setTextColor(resolvedTint)
                             contentDescription = iconName
                         }
                     }
