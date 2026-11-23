@@ -420,27 +420,24 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 .putString("last_build_status", "Termux command sent. Waiting for build output…")
                 .putString("last_build_log", "Termux command sent.\nIf no output appears, check Termux RUN_COMMAND access and allow-external-apps.")
                 .apply()
+            // Termux environment setup can legitimately take longer than 30 seconds
+            // while pkg/proot-distro downloads and configures Ubuntu. Do not mark a
+            // still-running command as failed just because its callback is delayed.
             Handler(Looper.getMainLooper()).postDelayed({
                 val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
                 if (prefs.getBoolean("build_running", false)) {
                     val live = prefs.getString("last_build_log", "").orEmpty()
                     if (live.isBlank() || live.contains("Build starting…") || live.contains("Build starting...")) {
-                        val message = "No result received from Termux within 30 seconds. Check: (1) Termux ~/.termux/termux.properties contains allow-external-apps=true, then run termux-reload-settings; (2) Android Settings > Apps > Pocket APK Studio > Permissions > Additional permissions > Run commands in Termux environment is allowed; (3) Termux is installed and opened once. Retry after checking these items."
+                        val message = "Termux is taking longer than expected. The command has not reported back yet; it may still be running. Keep Termux installed and open it once, allow RUN_COMMAND permission, and check allow-external-apps=true in ~/.termux/termux.properties. Do not start a second build yet."
                         prefs.edit()
-                            .putBoolean("build_running", false)
                             .putString("last_build_status", message)
                             .putString("last_build_log", message)
-                            .putInt("last_build_percent", 0)
-                            .putString("last_apk_path", null)
                             .apply()
-                        buildLogHandler.removeCallbacks(buildLogPollTask)
-                        if (::buildProgress.isInitialized) buildProgress.visibility = View.GONE
                         if (::status.isInitialized) status.text = message
                         if (::logs.isInitialized) logs.text = message
-                        if (::percentText.isInitialized) percentText.text = "BUILD NOT STARTED"
                     }
                 }
-            }, 30000L)
+            }, 120000L)
         } catch (e: Exception) {
             val detail = e.message ?: e.javaClass.simpleName
             val message = when (e) {
