@@ -36,6 +36,11 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Validate local APK build engine
+        run: |
+          bash -n app/src/main/assets/build-project.sh
+          bash app/src/main/assets/build-project.sh --self-test
+
       - name: Build debug APK
         run: |
           set -o pipefail

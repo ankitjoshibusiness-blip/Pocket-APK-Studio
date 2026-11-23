@@ -1368,9 +1368,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .putString("last_build_status", "Copying project ZIP to shared Downloads…")
                     .putString("last_build_log", "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio.")
                     .apply()
-                val fileName = withContext(Dispatchers.IO) { copyZipToDownloads(source) }
+                val fileName = withContext(Dispatchers.IO) {
+                    copyZipToDownloads(source).also { copyBuildEngineToDownloads() }
+                }
                 importedZipName = fileName
-                val copied = "Project ZIP copied: $fileName\nStarting Termux build service…"
+                val copied = "Project ZIP copied: $fileName\nBuild engine copied to shared Downloads.\nStarting Termux build service…"
                 status.text = "Starting Termux build…"
                 logs.text = copied
                 buildPrefs.edit()
@@ -1379,7 +1381,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .apply()
                 launchTermuxBuild(fileName)
             } catch (e: Exception) {
-                val message = "Could not prepare project ZIP: ${e.message ?: "storage error"}"
+                val message = "Could not prepare the project ZIP or build engine: ${e.message ?: "storage error"}"
                 getSharedPreferences("build_state", MODE_PRIVATE).edit()
                     .putBoolean("build_running", false)
                     .putString("last_build_status", message)
@@ -1496,6 +1498,33 @@ class MainActivity : androidx.activity.ComponentActivity() {
         return safeName
     }
 
+    private fun copyBuildEngineToDownloads() {
+        val displayName = "build-project.sh"
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/"
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        contentResolver.delete(
+            collection,
+            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+            arrayOf(displayName, folder)
+        )
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/x-shellscript")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val uri = contentResolver.insert(collection, values)
+            ?: error("Could not copy the local APK build engine to Downloads")
+        try {
+            assets.open(displayName).use { input ->
+                contentResolver.openOutputStream(uri)?.use { output -> input.copyTo(output) }
+                    ?: error("Could not write the local APK build engine to Downloads")
+            }
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
     private fun queryDisplayName(uri: Uri): String? {
         contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) return cursor.getString(0)
@@ -1504,124 +1533,13 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun launchTermuxBuild(zipName: String) {
-        val sharedZip = "/mnt/shared/Download/PocketAPKStudio/$zipName"
-        val command = """
-            set -e
-            SHARED="/storage/emulated/0"
-            LOG_DIR="@D@SHARED/Download/PocketAPKStudio"
-            LIVE_LOG="@D@LOG_DIR/build-live.log"
-            mkdir -p "@D@LOG_DIR"
-            : > "@D@LIVE_LOG"
-            exec > >(tee -a "@D@LIVE_LOG") 2>&1
-            echo "Pocket APK Studio: background Android build started"
-            if [ ! -d "@D@SHARED/Download" ]; then
-                echo "ERROR: Termux shared storage is not ready. Open Termux, run termux-setup-storage, allow storage access, then retry."
-                exit 24
-            fi
-            if [ ! -r "@D@SHARED/Download/PocketAPKStudio/$zipName" ]; then
-                echo "ERROR: Imported project ZIP is not readable in Termux shared storage: $zipName"
-                exit 25
-            fi
-            command -v proot-distro >/dev/null || { echo 'ERROR: proot-distro is missing in Termux'; exit 10; }
-            proot-distro login --bind "@D@SHARED:/mnt/shared" ubuntu -- bash -lc '
-                set -e
-                export ANDROID_HOME=/root/Android/Sdk
-                export ANDROID_SDK_ROOT=/root/Android/Sdk
-                export PATH=/root/Android/cmdline-tools/latest/bin:/root/Android/Sdk/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-                command -v java >/dev/null || { echo "ERROR: Java is missing in Ubuntu"; exit 11; }
-                test -f /root/Android/Sdk/platforms/android-35/android.jar || { echo "ERROR: Android 35 SDK platform is missing"; exit 15; }
-                AAPT2_DIR="/root/.local/bin"
-                AAPT2="/root/.local/bin/aapt2"
-                mkdir -p "@D@AAPT2_DIR"
-                if [ ! -x "@D@AAPT2" ] || ! "@D@AAPT2" version >/dev/null 2>&1; then
-                    echo "Installing ARM64 AAPT2..."
-                    if command -v curl >/dev/null 2>&1; then
-                        curl -L --fail --silent --show-error "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -o "@D@AAPT2"
-                    elif command -v wget >/dev/null 2>&1; then
-                        wget -q "https://github.com/ReVanced/aapt2/releases/download/v1.1.0/aapt2-arm64-v8a" -O "@D@AAPT2"
-                    else
-                        echo "ERROR: curl or wget is required to install ARM64 AAPT2"
-                        exit 17
-                    fi
-                fi
-                echo "7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b  @D@AAPT2" | sha256sum -c - || { echo "ERROR: ARM64 AAPT2 checksum verification failed"; exit 18; }
-                chmod 755 "@D@AAPT2"
-                "@D@AAPT2" version
-                mkdir -p "@D@HOME/.gradle"
-                touch "@D@HOME/.gradle/gradle.properties"
-                if grep -q '^android.aapt2FromMavenOverride=' "@D@HOME/.gradle/gradle.properties"; then
-                    sed -i "s|^android.aapt2FromMavenOverride=.*|android.aapt2FromMavenOverride=@D@AAPT2|" "@D@HOME/.gradle/gradle.properties"
-                else
-                    echo "android.aapt2FromMavenOverride=@D@AAPT2" >> "@D@HOME/.gradle/gradle.properties"
-                fi
-                PROJECT="/root/pocket-apk-studio/project"
-                mkdir -p "@D@PROJECT"
-                if [ ! -d "@D@PROJECT" ]; then echo "ERROR: project workspace could not be created: @D@PROJECT"; exit 26; fi
-                echo "Project workspace: @D@PROJECT"
-                rm -rf "@D@PROJECT"/*
-                unzip -q -o "/mnt/shared/Download/PocketAPKStudio/$zipName" -d "@D@PROJECT"
-
-                # Align Java and Kotlin bytecode targets for modern Kotlin/AGP projects.
-                # Only the extracted working copy is changed; the user's original ZIP stays intact.
-                echo "DIAGNOSTIC: PROJECT=[$PROJECT]"
-                if [ -z "$PROJECT" ] || [ ! -d "$PROJECT" ]; then
-                    echo "ERROR: Project workspace path is empty or missing: [$PROJECT]"
-                    exit 27
-                fi
-                APP_GRADLE=$(find "$PROJECT" -type f \( -path "*/app/build.gradle.kts" -o -path "*/app/build.gradle" \) -print -quit 2> /tmp/pas-find-app.err) || {
-                    echo "ERROR: Could not scan project for app Gradle files"
-                    cat /tmp/pas-find-app.err
-                    exit 28
-                }
-                echo "DIAGNOSTIC: APP_GRADLE=[$APP_GRADLE]"
-                if [ -n "@D@APP_GRADLE" ]; then
-                    if [[ "@D@APP_GRADLE" == *.kts ]]; then
-                        if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
-                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }' "@D@APP_GRADLE"
-                        fi
-                        if ! grep -q 'kotlinOptions' "@D@APP_GRADLE" && grep -q 'org.jetbrains.kotlin' "@D@APP_GRADLE"; then
-                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    kotlinOptions { jvmTarget = "17" }' "@D@APP_GRADLE"
-                        fi
-                    else
-                        if ! grep -q 'compileOptions' "@D@APP_GRADLE"; then
-                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }' "@D@APP_GRADLE"
-                        fi
-                        if ! grep -q 'kotlinOptions' "@D@APP_GRADLE" && grep -q 'org.jetbrains.kotlin' "@D@APP_GRADLE"; then
-                            sed -i '/^[[:space:]]*android[[:space:]]*{/a\\    kotlinOptions { jvmTarget = "17" }' "@D@APP_GRADLE"
-                        fi
-                    fi
-                    echo "Applied Java/Kotlin JVM target compatibility check to @D@APP_GRADLE"
-                else
-                    echo "WARNING: app/build.gradle(.kts) not found; leaving project Gradle configuration unchanged"
-                fi
-
-                SETTINGS=$(find "$PROJECT" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit 2> /tmp/pas-find-settings.err) || {
-                    echo "ERROR: Could not scan project for settings.gradle"
-                    cat /tmp/pas-find-settings.err
-                    exit 29
-                }
-                echo "DIAGNOSTIC: SETTINGS=[$SETTINGS]"
-                test -n "@D@SETTINGS" || { echo "ERROR: settings.gradle(.kts) not found in ZIP"; exit 14; }
-                cd "@D@(dirname "@D@SETTINGS")"
-                if [ -f ./gradlew ]; then
-                    chmod +x ./gradlew
-                    ./gradlew --no-daemon --max-workers=2 assembleDebug
-                else
-                    command -v gradle >/dev/null || { echo "ERROR: Gradle is missing in Ubuntu"; exit 12; }
-                    gradle --no-daemon --max-workers=2 assembleDebug
-                fi
-                mkdir -p /mnt/shared/Download/PocketAPKStudio/Builds
-                APK_COUNT=0
-                while IFS= read -r APK; do
-                    [ -n "@D@APK" ] || continue
-                    cp "@D@APK" /mnt/shared/Download/PocketAPKStudio/Builds/
-                    echo "APK_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Builds/@D@(basename "@D@APK")"
-                    APK_COUNT=@D@((APK_COUNT + 1))
-                done < <(find . -path "*/build/outputs/apk/debug/*.apk" -type f)
-                test "@D@APK_COUNT" -gt 0 || { echo "ERROR: Build completed but no debug APK was found"; exit 16; }
-                echo "BUILD SUCCESS: @D@APK_COUNT APK file(s) copied to Downloads/PocketAPKStudio/Builds"
-            '
-        """.trimIndent().replace("@D@", "$").replace("@ZIP@", sharedZip)
+        require(Regex("""^project-[0-9]+-[A-Za-z0-9._-]+\.[zZ][iI][pP]$""").matches(zipName)) {
+            "Imported ZIP name is not safe for the Termux build command."
+        }
+        val scriptPath = "/storage/emulated/0/Download/PocketAPKStudio/build-project.sh"
+        // Run the checked-in shell asset from shared storage. Keeping shell logic out of
+        // this Kotlin string avoids nested quoting and Kotlin string-interpolation bugs.
+        val command = "exec bash \"$scriptPath\" \"$zipName\""
 
         val resultIntent = Intent(this, TermuxResultService::class.java)
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
