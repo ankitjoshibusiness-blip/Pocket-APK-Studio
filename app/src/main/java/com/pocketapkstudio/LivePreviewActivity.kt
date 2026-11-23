@@ -27,6 +27,7 @@ class LivePreviewActivity : Activity() {
     private var previewWidthDp = 360
     private var previewHeightDp = 800
     private var selectedPreviewPath: String? = null
+    private var webPreviewView: android.webkit.WebView? = null
     private var layouts: List<File> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -255,6 +256,21 @@ class LivePreviewActivity : Activity() {
         previewScroll.post { previewScroll.scrollTo(0, 0) }
     }
 
+    private fun clearPreviewContent() {
+        content.removeAllViews()
+        val previousWebView = webPreviewView
+        webPreviewView = null
+        if (previousWebView != null) {
+            runCatching {
+                previousWebView.stopLoading()
+                previousWebView.webChromeClient = null
+                previousWebView.webViewClient = android.webkit.WebViewClient()
+                previousWebView.removeAllViews()
+                previousWebView.destroy()
+            }
+        }
+    }
+
     /**
      * Render bundled web applications with Android WebView instead of trying to
      * interpret their HTML/React UI as native XML or Kotlin source.
@@ -267,7 +283,7 @@ class LivePreviewActivity : Activity() {
             File(projectRoot, "web-source/index.html")
         )
         val entry = candidates.firstOrNull { it.isFile } ?: return false
-        content.removeAllViews()
+        clearPreviewContent()
         selectedPreviewPath = entry.relativeTo(projectRoot).invariantSeparatorsPath
         title.text = "LIVE WEB UI PREVIEW · " + entry.name
         val baseDirectory = entry.parentFile ?: projectRoot
@@ -341,6 +357,7 @@ class LivePreviewActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(-1, dp(previewHeightDp))
         }
         content.addView(web)
+        webPreviewView = web
         return try {
             web.loadDataWithBaseURL(baseUrl, entry.readText(), "text/html", "UTF-8", null)
             true
@@ -440,7 +457,7 @@ class LivePreviewActivity : Activity() {
                 }
             }.getOrNull()
         }
-        content.removeAllViews()
+        clearPreviewContent()
         when (selected?.extension?.lowercase()) {
             "xml" -> render(selected)
             "kt" -> renderComposeFile(selected)
@@ -451,7 +468,7 @@ class LivePreviewActivity : Activity() {
 
     /** Static Compose source preview. It approximates common composables without executing app code. */
     private fun renderSourcePreview() {
-        content.removeAllViews()
+        clearPreviewContent()
         val sources = projectRoot.walkTopDown().maxDepth(10).filter {
             it.isFile && it.extension == "kt" && it.length() < 2_000_000L &&
                 it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules", "generated") }
@@ -524,6 +541,7 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun renderComposeFile(source: File) {
+        clearPreviewContent()
         selectedPreviewPath = source.relativeTo(projectRoot).invariantSeparatorsPath
         title.text = "SOURCE PREVIEW · " + source.name
         try {
@@ -1213,7 +1231,7 @@ class LivePreviewActivity : Activity() {
 
     private fun render(file: File) {
         selectedPreviewPath = file.relativeTo(projectRoot).invariantSeparatorsPath
-        content.removeAllViews()
+        clearPreviewContent()
         title.text = "PREVIEW · " + file.name
         try {
             val sourceXml = file.readText()
@@ -1407,8 +1425,13 @@ class LivePreviewActivity : Activity() {
         }
     }
     private fun showMessage(s: String) {
-        content.removeAllViews()
+        clearPreviewContent()
         content.addView(TextView(this).apply { text = s; textSize = 14f; setTextColor(Color.DKGRAY); setPadding(dp(14),dp(18),dp(14),dp(18)) })
     }
+    override fun onDestroy() {
+        if (::content.isInitialized) clearPreviewContent()
+        super.onDestroy()
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 }
