@@ -33,7 +33,7 @@ class LivePreviewActivity : Activity() {
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
-        findLayouts()
+        if (!renderWebPreviewIfAvailable()) findLayouts()
     }
 
     private fun buildScreen() {
@@ -226,7 +226,102 @@ class LivePreviewActivity : Activity() {
         previewScroll.post { previewScroll.scrollTo(0, 0) }
     }
 
+    /**
+     * Render bundled web applications with Android WebView instead of trying to
+     * interpret their HTML/React UI as native XML or Kotlin source.
+     */
+    private fun renderWebPreviewIfAvailable(): Boolean {
+        val candidates = listOf(
+            File(projectRoot, "app/src/main/assets/index.html"),
+            File(projectRoot, "src/main/assets/index.html"),
+            File(projectRoot, "index.html"),
+            File(projectRoot, "web-source/index.html")
+        )
+        val entry = candidates.firstOrNull { it.isFile } ?: return false
+        content.removeAllViews()
+        title.text = "LIVE WEB UI PREVIEW · " + entry.name
+        val baseDirectory = entry.parentFile ?: projectRoot
+        val relativeDirectory = baseDirectory.relativeTo(projectRoot).invariantSeparatorsPath
+        val baseUrl = "https://appassets.androidplatform.net/project/" +
+            (if (relativeDirectory.isBlank() || relativeDirectory == ".") "" else "$relativeDirectory/")
+
+        val web = android.webkit.WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.loadsImagesAutomatically = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = false
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            setBackgroundColor(Color.WHITE)
+            webViewClient = object : android.webkit.WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: android.webkit.WebView,
+                    request: android.webkit.WebResourceRequest
+                ): android.webkit.WebResourceResponse? {
+                    val uri = request.url
+                    if (uri.host != "appassets.androidplatform.net" || !uri.path.orEmpty().startsWith("/project/")) {
+                        return super.shouldInterceptRequest(view, request)
+                    }
+                    return try {
+                        val relative = uri.path.orEmpty().removePrefix("/project/").substringBefore('?')
+                        val target = File(projectRoot, relative).canonicalFile
+                        if (!target.path.startsWith(projectRoot.canonicalPath + File.separator) || !target.isFile) {
+                            android.webkit.WebResourceResponse("text/plain", "UTF-8", 404, "Not Found",
+                                mapOf("Access-Control-Allow-Origin" to "*"), "Preview asset not found".byteInputStream())
+                        } else {
+                            val mime = when (target.extension.lowercase()) {
+                                "js", "mjs" -> "text/javascript"
+                                "css" -> "text/css"
+                                "html", "htm" -> "text/html"
+                                "json", "map" -> "application/json"
+                                "svg" -> "image/svg+xml"
+                                "png" -> "image/png"
+                                "jpg", "jpeg" -> "image/jpeg"
+                                "webp" -> "image/webp"
+                                "gif" -> "image/gif"
+                                "woff" -> "font/woff"
+                                "woff2" -> "font/woff2"
+                                "ttf" -> "font/ttf"
+                                "otf" -> "font/otf"
+                                else -> "application/octet-stream"
+                            }
+                            android.webkit.WebResourceResponse(mime, null, target.inputStream())
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: android.webkit.WebView,
+                    request: android.webkit.WebResourceRequest,
+                    error: android.webkit.WebResourceError
+                ) {
+                    if (request.isForMainFrame) runOnUiThread {
+                        showMessage("Web preview could not load: " + error.description +
+                            "\\nCheck that the project's bundled HTML and asset files are present.")
+                    }
+                }
+            }
+            webChromeClient = android.webkit.WebChromeClient()
+            layoutParams = LinearLayout.LayoutParams(-1, dp(previewHeightDp))
+        }
+        content.addView(web)
+        return try {
+            web.loadDataWithBaseURL(baseUrl, entry.readText(), "text/html", "UTF-8", null)
+            true
+        } catch (error: Exception) {
+            showMessage("Could not open web preview: " + (error.message ?: error.javaClass.simpleName))
+            true
+        }
+    }
+
     private fun findLayouts() {
+        if (renderWebPreviewIfAvailable()) return
         layouts = projectRoot.walkTopDown().maxDepth(10)
             .filter { it.isFile && it.extension.equals("xml", true) && it.parentFile?.name == "layout" &&
                 it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules") } }
