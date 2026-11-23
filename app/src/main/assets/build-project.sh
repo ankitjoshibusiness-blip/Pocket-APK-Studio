@@ -192,6 +192,15 @@ pas_find_apks() {
     return 0
 }
 
+pas_copy_apk_to_output() {
+    local source="$1"
+    local destination="$2"
+    [[ -f "$source" && -s "$source" ]] || return 1
+    mkdir -p "$(dirname "$destination")" || return 1
+    cp -f -- "$source" "$destination" || return 1
+    [[ -f "$destination" && -s "$destination" ]]
+}
+
 pas_verify_sha256() {
     local file="$1"
     local expected="$2"
@@ -208,6 +217,7 @@ pas_run_self_tests() (
     local kts_file
     local groovy_file
     local fake_apk
+    local output_apk
     local digest
     local test_count=0
 
@@ -219,7 +229,7 @@ pas_run_self_tests() (
         test_count=$((test_count + 1))
     }
 
-    for tool in python3 unzip find grep sha256sum mktemp; do
+    for tool in python3 unzip find grep sha256sum mktemp cmp; do
         pas_require_command "$tool" || {
             printf 'FAIL: required test tool is missing: %s\n' "$tool" >&2
             return 1
@@ -378,11 +388,23 @@ PAS_TEST_GROOVY
         return 1
     fi
 
+    output_apk="$test_root/Downloads With Spaces/Pocket APK Studio Build.apk"
+    mkdir -p "$(dirname "$output_apk")"
+    printf 'old placeholder' > "$output_apk"
+    if pas_copy_apk_to_output "$fake_apk" "$output_apk" &&
+        cmp -s "$fake_apk" "$output_apk"; then
+        test_pass "APK copying overwrites an app-created placeholder and preserves spaced paths"
+    else
+        printf 'FAIL: APK copy to registered output path failed\\n' >&2
+        return 1
+    fi
+
     printf 'SELF_TESTS_PASSED=%s\n' "$test_count"
 )
 
 pas_ubuntu_main() {
     local zip_name="${1-}"
+    local output_name="${2-}"
     local shared_zip
     local java_version
     local java_major
@@ -404,6 +426,7 @@ pas_ubuntu_main() {
     local apk_name
     local output_dir="/mnt/shared/Download/PocketAPKStudio/Builds"
     local apk_count=0
+    local candidate
     local -a build_files=()
 
     trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\n" "$rc"' EXIT
@@ -421,6 +444,11 @@ pas_ubuntu_main() {
     case "$zip_name" in
         *.[zZ][iI][pP]) ;;
         *) pas_fail 25 "The imported project file does not have a .zip extension." ;;
+    esac
+    case "$output_name" in
+        ""|*/*|*[!A-Za-z0-9._-]*) pas_fail 25 "Invalid reserved APK output file name." ;;
+        *.apk) ;;
+        *) pas_fail 25 "Reserved APK output file must end in .apk." ;;
     esac
 
     shared_zip="/mnt/shared/Download/PocketAPKStudio/$zip_name"
@@ -561,22 +589,40 @@ pas_ubuntu_main() {
     (( ${#PAS_APK_FILES[@]} > 0 )) ||
         pas_fail 16 "Gradle returned success, but no non-empty debug APK was found under build/outputs/apk/debug."
 
+    # Keep each normal variant APK filename in shared Downloads for direct access.
     for apk in "${PAS_APK_FILES[@]}"; do
         apk_name="$(basename "$apk")"
         cp -f -- "$apk" "$output_dir/$apk_name" ||
             pas_fail 41 "Could not copy APK to shared Downloads: $apk_name"
         [[ -s "$output_dir/$apk_name" ]] ||
             pas_fail 42 "Copied APK is empty: $output_dir/$apk_name"
-        echo "APK_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Builds/$apk_name"
         apk_count=$((apk_count + 1))
     done
 
+    # Prefer the conventional app module's debug APK for the app-owned MediaStore output.
+    apk=""
+    for candidate in "${PAS_APK_FILES[@]}"; do
+        case "$candidate" in
+            "$gradle_root"/app/build/outputs/apk/debug/*.apk)
+                apk="$candidate"
+                break
+                ;;
+        esac
+    done
+    [[ -n "$apk" ]] || apk="${PAS_APK_FILES[0]}"
+    pas_copy_apk_to_output "$apk" "$output_dir/$output_name" ||
+        pas_fail 44 "Could not copy a verified APK into the reserved Downloads output: $output_name"
+    echo "APK_SOURCE=$apk"
+    echo "APK_SAVED=/storage/emulated/0/Download/PocketAPKStudio/Builds/$output_name"
+
     pas_log "BUILD_SUCCESS=1"
-    pas_log "BUILD_SUCCESS: $apk_count debug APK file(s) copied and checked in Downloads/PocketAPKStudio/Builds."
+    pas_log "BUILD_SUCCESS: $apk_count debug APK file(s) copied; primary APK registered as $output_name."
+
 }
 
 pas_termux_main() {
     local zip_name="${1-}"
+    local output_name="${2-}"
     local shared="/storage/emulated/0"
     local build_dir="$shared/Download/PocketAPKStudio"
     local live_log="$build_dir/build-live.log"
@@ -608,6 +654,11 @@ pas_termux_main() {
         *.[zZ][iI][pP]) ;;
         *) pas_fail 25 "Imported project file does not have a .zip extension." ;;
     esac
+    case "$output_name" in
+        ""|*/*|*[!A-Za-z0-9._-]*) pas_fail 25 "Invalid reserved APK output file name." ;;
+        *.apk) ;;
+        *) pas_fail 25 "Reserved APK output file must end in .apk." ;;
+    esac
     [[ -r "$build_dir/$zip_name" ]] ||
         pas_fail 25 "Imported project ZIP is not readable in Termux shared storage: $build_dir/$zip_name"
     pas_require_command proot-distro ||
@@ -616,7 +667,7 @@ pas_termux_main() {
     pas_log "TERMUX_ZIP=$build_dir/$zip_name"
     pas_log "PROOT_BIND=$shared:/mnt/shared"
     proot-distro login --bind "$shared:/mnt/shared" ubuntu -- \
-        bash /mnt/shared/Download/PocketAPKStudio/build-project.sh --ubuntu "$zip_name" ||
+        bash /mnt/shared/Download/PocketAPKStudio/build-project.sh --ubuntu "$zip_name" "$output_name" ||
         pas_fail 43 "The Ubuntu PRoot build process returned a failure. See the preceding Ubuntu diagnostics."
     pas_log "BUILD_ENGINE_COMPLETE=1"
 }

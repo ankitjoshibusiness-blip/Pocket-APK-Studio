@@ -2,9 +2,57 @@ package com.pocketapkstudio
 
 import android.app.IntentService
 import android.content.Intent
+import android.net.Uri
+import java.io.File
 import android.util.Log
 
 class TermuxResultService : IntentService("TermuxResultService") {
+
+    private fun materializeBuiltApk(pendingUriText: String?, pendingName: String?, reportedPath: String?): File? {
+        val reportedFile = reportedPath?.let(::File)
+        val fileNamePattern = Regex("^[A-Za-z0-9._-]+\\.apk$", RegexOption.IGNORE_CASE)
+        val fileName = pendingName?.takeIf { fileNamePattern.matches(it) }
+            ?: reportedFile?.name?.takeIf { fileNamePattern.matches(it) }
+            ?: return null
+
+        val uri = pendingUriText?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        if (uri != null) {
+            val targetDir = File(filesDir, "built-apks")
+            if (!targetDir.exists() && !targetDir.mkdirs()) {
+                Log.e("PocketAPKStudio", "Could not create private built-apks directory")
+                return null
+            }
+            val target = File(targetDir, fileName)
+            val temporary = File(targetDir, ".$fileName.part")
+            return try {
+                val input = contentResolver.openInputStream(uri)
+                    ?: error("Android could not open the reserved Downloads APK output")
+                input.use { source ->
+                    temporary.outputStream().buffered().use { output -> source.copyTo(output) }
+                }
+                if (!temporary.isFile || temporary.length() <= 0L) {
+                    error("The reserved APK output is empty")
+                }
+                if (target.exists() && !target.delete()) {
+                    error("Could not replace the previous private APK copy")
+                }
+                if (!temporary.renameTo(target)) {
+                    temporary.copyTo(target, overwrite = true)
+                    temporary.delete()
+                }
+                target.takeIf { it.isFile && it.length() > 0L }
+                    ?: error("The private APK copy failed verification")
+            } catch (error: Exception) {
+                temporary.delete()
+                Log.e("PocketAPKStudio", "Could not materialize built APK from MediaStore", error)
+                null
+            }
+        }
+
+        // Compatibility fallback for older builds that reported a direct readable path.
+        return reportedFile?.takeIf { it.isFile && it.length() > 0L }
+    }
+
     override fun onHandleIntent(intent: Intent?) {
         if (intent == null) return
         val result = intent.getBundleExtra("result")
@@ -86,26 +134,34 @@ class TermuxResultService : IntentService("TermuxResultService") {
             sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
             return
         }
-        val apkPath = Regex("APK_SAVED=([^\\r\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
-        val verifiedApk = apkPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
-        val successful = exitCode == 0 && errCode == -1 && verifiedApk != null
+        val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
+        val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val pendingApkUri = buildPrefs.getString("pending_build_apk_uri", null)
+        val pendingApkName = buildPrefs.getString("pending_build_apk_name", null)
+        val verifiedApk = materializeBuiltApk(pendingApkUri, pendingApkName, apkPath)
+        val successful = exitCode == 0 && errCode == -1 && apkPath != null && verifiedApk != null
         val combined = buildString {
             append(stdout)
             if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
             if (errMessage.isNotBlank()) append("\n\nTERMUX ERROR:\n").append(errMessage)
         }
         val status = when {
-            successful -> "BUILD SUCCESS! APK verified: " + verifiedApk!!.name
+            successful -> "BUILD SUCCESS! APK verified and ready to install/share: " + verifiedApk!!.name
             exitCode == 0 && errCode == -1 && verifiedApk == null -> "BUILD FAILED: Gradle returned success, but no valid APK file was found at the reported path."
             errCode != -1 -> "Termux could not run the build: $errMessage"
             else -> "BUILD FAILED (exit code $exitCode).\n${combined.takeLast(2200)}"
         }
-        getSharedPreferences("build_state", MODE_PRIVATE).edit()
+        if (!successful && !pendingApkUri.isNullOrBlank()) {
+            runCatching { contentResolver.delete(Uri.parse(pendingApkUri), null, null) }
+        }
+        buildPrefs.edit()
             .putString("last_build_status", status)
             .putString("last_build_log", combined.takeLast(40000))
             .putBoolean("build_running", false)
             .putInt("last_build_percent", if (successful) 100 else 0)
             .putString("last_apk_path", if (successful) verifiedApk!!.absolutePath else null)
+            .remove("pending_build_apk_uri")
+            .remove("pending_build_apk_name")
             .apply()
         sendBroadcast(Intent("com.pocketapkstudio.BUILD_RESULT").setPackage(packageName))
         Log.i("PocketAPKStudio", "Termux build finished. exit=$exitCode err=$errCode")

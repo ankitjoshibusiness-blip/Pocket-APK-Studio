@@ -11,6 +11,7 @@ Pocket APK Studio is an Android-phone workspace for importing, editing, previewi
 - A successful state is shown only when Gradle exits successfully and a non-empty APK is verified at the reported path.
 
 - The phone-side build runner is maintained as the standalone asset `app/src/main/assets/build-project.sh`. Pocket APK Studio copies it beside the imported ZIP in shared Downloads and invokes the same script first in Termux, then inside Ubuntu PRoot. The user's imported ZIP is kept unchanged; the script builds from an extracted working copy.
+- The primary APK output is reserved through an app-owned Downloads MediaStore entry before Termux starts. The result callback copies that APK into app-private storage, so install/share/preview do not rely on reading a file created by another app through a raw shared-storage path.
 - GitHub Actions runs `bash -n` and the runner's `--self-test` mode before compiling Pocket APK Studio. These checks cover safe ZIP paths, ZIP integrity, nested Gradle roots, spaces in paths, Java/Kotlin 17 overrides, AAPT2 checksum verification, missing tools and debug APK discovery. They do not replace a real phone-side build test.
 
 ## Local build prerequisites

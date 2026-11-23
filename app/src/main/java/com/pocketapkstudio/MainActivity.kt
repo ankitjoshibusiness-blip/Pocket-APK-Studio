@@ -1337,6 +1337,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
             return
         }
 
+        val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        if (buildPrefs.getBoolean("build_running", false)) {
+            status.text = "A build is already running. Wait for its result before starting another build."
+            Toast.makeText(this, "A build is already running.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        discardPendingBuildOutput()
+
         buildProgress.visibility = View.VISIBLE
         buildProgress.isIndeterminate = true
         percentText.text = "BUILD RUNNING"
@@ -1346,7 +1354,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
         logs.text = "Preparing project…"
         runtimePreviewHint.visibility = View.GONE
         runPreviewButton.visibility = View.GONE
-        val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
         buildPrefs.edit()
             .putBoolean("runtime_preview_requested", runtimePreview)
             .putBoolean("build_running", true)
@@ -1368,20 +1375,31 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .putString("last_build_status", "Copying project ZIP to shared Downloads…")
                     .putString("last_build_log", "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio.")
                     .apply()
-                val fileName = withContext(Dispatchers.IO) {
-                    copyZipToDownloads(source).also { copyBuildEngineToDownloads() }
+                val prepared = withContext(Dispatchers.IO) {
+                    val zipName = copyZipToDownloads(source)
+                    try {
+                        copyBuildEngineToDownloads()
+                        val outputName = createBuildOutput()
+                        zipName to outputName
+                    } catch (error: Exception) {
+                        discardPendingBuildOutput()
+                        throw error
+                    }
                 }
+                val fileName = prepared.first
+                val outputName = prepared.second
                 importedZipName = fileName
-                val copied = "Project ZIP copied: $fileName\nBuild engine copied to shared Downloads.\nStarting Termux build service…"
+                val copied = "Project ZIP copied: $fileName\nBuild engine copied to shared Downloads.\nAPK output reserved: $outputName\nStarting Termux build service…"
                 status.text = "Starting Termux build…"
                 logs.text = copied
                 buildPrefs.edit()
                     .putString("last_build_status", "Starting Termux build…")
                     .putString("last_build_log", copied)
                     .apply()
-                launchTermuxBuild(fileName)
+                launchTermuxBuild(fileName, outputName)
             } catch (e: Exception) {
-                val message = "Could not prepare the project ZIP or build engine: ${e.message ?: "storage error"}"
+                discardPendingBuildOutput()
+                val message = "Could not prepare the project ZIP, build engine or APK output: ${e.message ?: "storage error"}"
                 getSharedPreferences("build_state", MODE_PRIVATE).edit()
                     .putBoolean("build_running", false)
                     .putString("last_build_status", message)
@@ -1525,6 +1543,45 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private fun createBuildOutput(): String {
+        check(Build.VERSION.SDK_INT >= 29) {
+            "Automatic APK output registration requires Android 10 or newer."
+        }
+        val displayName = "PocketAPKStudio-${System.currentTimeMillis()}.apk"
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Builds/"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: error("Could not reserve an APK output file in Downloads/PocketAPKStudio/Builds")
+        try {
+            contentResolver.openOutputStream(uri)?.use { }
+                ?: error("Could not initialize the reserved APK output file")
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("pending_build_apk_uri", uri.toString())
+                .putString("pending_build_apk_name", displayName)
+                .apply()
+        } catch (error: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw error
+        }
+        return displayName
+    }
+
+    private fun discardPendingBuildOutput() {
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val uriText = prefs.getString("pending_build_apk_uri", null)
+        if (!uriText.isNullOrBlank()) {
+            runCatching { contentResolver.delete(Uri.parse(uriText), null, null) }
+        }
+        prefs.edit()
+            .remove("pending_build_apk_uri")
+            .remove("pending_build_apk_name")
+            .apply()
+    }
+
     private fun queryDisplayName(uri: Uri): String? {
         contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) return cursor.getString(0)
@@ -1532,14 +1589,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
         return null
     }
 
-    private fun launchTermuxBuild(zipName: String) {
+    private fun launchTermuxBuild(zipName: String, outputName: String) {
         require(Regex("""^project-[0-9]+-[A-Za-z0-9._-]+\.[zZ][iI][pP]$""").matches(zipName)) {
             "Imported ZIP name is not safe for the Termux build command."
         }
+        require(Regex("""^PocketAPKStudio-[0-9]+\.apk$""").matches(outputName)) {
+            "Reserved APK output name is not safe for the Termux build command."
+        }
         val scriptPath = "/storage/emulated/0/Download/PocketAPKStudio/build-project.sh"
-        // Run the checked-in shell asset from shared storage. Keeping shell logic out of
-        // this Kotlin string avoids nested quoting and Kotlin string-interpolation bugs.
-        val command = "exec bash \"$scriptPath\" \"$zipName\""
+        // The APK output name refers to a MediaStore item owned by this app. The callback
+        // can read that item and materialize a private copy for install/share/preview.
+        val command = "exec bash \"$scriptPath\" \"$zipName\" \"$outputName\""
 
         val resultIntent = Intent(this, TermuxResultService::class.java)
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
@@ -1558,6 +1618,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         try {
             startService(intent)
         } catch (e: Exception) {
+            discardPendingBuildOutput()
             val message = "Could not start Termux build: " + (e.message ?: "unknown error")
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
                 .putBoolean("build_running", false)

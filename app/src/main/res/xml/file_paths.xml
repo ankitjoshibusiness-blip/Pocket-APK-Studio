@@ -3,4 +3,5 @@
     <external-path name="pocket_apk_builds" path="Download/PocketAPKStudio/Builds/" />
     <external-path name="pocket_apk_recovery" path="Download/PocketAPKStudio/Recovery/" />
     <cache-path name="editor_cache" path="." />
+    <files-path name="pocket_built_apks_private" path="built-apks/" />
 </paths>
