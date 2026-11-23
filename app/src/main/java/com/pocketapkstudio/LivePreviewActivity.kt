@@ -547,19 +547,149 @@ class LivePreviewActivity : Activity() {
         try {
             val sourceFiles = resolveComposePreviewSources(source)
             val code = sourceFiles.joinToString("\n\n") { it.readText() }
+            // Preserve source offsets while blanking strings and comments. This prevents
+            // example code inside comments or quoted text from becoming fake preview nodes.
+            fun maskKotlinStructure(sourceText: String): String {
+                val chars = sourceText.toCharArray()
+                var index = 0
+                var inString = false
+                var inRawString = false
+                var inCharacter = false
+                var escaped = false
+                var lineComment = false
+                var blockCommentDepth = 0
+                while (index < sourceText.length) {
+                    val ch = sourceText[index]
+                    when {
+                        lineComment -> {
+                            if (ch != '\n' && ch != '\r') chars[index] = ' '
+                            if (ch == '\n') lineComment = false
+                            index++
+                        }
+                        blockCommentDepth > 0 -> {
+                            when {
+                                sourceText.startsWith("/*", index) -> {
+                                    chars[index] = ' '
+                                    chars[index + 1] = ' '
+                                    blockCommentDepth++
+                                    index += 2
+                                }
+                                sourceText.startsWith("*/", index) -> {
+                                    chars[index] = ' '
+                                    chars[index + 1] = ' '
+                                    blockCommentDepth--
+                                    index += 2
+                                }
+                                else -> {
+                                    if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                    index++
+                                }
+                            }
+                        }
+                        inRawString -> {
+                            if (sourceText.startsWith("\"\"\"", index)) {
+                                chars[index] = ' '
+                                chars[index + 1] = ' '
+                                chars[index + 2] = ' '
+                                inRawString = false
+                                index += 3
+                            } else {
+                                if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                index++
+                            }
+                        }
+                        inString -> {
+                            if (escaped) {
+                                if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                escaped = false
+                                index++
+                            } else when (ch) {
+                                '\\' -> {
+                                    chars[index] = ' '
+                                    escaped = true
+                                    index++
+                                }
+                                '"' -> {
+                                    chars[index] = ' '
+                                    inString = false
+                                    index++
+                                }
+                                else -> {
+                                    if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                    index++
+                                }
+                            }
+                        }
+                        inCharacter -> {
+                            if (escaped) {
+                                if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                escaped = false
+                                index++
+                            } else when (ch) {
+                                '\\' -> {
+                                    chars[index] = ' '
+                                    escaped = true
+                                    index++
+                                }
+                                '\'' -> {
+                                    chars[index] = ' '
+                                    inCharacter = false
+                                    index++
+                                }
+                                else -> {
+                                    if (ch != '\n' && ch != '\r') chars[index] = ' '
+                                    index++
+                                }
+                            }
+                        }
+                        sourceText.startsWith("//", index) -> {
+                            chars[index] = ' '
+                            chars[index + 1] = ' '
+                            lineComment = true
+                            index += 2
+                        }
+                        sourceText.startsWith("/*", index) -> {
+                            chars[index] = ' '
+                            chars[index + 1] = ' '
+                            blockCommentDepth = 1
+                            index += 2
+                        }
+                        sourceText.startsWith("\"\"\"", index) -> {
+                            chars[index] = ' '
+                            chars[index + 1] = ' '
+                            chars[index + 2] = ' '
+                            inRawString = true
+                            index += 3
+                        }
+                        ch == '"' -> {
+                            chars[index] = ' '
+                            inString = true
+                            index++
+                        }
+                        ch == '\'' -> {
+                            chars[index] = ' '
+                            inCharacter = true
+                            index++
+                        }
+                        else -> index++
+                    }
+                }
+                return String(chars)
+            }
+            val structuralCode = maskKotlinStructure(code)
             val screen = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(16), dp(16), dp(16))
                 setBackgroundColor(0xFFF5F7FF.toInt())
             }
             val colorMap = HashMap<String, Int>()
-            Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach {
+            Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(structuralCode).forEach {
                 runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
             }
-            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(code).forEach { match ->
+            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(structuralCode).forEach { match ->
                 runCatching { colorMap[match.groupValues[1]] = android.graphics.Color.parseColor("#" + match.groupValues[2].takeLast(6)) }
             }
-            val usesDarkTheme = Regex("""darkColorScheme\s*\(""").containsMatchIn(code)
+            val usesDarkTheme = Regex("""darkColorScheme\s*\(""").containsMatchIn(structuralCode)
             val themeBackground = colorMap["background"] ?: colorMap["surface"] ?: if (usesDarkTheme) 0xFF171B24.toInt() else 0xFFF5F7FF.toInt()
             val themeOnBackground = colorMap["onSurface"] ?: if (usesDarkTheme) Color.WHITE else 0xFF263449.toInt()
             fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
@@ -612,7 +742,7 @@ class LivePreviewActivity : Activity() {
             }
             val pattern = Regex("""\b(Scaffold|Column|Row|Box|BoxWithConstraints|FlowRow|FlowColumn|LazyColumn|LazyRow|LazyVerticalGrid|LazyHorizontalGrid|Card|ElevatedCard|OutlinedCard|Surface|TopAppBar|CenterAlignedTopAppBar|SmallTopAppBar|LargeTopAppBar|BottomAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|NavigationDrawerItem|NavigationBarItem|NavigationRailItem|Text|Button|OutlinedButton|TextButton|IconButton|FilledIconButton|FilledTonalButton|ElevatedButton|FloatingActionButton|ExtendedFloatingActionButton|OutlinedTextField|TextField|BasicTextField|SearchBar|Switch|Slider|RangeSlider|Checkbox|TriStateCheckbox|RadioButton|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog|DatePicker|TimePicker|AssistChip|FilterChip|InputChip|SuggestionChip|Tab|TabRow|ListItem|Badge|HorizontalDivider|VerticalDivider|Divider)\s*\(""")
             screen.setBackgroundColor(themeBackground)
-            val matches = pattern.findAll(code).toList()
+            val matches = pattern.findAll(structuralCode).toList()
             val consumed = ArrayList<IntRange>()
             data class PreviewNode(
                 val start: Int,
@@ -632,17 +762,17 @@ class LivePreviewActivity : Activity() {
             var rendered = 0
             for (match in matches) {
                 if (consumed.any { match.range.first in it }) continue
-                val open = code.indexOf('(', match.range.first)
-                val close = findClosing(code, open, '(', ')')
+                val open = structuralCode.indexOf('(', match.range.first)
+                val close = findClosing(structuralCode, open, '(', ')')
                 if (close < 0) continue
                 val callArgs = code.substring(open + 1, close)
                 val kind = match.groupValues[1]
                 var label = firstLiteral(callArgs)
                 var endOfElement = close
                 if (kind in buttonKinds) {
-                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    val lambdaStart = structuralCode.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
-                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        val lambdaEnd = findClosing(structuralCode, lambdaStart, '{', '}')
                         if (lambdaEnd > lambdaStart) {
                             val body = code.substring(lambdaStart, lambdaEnd + 1)
                             val textLabel = Regex("""Text\s*\(\s*"""").find(body)
@@ -672,9 +802,9 @@ class LivePreviewActivity : Activity() {
                     "Tab", "TabRow", "ListItem", "Badge", "BottomAppBar"
                 )
                 if (kind == "DropdownMenu") {
-                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    val lambdaStart = structuralCode.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
-                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        val lambdaEnd = findClosing(structuralCode, lambdaStart, '{', '}')
                         if (lambdaEnd > lambdaStart) endOfElement = lambdaEnd
                     }
                 }
@@ -682,9 +812,9 @@ class LivePreviewActivity : Activity() {
                     consumed.add(match.range.first..endOfElement)
                 }
                 if (isContainer) {
-                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    val lambdaStart = structuralCode.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
-                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        val lambdaEnd = findClosing(structuralCode, lambdaStart, '{', '}')
                         if (lambdaEnd > lambdaStart) endOfElement = lambdaEnd
                     }
                 }
@@ -772,9 +902,9 @@ class LivePreviewActivity : Activity() {
                         isAllCaps = false
                         setOnClickListener { anchor ->
                             val popup = PopupMenu(this@LivePreviewActivity, anchor)
-                            val menuLambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                            val menuLambdaStart = structuralCode.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                             val menuLambdaBody = menuLambdaStart?.let { start ->
-                                val menuLambdaEnd = findClosing(code, start, '{', '}')
+                                val menuLambdaEnd = findClosing(structuralCode, start, '{', '}')
                                 if (menuLambdaEnd > start) code.substring(start + 1, menuLambdaEnd) else ""
                             } ?: ""
                             val optionNames = Regex("""Text\s*\(\s*"([^"]+)"""").findAll(menuLambdaBody).map { it.groupValues[1] }.distinct().take(12).toList()
