@@ -46,6 +46,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var buildProgress: ProgressBar
     private lateinit var percentText: TextView
     private lateinit var logs: TextView
+    private var buildLogScroll: ScrollView? = null
     private lateinit var installButton: Button
     private lateinit var shareButton: Button
     private lateinit var runtimePreviewHint: TextView
@@ -811,9 +812,9 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF0B0E15.toInt()); cornerRadius = dp(10).toFloat() }
         }
-        val logScroll = ScrollView(this).apply { layoutParams = LinearLayout.LayoutParams(-1, dp(180)) }
-        logScroll.addView(logs)
-        logCard.addView(logScroll)
+        buildLogScroll = ScrollView(this).apply { layoutParams = LinearLayout.LayoutParams(-1, dp(180)) }
+        buildLogScroll?.addView(logs)
+        buildLogScroll?.let { logCard.addView(it) }
         logCard.addView(space(6))
         logCard.addView(actionButton("Copy build logs") {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -1445,6 +1446,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             if (text.isNotBlank()) {
                 val visible = text.takeLast(40000)
                 logs.text = visible
+                buildLogScroll?.post { buildLogScroll?.fullScroll(View.FOCUS_DOWN) }
                 prefs.edit().putString("last_build_log", visible).apply()
             }
         } catch (_: Exception) {
