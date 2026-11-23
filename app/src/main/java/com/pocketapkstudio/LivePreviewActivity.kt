@@ -708,9 +708,48 @@ class LivePreviewActivity : Activity() {
                 }
                 return -1
             }
+            val stringResources = HashMap<String, String>()
+            projectRoot.walkTopDown().maxDepth(10)
+                .filter { file ->
+                    file.isFile && file.name.equals("strings.xml", true) &&
+                        file.parentFile?.name?.startsWith("values") == true
+                }
+                .take(50)
+                .forEach { resourceFile ->
+                    runCatching {
+                        val parser = Xml.newPullParser()
+                        resourceFile.inputStream().use { input ->
+                            parser.setInput(input, "UTF-8")
+                            var currentName: String? = null
+                            val value = StringBuilder()
+                            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+                                when (parser.eventType) {
+                                    XmlPullParser.START_TAG -> if (parser.name == "string") {
+                                        currentName = parser.getAttributeValue(null, "name")
+                                        value.setLength(0)
+                                    }
+                                    XmlPullParser.TEXT, XmlPullParser.CDSECT ->
+                                        if (currentName != null) value.append(parser.text)
+                                    XmlPullParser.END_TAG -> if (parser.name == "string" && currentName != null) {
+                                        if (!stringResources.containsKey(currentName)) {
+                                            stringResources[currentName!!] = value.toString().trim()
+                                        }
+                                        currentName = null
+                                    }
+                                }
+                                parser.next()
+                            }
+                        }
+                    }
+                }
             fun firstLiteral(text: String): String? =
                 Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
                     ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
+            fun firstPreviewText(text: String): String? {
+                firstLiteral(text)?.let { return it }
+                val resourceName = Regex("""R\.string\.(\w+)""").find(text)?.groupValues?.get(1) ?: return null
+                return stringResources[resourceName]
+            }
             fun iconGlyph(iconName: String?): String = when (iconName?.lowercase()) {
                 "home" -> "⌂"
                 "search" -> "⌕"
@@ -767,7 +806,7 @@ class LivePreviewActivity : Activity() {
                 if (close < 0) continue
                 val callArgs = code.substring(open + 1, close)
                 val kind = match.groupValues[1]
-                var label = firstLiteral(callArgs)
+                var label = firstPreviewText(callArgs)
                 var endOfElement = close
                 if (kind in buttonKinds) {
                     val lambdaStart = structuralCode.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
@@ -776,7 +815,7 @@ class LivePreviewActivity : Activity() {
                         if (lambdaEnd > lambdaStart) {
                             val body = code.substring(lambdaStart, lambdaEnd + 1)
                             val textLabel = Regex("""Text\s*\(\s*"""").find(body)
-                                ?.let { firstLiteral(body.substring(it.range.first)) }
+                                ?.let { firstPreviewText(body.substring(it.range.first)) }
                             val iconName = Regex("""Icons\.(?:(?:AutoMirrored\.)?(?:Default|Filled|Outlined|Rounded|Sharp|TwoTone))\.(\w+)""")
                                 .find(body)?.groupValues?.get(1)
                             label = textLabel ?: label ?: iconGlyph(iconName)
@@ -790,7 +829,7 @@ class LivePreviewActivity : Activity() {
                 }
                 if (kind in setOf("OutlinedTextField", "TextField")) {
                     val labelBlock = Regex("""(?:label|placeholder)\s*=\s*\{\s*Text\s*\(""").find(callArgs)
-                    if (labelBlock != null) label = firstLiteral(callArgs.substring(labelBlock.range.last + 1)) ?: label
+                    if (labelBlock != null) label = firstPreviewText(callArgs.substring(labelBlock.range.last + 1)) ?: label
                 }
                 val isContainer = kind in setOf(
                     "Scaffold", "Column", "Row", "Box", "BoxWithConstraints", "FlowRow", "FlowColumn",
