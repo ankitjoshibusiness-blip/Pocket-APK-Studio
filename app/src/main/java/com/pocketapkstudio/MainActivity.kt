@@ -1451,7 +1451,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         runCatching {
             val stamp = android.text.format.DateFormat.format("HH:mm:ss.SSS", System.currentTimeMillis())
             contentResolver.openOutputStream(Uri.parse(uriText), "wa")?.use { output ->
-                output.write("[$stamp] $message\\n".toByteArray(Charsets.UTF_8))
+                output.write("[$stamp] $message\n".toByteArray(Charsets.UTF_8))
                 output.flush()
             } ?: error("Could not append to live build log")
         }
@@ -1529,7 +1529,21 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 requireNotNull(input) { "Cannot read selected ZIP" }
                 contentResolver.openOutputStream(outputUri).use { output ->
                     requireNotNull(output) { "Cannot write ZIP to Downloads" }
-                    input.copyTo(output)
+                    val buffer = ByteArray(64 * 1024)
+                    var copiedBytes = 0L
+                    var lastReportedBytes = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        copiedBytes += count
+                        if (copiedBytes - lastReportedBytes >= 4L * 1024L * 1024L) {
+                            appendBuildLiveLog("APP I/O: Project ZIP read/written: ${copiedBytes / (1024 * 1024)} MB")
+                            lastReportedBytes = copiedBytes
+                        }
+                    }
+                    output.flush()
+                    appendBuildLiveLog("APP I/O: Project ZIP copy finished; $copiedBytes bytes read and written.")
                 }
             }
         } catch (e: Exception) {
