@@ -187,7 +187,10 @@ pas_find_apks() {
         [[ -s "$apk_file" ]] && PAS_APK_FILES+=("$apk_file")
     done < <(
         find "$project_root" -type d -name .gradle -prune -o \
-            -type f -path '*/build/outputs/apk/debug/*.apk' -print0 2>/dev/null
+            -type f \\( \
+                -path '*/build/outputs/apk/debug/*.apk' -o \
+                -path '*/build/outputs/apk/*/debug/*.apk' \
+            \\) -print0 2>/dev/null
     )
     return 0
 }
@@ -217,7 +220,13 @@ pas_run_self_tests() (
     local kts_file
     local groovy_file
     local fake_apk
+    local flavored_apk
+    local release_apk
     local output_apk
+    local discovered_apk
+    local found_direct
+    local found_flavored
+    local found_release
     local digest
     local test_count=0
 
@@ -378,13 +387,29 @@ PAS_TEST_GROOVY
     fi
 
     fake_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/debug/app-debug.apk"
-    mkdir -p "$(dirname "$fake_apk")"
+    flavored_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/free/debug/app-free-debug.apk"
+    release_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/free/release/app-free-release.apk"
+    mkdir -p "$(dirname "$fake_apk")" "$(dirname "$flavored_apk")" "$(dirname "$release_apk")"
     printf 'fake-apk-content' > "$fake_apk"
+    printf 'flavored-apk-content' > "$flavored_apk"
+    printf 'release-apk-content' > "$release_apk"
     pas_find_apks "$test_root/Android Project With Spaces"
-    if [[ "${#PAS_APK_FILES[@]}" -eq 1 ]] && [[ "${PAS_APK_FILES[0]}" == "$fake_apk" ]]; then
-        test_pass "debug APK discovery supports paths containing spaces"
+    found_direct=0
+    found_flavored=0
+    found_release=0
+    for discovered_apk in "${PAS_APK_FILES[@]}"; do
+        [[ "$discovered_apk" == "$fake_apk" ]] && found_direct=1
+        [[ "$discovered_apk" == "$flavored_apk" ]] && found_flavored=1
+        [[ "$discovered_apk" == "$release_apk" ]] && found_release=1
+    done
+    if [[ "${#PAS_APK_FILES[@]}" -eq 2 ]] &&
+        [[ "$found_direct" -eq 1 ]] &&
+        [[ "$found_flavored" -eq 1 ]] &&
+        [[ "$found_release" -eq 0 ]]; then
+        test_pass "debug APK discovery includes product-flavor builds, excludes release builds and supports paths with spaces"
     else
-        printf 'FAIL: debug APK discovery returned %s candidates\n' "${#PAS_APK_FILES[@]}" >&2
+        printf 'FAIL: APK discovery returned %s candidates (direct=%s flavored=%s release=%s)\\n' \
+            "${#PAS_APK_FILES[@]}" "$found_direct" "$found_flavored" "$found_release" >&2
         return 1
     fi
 
@@ -603,7 +628,7 @@ pas_ubuntu_main() {
     apk=""
     for candidate in "${PAS_APK_FILES[@]}"; do
         case "$candidate" in
-            "$gradle_root"/app/build/outputs/apk/debug/*.apk)
+            "$gradle_root"/app/build/outputs/apk/debug/*.apk|"$gradle_root"/app/build/outputs/apk/*/debug/*.apk)
                 apk="$candidate"
                 break
                 ;;
