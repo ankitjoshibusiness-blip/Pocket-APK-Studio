@@ -187,10 +187,10 @@ pas_find_apks() {
         [[ -s "$apk_file" ]] && PAS_APK_FILES+=("$apk_file")
     done < <(
         find "$project_root" -type d -name .gradle -prune -o \
-            -type f \\( \
+            -type f \( \
                 -path '*/build/outputs/apk/debug/*.apk' -o \
                 -path '*/build/outputs/apk/*/debug/*.apk' \
-            \\) -print0 2>/dev/null
+            \) -print0 2>/dev/null
     )
     return 0
 }
