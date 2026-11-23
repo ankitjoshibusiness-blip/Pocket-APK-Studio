@@ -101,6 +101,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private var projectIsGradle = false
     private var projectIsFlutter = false
     private var navigateToWorkflow: (() -> Unit)? = null
+    private var pendingRuntimePreviewPackage: String? = null
     private val buildResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
@@ -134,6 +135,47 @@ class MainActivity : androidx.activity.ComponentActivity() {
             if (::runtimePreviewHint.isInitialized) runtimePreviewHint.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
             if (::runPreviewButton.isInitialized) runPreviewButton.visibility = if (showRuntimePreview) View.VISIBLE else View.GONE
             if (available) loadApkPreview(apk!!)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumePendingRuntimePreview()
+    }
+
+    private fun resumePendingRuntimePreview() {
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        val targetPackage = prefs.getString("pending_runtime_preview_package", null) ?: return
+        val expectedHash = prefs.getString("pending_runtime_preview_sha256", null)
+        val installedPath = try {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(targetPackage, 0).applicationInfo?.sourceDir
+        } catch (_: Exception) {
+            null
+        }
+        val installedMatches = installedPath != null && expectedHash != null &&
+            runCatching { sha256(File(installedPath)) == expectedHash }.getOrDefault(false)
+        prefs.edit()
+            .remove("pending_runtime_preview_package")
+            .remove("pending_runtime_preview_sha256")
+            .apply()
+        if (!installedMatches) {
+            if (::status.isInitialized) status.text =
+                "Installation was not completed. Tap Run Exact Device Preview to try again."
+            return
+        }
+        val launchIntent = packageManager.getLaunchIntentForPackage(targetPackage)
+        if (launchIntent == null) {
+            if (::status.isInitialized) status.text =
+                "APK installed, but no launcher activity was found in its AndroidManifest.xml."
+            return
+        }
+        try {
+            if (::status.isInitialized) status.text = "Latest APK installed. Launching its real Android app…"
+            startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (error: Exception) {
+            if (::status.isInitialized) status.text =
+                "APK installed, but launch failed: ${error.message ?: error.javaClass.simpleName}"
         }
     }
 
@@ -1731,8 +1773,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val installedMatches = installedApkPath != null &&
             runCatching { sha256(File(installedApkPath)) == sha256(apk) }.getOrDefault(false)
         if (!installedMatches) {
-            status.text = "The latest build is not installed. Opening Android's installer…"
-            Toast.makeText(this, "Install this build, then return and tap Run Exact Device Preview.", Toast.LENGTH_LONG).show()
+            status.text = "Opening Android installer. After installation, Pocket APK Studio will launch the real app automatically…"
+            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+                .putString("pending_runtime_preview_package", targetPackage)
+                .putString("pending_runtime_preview_sha256", sha256(apk))
+                .apply()
+            Toast.makeText(this, "Install the APK. The real app will open automatically when you return.", Toast.LENGTH_LONG).show()
             installBuiltApk()
             return
         }
