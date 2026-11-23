@@ -47,6 +47,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private lateinit var percentText: TextView
     private lateinit var logs: TextView
     private var buildLogScroll: ScrollView? = null
+    private var buildLogAutoFollow = true
+    private var lastRenderedBuildLog = ""
     private lateinit var installButton: Button
     private lateinit var shareButton: Button
     private lateinit var runtimePreviewHint: TextView
@@ -809,7 +811,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF0B0E15.toInt()); cornerRadius = dp(10).toFloat() }
         }
-        buildLogScroll = ScrollView(this).apply { layoutParams = LinearLayout.LayoutParams(-1, dp(180)) }
+        buildLogScroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, dp(180))
+            isFillViewport = false
+            setOnScrollChangeListener { view, _, scrollY, _, _ ->
+                val scroll = view as ScrollView
+                val content = scroll.getChildAt(0)
+                buildLogAutoFollow = content == null ||
+                    content.bottom - (scrollY + scroll.height) <= dp(24)
+            }
+        }
         buildLogScroll?.addView(logs)
         buildLogScroll?.let { logCard.addView(it) }
         logCard.addView(space(6))
@@ -1466,9 +1477,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (text.isNotBlank()) {
                 val visible = text.takeLast(40000)
-                logs.text = visible
-                buildLogScroll?.post { buildLogScroll?.fullScroll(View.FOCUS_DOWN) }
-                prefs.edit().putString("last_build_log", visible).apply()
+                // Do not reset TextView layout/scroll position on every 500 ms poll.
+                // Follow new output only when the user was already at the bottom.
+                if (visible != lastRenderedBuildLog) {
+                    val followNewOutput = buildLogAutoFollow
+                    logs.text = visible
+                    lastRenderedBuildLog = visible
+                    if (followNewOutput) {
+                        buildLogScroll?.post { buildLogScroll?.fullScroll(View.FOCUS_DOWN) }
+                    }
+                    prefs.edit().putString("last_build_log", visible).apply()
+                }
             }
         } catch (_: Exception) {
             // Final Termux callback still supplies stdout/stderr if live access is unavailable.
