@@ -466,7 +466,15 @@ class LivePreviewActivity : Activity() {
             screen.setBackgroundColor(themeBackground)
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
-            data class PreviewNode(val start: Int, val end: Int, val view: View, val params: LinearLayout.LayoutParams, val container: Boolean, val args: String)
+            data class PreviewNode(
+                val start: Int,
+                val end: Int,
+                val view: View,
+                val params: LinearLayout.LayoutParams,
+                val container: Boolean,
+                val args: String,
+                val kind: String
+            )
             val previewNodes = ArrayList<PreviewNode>()
             var rendered = 0
             for (match in matches) {
@@ -616,20 +624,41 @@ class LivePreviewActivity : Activity() {
                         hint = label ?: "Enter text"
                         contentDescription = label ?: "Preview text field"
                         textSize = 16f
-                        setSingleLine(true)
+                        val singleLine = kind == "SearchBar" ||
+                            Regex("""singleLine\s*=\s*true""").containsMatchIn(callArgs)
+                        setSingleLine(singleLine)
+                        if (!singleLine) {
+                            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                            minLines = 2
+                            maxLines = Regex("""maxLines\s*=\s*(\d+)""").find(callArgs)
+                                ?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(2, 8) ?: 4
+                            gravity = Gravity.TOP or Gravity.START
+                        }
                     }
                     "Switch" -> Switch(this).apply {
                         text = label ?: "Toggle"
                         contentDescription = label ?: "Preview switch"
+                        isChecked = Regex("""checked\s*=\s*true""").containsMatchIn(callArgs)
                     }
                     "Checkbox", "TriStateCheckbox" -> CheckBox(this).apply {
                         text = label ?: "Check"
                         contentDescription = label ?: "Preview checkbox"
+                        isChecked = Regex("""checked\s*=\s*true""").containsMatchIn(callArgs)
                     }
                     "Slider", "RangeSlider" -> SeekBar(this).apply {
-                        contentDescription = label ?: "Preview slider"
+                        contentDescription = label ?: if (kind == "RangeSlider") "Preview range slider (single-thumb approximation)" else "Preview slider"
                         max = 100
-                        progress = 50
+                        val value = Regex("""(?:^|[,\s])value\s*=\s*(-?\d+(?:\.\d+)?)f?""")
+                            .find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()
+                        val range = Regex("""valueRange\s*=\s*(-?\d+(?:\.\d+)?)f?\s*\.\.\s*(-?\d+(?:\.\d+)?)f?""")
+                            .find(callArgs)
+                        progress = if (value != null && range != null) {
+                            val lower = range.groupValues[1].toFloatOrNull() ?: 0f
+                            val upper = range.groupValues[2].toFloatOrNull() ?: 1f
+                            if (upper > lower) (((value - lower) / (upper - lower)) * 100f).toInt().coerceIn(0, 100) else 50
+                        } else if (value != null && value in 0f..1f) (value * 100f).toInt() else 50
                     }
                     "Card", "ElevatedCard", "OutlinedCard", "Surface", "ListItem", "NavigationDrawerItem", "NavigationBarItem", "Tab", "Badge" -> TextView(this).apply {
                         text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
@@ -637,10 +666,48 @@ class LivePreviewActivity : Activity() {
                         setTextColor(0xFF263449.toInt())
                         setPadding(dp(12), dp(12), dp(12), dp(12))
                         setBackgroundColor(0xFFE8ECF7.toInt())
+                        if (kind in setOf("NavigationDrawerItem", "NavigationBarItem", "Tab")) {
+                            isClickable = true
+                            isFocusable = true
+                        }
                     }
                     "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
-                    "RadioButton" -> RadioButton(this).apply { contentDescription = label ?: "Radio option" }
-                    "DatePicker", "TimePicker" -> TextView(this).apply { text = label ?: kind; setPadding(dp(12), dp(12), dp(12), dp(12)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "RadioButton" -> RadioButton(this).apply {
+                        contentDescription = label ?: "Radio option"
+                        isChecked = Regex("""(?:selected|checked)\s*=\s*true""").containsMatchIn(callArgs)
+                    }
+                    "DatePicker" -> Button(this).apply {
+                        text = label ?: "Choose date"
+                        isAllCaps = false
+                        setOnClickListener {
+                            val calendar = java.util.Calendar.getInstance()
+                            android.app.DatePickerDialog(
+                                this@LivePreviewActivity,
+                                { _, year, month, day ->
+                                    text = String.format(java.util.Locale.getDefault(), "%02d/%02d/%04d", day, month + 1, year)
+                                },
+                                calendar.get(java.util.Calendar.YEAR),
+                                calendar.get(java.util.Calendar.MONTH),
+                                calendar.get(java.util.Calendar.DAY_OF_MONTH)
+                            ).show()
+                        }
+                    }
+                    "TimePicker" -> Button(this).apply {
+                        text = label ?: "Choose time"
+                        isAllCaps = false
+                        setOnClickListener {
+                            val calendar = java.util.Calendar.getInstance()
+                            android.app.TimePickerDialog(
+                                this@LivePreviewActivity,
+                                { _, hour, minute ->
+                                    text = String.format(java.util.Locale.getDefault(), "%02d:%02d", hour, minute)
+                                },
+                                calendar.get(java.util.Calendar.HOUR_OF_DAY),
+                                calendar.get(java.util.Calendar.MINUTE),
+                                android.text.format.DateFormat.is24HourFormat(this@LivePreviewActivity)
+                            ).show()
+                        }
+                    }
                     "HorizontalDivider", "VerticalDivider", "Divider" -> View(this).apply { setBackgroundColor(0xFFCBD5E1.toInt()); minimumHeight = dp(1) }
                     else -> null
                 }
@@ -791,7 +858,7 @@ class LivePreviewActivity : Activity() {
                         }
                     }
                     if (callArgs.contains("enabled = false") && view.isEnabled) view.isEnabled = false
-                    previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer, callArgs))
+                    previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer, callArgs, kind))
                     rendered++
                 }
             }
@@ -828,6 +895,35 @@ class LivePreviewActivity : Activity() {
                     parent.addView(node.view, node.params)
                 } else {
                     screen.addView(node.view, node.params)
+                }
+                if (node.kind in setOf("Tab", "NavigationBarItem", "NavigationDrawerItem")) {
+                    val selectionTag = "compose-preview-selection-" + node.kind
+                    node.view.tag = selectionTag
+                    val initiallySelected = Regex("""selected\s*=\s*true""").containsMatchIn(node.args)
+                    fun applySelectionState(target: View, selected: Boolean) {
+                        if (target is TextView) {
+                            target.setTextColor(if (selected) 0xFF1D4ED8.toInt() else 0xFF263449.toInt())
+                            target.background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(if (selected) 0xFFDCE7FF.toInt() else 0xFFE8ECF7.toInt())
+                                cornerRadius = dp(9).toFloat()
+                            }
+                        }
+                        target.isSelected = selected
+                    }
+                    applySelectionState(node.view, initiallySelected)
+                    node.view.setOnClickListener {
+                        if (parent is ViewGroup) {
+                            for (childIndex in 0 until parent.childCount) {
+                                val sibling = parent.getChildAt(childIndex)
+                                if (sibling !== node.view && sibling.tag == selectionTag) {
+                                    applySelectionState(sibling, false)
+                                }
+                            }
+                        }
+                        applySelectionState(node.view, true)
+                        Toast.makeText(this@LivePreviewActivity, "Selected: " +
+                            ((node.view as? TextView)?.text ?: node.kind), Toast.LENGTH_SHORT).show()
+                    }
                 }
                 attached.add(index)
             }
