@@ -454,7 +454,9 @@ pas_ubuntu_main() {
     local candidate
     local -a build_files=()
 
-    trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\n" "$rc"' EXIT
+    trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\\n" "$rc"' EXIT
+    export PS4='+[${EPOCHREALTIME}] ${BASH_SOURCE##*/}:${LINENO}: '
+    set -x
 
     case "$zip_name" in
         ""|*/*|*[!A-Za-z0-9._-]*)
@@ -601,10 +603,10 @@ pas_ubuntu_main() {
     if [[ -n "$wrapper" ]]; then
         chmod +x "$wrapper" || pas_fail 40 "Could not make the Gradle wrapper executable: $wrapper"
         pas_log "GRADLE_LAUNCHER=$wrapper"
-        "$wrapper" -p "$gradle_root" --no-daemon --max-workers=2 --console=plain assembleDebug
+        "$wrapper" -p "$gradle_root" --no-daemon --max-workers=2 --console=plain --info assembleDebug
     elif pas_require_command gradle; then
         pas_log "GRADLE_LAUNCHER=$(command -v gradle)"
-        gradle --no-daemon --max-workers=2 --console=plain -p "$gradle_root" assembleDebug
+        gradle --no-daemon --max-workers=2 --console=plain --info -p "$gradle_root" assembleDebug
     else
         pas_fail 12 "No gradlew wrapper was found under the imported project and Gradle is not installed in Ubuntu."
     fi
@@ -658,6 +660,8 @@ pas_termux_main() {
     mkdir -p "$build_dir" || pas_fail 20 "Could not create Downloads/PocketAPKStudio."
     : > "$live_log" || pas_fail 20 "Could not create the live build log: $live_log"
     exec > >(tee -a "$live_log") 2>&1
+    export PS4='+[${EPOCHREALTIME}] ${BASH_SOURCE##*/}:${LINENO}: '
+    set -x
 
     pas_log "Pocket APK Studio: local Android build started"
     pas_log "TERMUX_VERSION=${TERMUX_VERSION:-unknown}"
