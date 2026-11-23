@@ -423,7 +423,7 @@ class LivePreviewActivity : Activity() {
             fun firstLiteral(text: String): String? =
                 Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
                     ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
-            val pattern = Regex("""\b(Scaffold|Column|Row|Box|LazyColumn|LazyRow|Card|Surface|TopAppBar|CenterAlignedTopAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|Text|Button|OutlinedButton|TextButton|IconButton|OutlinedTextField|TextField|Switch|Slider|Checkbox|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog)\s*\(""")
+            val pattern = Regex("""\b(Scaffold|Column|Row|Box|BoxWithConstraints|FlowRow|FlowColumn|LazyColumn|LazyRow|LazyVerticalGrid|LazyHorizontalGrid|Card|ElevatedCard|OutlinedCard|Surface|TopAppBar|CenterAlignedTopAppBar|SmallTopAppBar|LargeTopAppBar|BottomAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|NavigationDrawerItem|NavigationBarItem|Text|Button|OutlinedButton|TextButton|IconButton|FilledIconButton|FilledTonalButton|ElevatedButton|FloatingActionButton|ExtendedFloatingActionButton|OutlinedTextField|TextField|BasicTextField|SearchBar|Switch|Slider|RangeSlider|Checkbox|TriStateCheckbox|RadioButton|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog|DatePicker|TimePicker|AssistChip|FilterChip|InputChip|SuggestionChip|Tab|TabRow|ListItem|Badge|HorizontalDivider|VerticalDivider|Divider)\s*\(""")
             screen.setBackgroundColor(themeBackground)
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
@@ -454,8 +454,8 @@ class LivePreviewActivity : Activity() {
                     val labelBlock = Regex("""(?:label|placeholder)\s*=\s*\{\s*Text\s*\(""").find(callArgs)
                     if (labelBlock != null) label = firstLiteral(callArgs.substring(labelBlock.range.last + 1)) ?: label
                 }
-                val isContainer = kind in setOf("Scaffold", "Column", "Row", "Box", "LazyColumn", "LazyRow", "Card", "Surface", "NavigationBar", "NavigationRail", "NavigationDrawer", "ModalNavigationDrawer")
-                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton")) consumed.add(match.range.first..endOfElement)
+                val isContainer = kind in setOf("Scaffold", "Column", "Row", "Box", "BoxWithConstraints", "FlowRow", "FlowColumn", "LazyColumn", "LazyRow", "LazyVerticalGrid", "LazyHorizontalGrid", "Card", "ElevatedCard", "OutlinedCard", "Surface", "NavigationBar", "NavigationRail", "NavigationDrawer", "ModalNavigationDrawer", "TabRow", "BottomAppBar")
+                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton", "FilledIconButton", "FilledTonalButton", "ElevatedButton", "FloatingActionButton", "ExtendedFloatingActionButton", "AssistChip", "FilterChip", "InputChip", "SuggestionChip")) consumed.add(match.range.first..endOfElement)
                 if (isContainer) {
                     val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
@@ -464,8 +464,8 @@ class LivePreviewActivity : Activity() {
                     }
                 }
                 val view: View? = when (kind) {
-                    "Scaffold", "Column", "LazyColumn", "NavigationDrawer", "ModalNavigationDrawer", "Card", "Surface" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(if (kind == "Card" || kind == "Surface") 0xFFE8ECF7.toInt() else 0xFFF5F7FF.toInt()) }
-                    "Row", "LazyRow", "NavigationBar", "NavigationRail" -> LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
+                    "Scaffold", "Column", "LazyColumn", "LazyVerticalGrid", "NavigationDrawer", "ModalNavigationDrawer", "Card", "ElevatedCard", "OutlinedCard", "Surface", "TabRow" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(if (kind == "Card" || kind == "Surface") 0xFFE8ECF7.toInt() else 0xFFF5F7FF.toInt()) }
+                    "Row", "LazyRow", "LazyHorizontalGrid", "FlowRow", "FlowColumn", "NavigationBar", "NavigationRail", "BottomAppBar" -> LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "Box" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "TopAppBar", "CenterAlignedTopAppBar" -> TextView(this).apply { text = label ?: "App Bar"; textSize = 18f; setTextColor(0xFF263449.toInt()); setPadding(dp(12), dp(14), dp(12), dp(14)); setBackgroundColor(0xFFE8ECF7.toInt()) }
                     "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
@@ -559,7 +559,7 @@ class LivePreviewActivity : Activity() {
                             setPadding(0, dp(5), 0, dp(5))
                         }
                     }
-                    "Button", "OutlinedButton", "TextButton", "IconButton" -> label?.let { textValue ->
+                    "Button", "OutlinedButton", "TextButton", "IconButton", "FilledIconButton", "FilledTonalButton", "ElevatedButton", "FloatingActionButton", "ExtendedFloatingActionButton", "AssistChip", "FilterChip", "InputChip", "SuggestionChip" -> label?.let { textValue ->
                         Button(this).apply {
                             text = textValue
                             isAllCaps = false
@@ -573,7 +573,7 @@ class LivePreviewActivity : Activity() {
                             }
                         }
                     }
-                    "OutlinedTextField", "TextField" -> EditText(this).apply {
+                    "OutlinedTextField", "TextField", "BasicTextField", "SearchBar" -> EditText(this).apply {
                         hint = label ?: "Enter text"
                         contentDescription = label ?: "Preview text field"
                         textSize = 16f
@@ -583,16 +583,16 @@ class LivePreviewActivity : Activity() {
                         text = label ?: "Toggle"
                         contentDescription = label ?: "Preview switch"
                     }
-                    "Checkbox" -> CheckBox(this).apply {
+                    "Checkbox", "TriStateCheckbox" -> CheckBox(this).apply {
                         text = label ?: "Check"
                         contentDescription = label ?: "Preview checkbox"
                     }
-                    "Slider" -> SeekBar(this).apply {
+                    "Slider", "RangeSlider" -> SeekBar(this).apply {
                         contentDescription = label ?: "Preview slider"
                         max = 100
                         progress = 50
                     }
-                    "Card", "Surface" -> TextView(this).apply {
+                    "Card", "ElevatedCard", "OutlinedCard", "Surface", "ListItem", "NavigationDrawerItem", "NavigationBarItem", "Tab", "Badge" -> TextView(this).apply {
                         text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
                         textSize = 14f
                         setTextColor(0xFF263449.toInt())
@@ -600,6 +600,9 @@ class LivePreviewActivity : Activity() {
                         setBackgroundColor(0xFFE8ECF7.toInt())
                     }
                     "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
+                    "RadioButton" -> RadioButton(this).apply { contentDescription = label ?: "Radio option" }
+                    "DatePicker", "TimePicker" -> TextView(this).apply { text = label ?: kind; setPadding(dp(12), dp(12), dp(12), dp(12)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "HorizontalDivider", "VerticalDivider", "Divider" -> View(this).apply { setBackgroundColor(0xFFCBD5E1.toInt()); minimumHeight = dp(1) }
                     else -> null
                 }
                 if (view != null) {
@@ -631,7 +634,7 @@ class LivePreviewActivity : Activity() {
                     if (callArgs.contains("fillMaxHeight()")) lp.height = -1
                     Regex("""weight\s*\(\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { lp.weight = it }
                     if (isContainer && view is LinearLayout) {
-                        if (kind == "Row" || kind == "LazyRow" || kind == "NavigationBar" || kind == "NavigationRail") {
+                        if (kind == "Row" || kind == "LazyRow" || kind == "LazyHorizontalGrid" || kind == "FlowRow" || kind == "NavigationBar" || kind == "NavigationRail" || kind == "BottomAppBar") {
                             view.gravity = when {
                                 callArgs.contains("Arrangement.Center") -> Gravity.CENTER
                                 callArgs.contains("Arrangement.End") -> Gravity.END or Gravity.CENTER_VERTICAL
@@ -663,6 +666,23 @@ class LivePreviewActivity : Activity() {
                         val maxLines = Regex("""maxLines\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
                         if (maxLines != null) view.maxLines = maxLines
                     }
+                    // Apply common Compose dimensions, typography, colors and shape modifiers.
+                    Regex("""fontSize\\s*=\\s*(\\d+(?:\\.\\d+)?)\\.sp""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { if (view is TextView) view.textSize = it }
+                    Regex("""alpha\\s*=\\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { view.alpha = it.coerceIn(0f, 1f) }
+                    val directColor = Regex("""(?:contentColor|tint|color)\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").find(callArgs)?.groupValues?.get(1)
+                    if (directColor != null && view is TextView) runCatching { view.setTextColor(Color.parseColor("#" + directColor.takeLast(6))) }
+                    val buttonContainerColor = Regex("""containerColor\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").find(callArgs)?.groupValues?.get(1)
+                    if (buttonContainerColor != null) runCatching { view.setBackgroundColor(Color.parseColor("#" + buttonContainerColor.takeLast(6))) }
+                    val cornerDp = Regex("""RoundedCornerShape\\(\\s*(\\d+)\\.dp\\s*\\)""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    if (cornerDp != null) {
+                        val fill = (view.background as? android.graphics.drawable.ColorDrawable)?.color ?: 0xFFE8ECF7.toInt()
+                        view.background = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(cornerDp).toFloat() }
+                    }
+                    if (callArgs.contains("FontWeight.Black") || callArgs.contains("FontWeight.ExtraBold") || callArgs.contains("FontWeight.Bold")) {
+                        if (view is TextView) view.setTypeface(view.typeface, android.graphics.Typeface.BOLD)
+                    }
+                    if (callArgs.contains("TextAlign.Center") && view is TextView) view.gravity = Gravity.CENTER
+                    if (callArgs.contains("TextAlign.End") && view is TextView) view.gravity = Gravity.END
                     if (callArgs.contains("enabled = false") && view.isEnabled) view.isEnabled = false
                     previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer, callArgs))
                     rendered++
