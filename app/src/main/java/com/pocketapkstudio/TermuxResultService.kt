@@ -140,10 +140,21 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val pendingApkName = buildPrefs.getString("pending_build_apk_name", null)
         val verifiedApk = materializeBuiltApk(pendingApkUri, pendingApkName, apkPath)
         val successful = exitCode == 0 && errCode == -1 && apkPath != null && verifiedApk != null
+        // RUN_COMMAND callback output can be empty on some Android/Termux versions.
+        // In that case, recover the complete transcript from the MediaStore live-log URI.
+        val liveLogUriText = buildPrefs.getString("live_build_log_uri", null)
+        val liveLogFallback = liveLogUriText?.let { text ->
+            runCatching {
+                contentResolver.openInputStream(Uri.parse(text))
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+        }.orEmpty()
+        val primaryBuildLog = if (liveLogFallback.length > stdout.length) liveLogFallback else stdout
         val combined = buildString {
-            append(stdout)
+            append(primaryBuildLog)
             if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
             if (errMessage.isNotBlank()) append("\n\nTERMUX ERROR:\n").append(errMessage)
+            if (isBlank()) append("No build output was returned by Termux. Check Download/PocketAPKStudio/build-live.log for the device-side transcript.")
         }
         val status = when {
             successful -> "BUILD SUCCESS! APK verified and ready to install/share: " + verifiedApk!!.name
