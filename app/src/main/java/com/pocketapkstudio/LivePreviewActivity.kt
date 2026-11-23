@@ -563,7 +563,36 @@ class LivePreviewActivity : Activity() {
             fun firstLiteral(text: String): String? =
                 Regex(""""((?:\\.|[^"\\])*)"""").find(text)?.groupValues?.get(1)
                     ?.replace("\\n", "\n")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
-            val pattern = Regex("""\b(Scaffold|Column|Row|Box|BoxWithConstraints|FlowRow|FlowColumn|LazyColumn|LazyRow|LazyVerticalGrid|LazyHorizontalGrid|Card|ElevatedCard|OutlinedCard|Surface|TopAppBar|CenterAlignedTopAppBar|SmallTopAppBar|LargeTopAppBar|BottomAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|NavigationDrawerItem|NavigationBarItem|Text|Button|OutlinedButton|TextButton|IconButton|FilledIconButton|FilledTonalButton|ElevatedButton|FloatingActionButton|ExtendedFloatingActionButton|OutlinedTextField|TextField|BasicTextField|SearchBar|Switch|Slider|RangeSlider|Checkbox|TriStateCheckbox|RadioButton|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog|DatePicker|TimePicker|AssistChip|FilterChip|InputChip|SuggestionChip|Tab|TabRow|ListItem|Badge|HorizontalDivider|VerticalDivider|Divider)\s*\(""")
+            fun iconGlyph(iconName: String?): String = when (iconName?.lowercase()) {
+                "home" -> "⌂"
+                "search" -> "⌕"
+                "settings" -> "⚙"
+                "menu" -> "☰"
+                "add" -> "+"
+                "close" -> "×"
+                "arrowback" -> "←"
+                "arrowforward" -> "→"
+                "delete" -> "▤"
+                "edit" -> "✎"
+                "person", "accountcircle" -> "●"
+                "favorite" -> "♥"
+                "notifications" -> "♢"
+                "cameraalt", "camera" -> "▣"
+                "check" -> "✓"
+                "morevert" -> "⋮"
+                "share" -> "↗"
+                "download" -> "↓"
+                "visibility" -> "◉"
+                "locationon" -> "⌖"
+                "email" -> "✉"
+                "phone" -> "☎"
+                "calendar", "calendarmonth" -> "▦"
+                "send" -> "➤"
+                "info" -> "ⓘ"
+                "star" -> "★"
+                else -> "◆"
+            }
+            val pattern = Regex("""\b(Scaffold|Column|Row|Box|BoxWithConstraints|FlowRow|FlowColumn|LazyColumn|LazyRow|LazyVerticalGrid|LazyHorizontalGrid|Card|ElevatedCard|OutlinedCard|Surface|TopAppBar|CenterAlignedTopAppBar|SmallTopAppBar|LargeTopAppBar|BottomAppBar|NavigationBar|NavigationRail|NavigationDrawer|ModalNavigationDrawer|NavigationDrawerItem|NavigationBarItem|NavigationRailItem|Text|Button|OutlinedButton|TextButton|IconButton|FilledIconButton|FilledTonalButton|ElevatedButton|FloatingActionButton|ExtendedFloatingActionButton|OutlinedTextField|TextField|BasicTextField|SearchBar|Switch|Slider|RangeSlider|Checkbox|TriStateCheckbox|RadioButton|Spacer|Icon|Image|AsyncImage|CircularProgressIndicator|LinearProgressIndicator|DropdownMenu|AlertDialog|DatePicker|TimePicker|AssistChip|FilterChip|InputChip|SuggestionChip|Tab|TabRow|ListItem|Badge|HorizontalDivider|VerticalDivider|Divider)\s*\(""")
             screen.setBackgroundColor(themeBackground)
             val matches = pattern.findAll(code).toList()
             val consumed = ArrayList<IntRange>()
@@ -577,6 +606,11 @@ class LivePreviewActivity : Activity() {
                 val kind: String
             )
             val previewNodes = ArrayList<PreviewNode>()
+            val buttonKinds = setOf(
+                "Button", "OutlinedButton", "TextButton", "IconButton", "FilledIconButton",
+                "FilledTonalButton", "ElevatedButton", "FloatingActionButton", "ExtendedFloatingActionButton"
+            )
+            val chipKinds = setOf("AssistChip", "FilterChip", "InputChip", "SuggestionChip")
             var rendered = 0
             for (match in matches) {
                 if (consumed.any { match.range.first in it }) continue
@@ -587,23 +621,48 @@ class LivePreviewActivity : Activity() {
                 val kind = match.groupValues[1]
                 var label = firstLiteral(callArgs)
                 var endOfElement = close
-                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton")) {
+                if (kind in buttonKinds) {
                     val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
                         val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
                         if (lambdaEnd > lambdaStart) {
                             val body = code.substring(lambdaStart, lambdaEnd + 1)
-                            label = Regex("""Text\s*\(\s*"""").find(body)?.let { firstLiteral(body.substring(it.range.first)) } ?: label
+                            val textLabel = Regex("""Text\s*\(\s*"""").find(body)
+                                ?.let { firstLiteral(body.substring(it.range.first)) }
+                            val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                                .find(body)?.groupValues?.get(1)
+                            label = textLabel ?: label ?: iconGlyph(iconName)
                             endOfElement = lambdaEnd
                         }
+                    } else if (kind in setOf("IconButton", "FilledIconButton")) {
+                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                            .find(callArgs)?.groupValues?.get(1)
+                        label = label ?: iconGlyph(iconName)
                     }
                 }
                 if (kind in setOf("OutlinedTextField", "TextField")) {
                     val labelBlock = Regex("""(?:label|placeholder)\s*=\s*\{\s*Text\s*\(""").find(callArgs)
                     if (labelBlock != null) label = firstLiteral(callArgs.substring(labelBlock.range.last + 1)) ?: label
                 }
-                val isContainer = kind in setOf("Scaffold", "Column", "Row", "Box", "BoxWithConstraints", "FlowRow", "FlowColumn", "LazyColumn", "LazyRow", "LazyVerticalGrid", "LazyHorizontalGrid", "Card", "ElevatedCard", "OutlinedCard", "Surface", "NavigationBar", "NavigationRail", "NavigationDrawer", "ModalNavigationDrawer", "TabRow", "BottomAppBar")
-                if (kind in setOf("Button", "OutlinedButton", "TextButton", "IconButton", "FilledIconButton", "FilledTonalButton", "ElevatedButton", "FloatingActionButton", "ExtendedFloatingActionButton", "AssistChip", "FilterChip", "InputChip", "SuggestionChip")) consumed.add(match.range.first..endOfElement)
+                val isContainer = kind in setOf(
+                    "Scaffold", "Column", "Row", "Box", "BoxWithConstraints", "FlowRow", "FlowColumn",
+                    "LazyColumn", "LazyRow", "LazyVerticalGrid", "LazyHorizontalGrid",
+                    "Card", "ElevatedCard", "OutlinedCard", "Surface",
+                    "TopAppBar", "CenterAlignedTopAppBar", "SmallTopAppBar", "LargeTopAppBar",
+                    "NavigationBar", "NavigationRail", "NavigationDrawer", "ModalNavigationDrawer",
+                    "NavigationDrawerItem", "NavigationBarItem", "NavigationRailItem",
+                    "Tab", "TabRow", "ListItem", "Badge", "BottomAppBar"
+                )
+                if (kind == "DropdownMenu") {
+                    val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
+                    if (lambdaStart != null) {
+                        val lambdaEnd = findClosing(code, lambdaStart, '{', '}')
+                        if (lambdaEnd > lambdaStart) endOfElement = lambdaEnd
+                    }
+                }
+                if (kind in buttonKinds || kind in chipKinds || kind in setOf("DropdownMenu", "AlertDialog")) {
+                    consumed.add(match.range.first..endOfElement)
+                }
                 if (isContainer) {
                     val lambdaStart = code.indexOf('{', close + 1).takeIf { it >= 0 && it - close < 100 }
                     if (lambdaStart != null) {
@@ -612,19 +671,43 @@ class LivePreviewActivity : Activity() {
                     }
                 }
                 val view: View? = when (kind) {
-                    "Scaffold", "Column", "LazyColumn", "LazyVerticalGrid", "NavigationDrawer", "ModalNavigationDrawer", "Card", "ElevatedCard", "OutlinedCard", "Surface", "TabRow" -> LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10)); setBackgroundColor(if (kind == "Card" || kind == "Surface") 0xFFE8ECF7.toInt() else 0xFFF5F7FF.toInt()) }
-                    "Row", "LazyRow", "LazyHorizontalGrid", "FlowRow", "FlowColumn", "NavigationBar", "NavigationRail", "BottomAppBar" -> LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
-                    "Box" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
-                    "TopAppBar", "CenterAlignedTopAppBar" -> TextView(this).apply { text = label ?: "App Bar"; textSize = 18f; setTextColor(0xFF263449.toInt()); setPadding(dp(12), dp(14), dp(12), dp(14)); setBackgroundColor(0xFFE8ECF7.toInt()) }
+                    "Scaffold", "Column", "LazyColumn", "LazyVerticalGrid", "FlowColumn",
+                    "NavigationDrawer", "ModalNavigationDrawer", "NavigationRail" ->
+                        LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(10), dp(10), dp(10), dp(10))
+                            setBackgroundColor(0xFFF5F7FF.toInt())
+                        }
+                    "Row", "LazyRow", "LazyHorizontalGrid", "FlowRow", "NavigationBar", "BottomAppBar",
+                    "TopAppBar", "CenterAlignedTopAppBar", "SmallTopAppBar", "LargeTopAppBar",
+                    "TabRow", "NavigationDrawerItem", "ListItem" ->
+                        LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            setPadding(dp(6), dp(6), dp(6), dp(6))
+                            if (kind in setOf("TopAppBar", "CenterAlignedTopAppBar", "SmallTopAppBar", "LargeTopAppBar")) {
+                                minimumHeight = dp(if (kind == "LargeTopAppBar") 120 else 64)
+                                setBackgroundColor(0xFFE8ECF7.toInt())
+                            }
+                        }
+                    "NavigationBarItem", "NavigationRailItem", "Tab" ->
+                        LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            gravity = Gravity.CENTER
+                            setPadding(dp(8), dp(6), dp(8), dp(6))
+                        }
+                    "Badge" -> FrameLayout(this).apply { setPadding(dp(4), dp(2), dp(4), dp(2)) }
+                    "Card", "ElevatedCard", "OutlinedCard", "Surface" -> LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(12), dp(12), dp(12), dp(12))
+                        setBackgroundColor(0xFFE8ECF7.toInt())
+                    }
+                    "Box", "BoxWithConstraints" -> FrameLayout(this).apply { setPadding(dp(6), dp(6), dp(6), dp(6)) }
                     "Spacer" -> Space(this).apply { minimumHeight = dp(12); minimumWidth = dp(12) }
                     "Icon" -> {
-                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""").find(callArgs)?.groupValues?.get(1) ?: "Star"
-                        val glyph = when (iconName.lowercase()) {
-                            "home" -> "⌂"; "search" -> "⌕"; "settings" -> "⚙"; "menu" -> "☰"; "add" -> "+"; "close" -> "×"
-                            "arrowback" -> "←"; "delete" -> "▤"; "edit" -> "✎"; "person" -> "●"; "favorite" -> "♥"
-                            "notifications" -> "♢"; "cameraalt", "camera" -> "▣"; "check" -> "✓"; "morevert" -> "⋮"
-                            "share" -> "↗"; "download" -> "↓"; "visibility" -> "◉"; "locationon" -> "⌖"; else -> "◆"
-                        }
+                        val iconName = Regex("""Icons\.(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.(\w+)""")
+                            .find(callArgs)?.groupValues?.get(1) ?: "Star"
+                        val glyph = iconGlyph(iconName)
                         TextView(this).apply {
                             text = glyph
                             textSize = Regex("""size\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 22f
@@ -761,16 +844,10 @@ class LivePreviewActivity : Activity() {
                             if (upper > lower) (((value - lower) / (upper - lower)) * 100f).toInt().coerceIn(0, 100) else 50
                         } else if (value != null && value in 0f..1f) (value * 100f).toInt() else 50
                     }
-                    "Card", "ElevatedCard", "OutlinedCard", "Surface", "ListItem", "NavigationDrawerItem", "NavigationBarItem", "Tab", "Badge" -> TextView(this).apply {
-                        text = label ?: if (kind == "Card") "▣ Card container" else "▣ Surface container"
-                        textSize = 14f
-                        setTextColor(0xFF263449.toInt())
+                    "Card", "ElevatedCard", "OutlinedCard", "Surface" -> LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
                         setPadding(dp(12), dp(12), dp(12), dp(12))
                         setBackgroundColor(0xFFE8ECF7.toInt())
-                        if (kind in setOf("NavigationDrawerItem", "NavigationBarItem", "Tab")) {
-                            isClickable = true
-                            isFocusable = true
-                        }
                     }
                     "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
                     "RadioButton" -> RadioButton(this).apply {
@@ -841,20 +918,38 @@ class LivePreviewActivity : Activity() {
                     if (callArgs.contains("fillMaxHeight()")) lp.height = -1
                     Regex("""weight\s*\(\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { lp.weight = it }
                     if (isContainer && view is LinearLayout) {
-                        if (kind == "Row" || kind == "LazyRow" || kind == "LazyHorizontalGrid" || kind == "FlowRow" || kind == "NavigationBar" || kind == "NavigationRail" || kind == "BottomAppBar") {
-                            view.gravity = when {
-                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER
-                                callArgs.contains("Arrangement.End") -> Gravity.END or Gravity.CENTER_VERTICAL
-                                callArgs.contains("Arrangement.SpaceBetween") -> Gravity.CENTER_VERTICAL
+                        val horizontal = view.orientation == LinearLayout.HORIZONTAL
+                        val mainGravity = if (horizontal) {
+                            when {
+                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER_HORIZONTAL
+                                callArgs.contains("Arrangement.End") -> Gravity.END
+                                callArgs.contains("Arrangement.Start") -> Gravity.START
+                                else -> Gravity.START
+                            }
+                        } else {
+                            when {
+                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER_VERTICAL
+                                callArgs.contains("Arrangement.Bottom") || callArgs.contains("Arrangement.End") -> Gravity.BOTTOM
+                                callArgs.contains("Arrangement.Top") || callArgs.contains("Arrangement.Start") -> Gravity.TOP
+                                else -> Gravity.TOP
+                            }
+                        }
+                        val crossGravity = if (horizontal) {
+                            when {
+                                callArgs.contains("Alignment.CenterVertically") -> Gravity.CENTER_VERTICAL
+                                callArgs.contains("Alignment.Bottom") -> Gravity.BOTTOM
+                                callArgs.contains("Alignment.Top") -> Gravity.TOP
                                 else -> Gravity.CENTER_VERTICAL
                             }
                         } else {
-                            view.gravity = when {
-                                callArgs.contains("Arrangement.Center") -> Gravity.CENTER_HORIZONTAL
-                                callArgs.contains("Arrangement.Bottom") -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                                else -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                            when {
+                                callArgs.contains("Alignment.CenterHorizontally") -> Gravity.CENTER_HORIZONTAL
+                                callArgs.contains("Alignment.End") -> Gravity.END
+                                callArgs.contains("Alignment.Start") -> Gravity.START
+                                else -> Gravity.CENTER_HORIZONTAL
                             }
                         }
+                        view.gravity = mainGravity or crossGravity
                     }
                     if (view is TextView) {
                         val typographySize = when {
@@ -993,21 +1088,62 @@ class LivePreviewActivity : Activity() {
                     }
                     parent.addView(node.view, FrameLayout.LayoutParams(node.params.width, node.params.height, boxGravity))
                 } else if (parent is LinearLayout) {
+                    val parentArgs = if (parentIndex >= 0) previewNodes[parentIndex].args else ""
+                    val horizontal = parent.orientation == LinearLayout.HORIZONTAL
+
+                    if (node.params.weight > 0f) {
+                        if (horizontal && node.params.width == -1) node.params.width = 0
+                        if (!horizontal && node.params.height == -2) node.params.height = 0
+                    }
+
+                    val spacingDp = Regex("""Arrangement\.spacedBy\s*\(\s*(\d+(?:\.\d+)?)\.dp""")
+                        .find(parentArgs)?.groupValues?.get(1)?.toFloatOrNull()?.toInt()
+                        ?.let { dp(it) }
+                    val defaultSpacing = if (spacingDp != null) spacingDp else dp(7)
+                    node.params.setMargins(
+                        node.params.leftMargin,
+                        node.params.topMargin,
+                        if (horizontal) defaultSpacing else node.params.rightMargin,
+                        if (horizontal) node.params.bottomMargin else defaultSpacing
+                    )
+
+                    val crossGravity = if (horizontal) {
+                        when {
+                            parentArgs.contains("Alignment.CenterVertically") -> Gravity.CENTER_VERTICAL
+                            parentArgs.contains("Alignment.Bottom") -> Gravity.BOTTOM
+                            parentArgs.contains("Alignment.Top") -> Gravity.TOP
+                            else -> 0
+                        }
+                    } else {
+                        when {
+                            parentArgs.contains("Alignment.CenterHorizontally") -> Gravity.CENTER_HORIZONTAL
+                            parentArgs.contains("Alignment.End") -> Gravity.END
+                            parentArgs.contains("Alignment.Start") -> Gravity.START
+                            else -> 0
+                        }
+                    }
+                    if (crossGravity != 0) node.params.gravity = crossGravity
                     parent.addView(node.view, node.params)
                 } else {
                     screen.addView(node.view, node.params)
                 }
-                if (node.kind in setOf("Tab", "NavigationBarItem", "NavigationDrawerItem")) {
+                if (node.kind in setOf("Tab", "NavigationBarItem", "NavigationRailItem", "NavigationDrawerItem")) {
                     val selectionTag = "compose-preview-selection-" + node.kind
                     node.view.tag = selectionTag
                     val initiallySelected = Regex("""selected\s*=\s*true""").containsMatchIn(node.args)
-                    fun applySelectionState(target: View, selected: Boolean) {
-                        if (target is TextView) {
-                            target.setTextColor(if (selected) 0xFF1D4ED8.toInt() else 0xFF263449.toInt())
-                            target.background = android.graphics.drawable.GradientDrawable().apply {
-                                setColor(if (selected) 0xFFDCE7FF.toInt() else 0xFFE8ECF7.toInt())
-                                cornerRadius = dp(9).toFloat()
+                    fun tintPreviewText(target: View, color: Int) {
+                        if (target is TextView) target.setTextColor(color)
+                        if (target is ViewGroup) {
+                            for (childIndex in 0 until target.childCount) {
+                                tintPreviewText(target.getChildAt(childIndex), color)
                             }
+                        }
+                    }
+                    fun applySelectionState(target: View, selected: Boolean) {
+                        tintPreviewText(target, if (selected) 0xFF1D4ED8.toInt() else 0xFF263449.toInt())
+                        target.background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(if (selected) 0xFFDCE7FF.toInt() else 0xFFE8ECF7.toInt())
+                            cornerRadius = dp(9).toFloat()
                         }
                         target.isSelected = selected
                     }
