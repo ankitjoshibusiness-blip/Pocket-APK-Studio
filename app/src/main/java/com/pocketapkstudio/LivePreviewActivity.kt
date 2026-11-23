@@ -26,14 +26,43 @@ class LivePreviewActivity : Activity() {
     private lateinit var deviceContentScroll: ScrollView
     private var previewWidthDp = 360
     private var previewHeightDp = 800
+    private var selectedPreviewPath: String? = null
     private var layouts: List<File> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        previewWidthDp = (savedInstanceState?.getInt("preview_width_dp", 360) ?: 360).coerceIn(240, 1200)
+        previewHeightDp = (savedInstanceState?.getInt("preview_height_dp", 800) ?: 800).coerceIn(320, 2400)
+        selectedPreviewPath = savedInstanceState?.getString("preview_source_path")
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
-        if (!renderWebPreviewIfAvailable()) findLayouts()
+
+        val restoredFile = selectedPreviewPath?.let { relative ->
+            runCatching {
+                File(projectRoot, relative).canonicalFile.takeIf { candidate ->
+                    candidate.path.startsWith(projectRoot.canonicalPath + File.separator) && candidate.isFile
+                }
+            }.getOrNull()
+        }
+        when (restoredFile?.extension?.lowercase()) {
+            "xml" -> {
+                layouts = projectRoot.walkTopDown().maxDepth(10)
+                    .filter { it.isFile && it.extension.equals("xml", true) && it.parentFile?.name == "layout" &&
+                        it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules") } }
+                    .take(200).sortedBy { it.relativeTo(projectRoot).invariantSeparatorsPath }.toList()
+                render(restoredFile)
+            }
+            "kt" -> renderComposeFile(restoredFile)
+            else -> if (!renderWebPreviewIfAvailable()) findLayouts()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("preview_width_dp", previewWidthDp)
+        outState.putInt("preview_height_dp", previewHeightDp)
+        outState.putString("preview_source_path", selectedPreviewPath)
+        super.onSaveInstanceState(outState)
     }
 
     private fun buildScreen() {
@@ -239,6 +268,7 @@ class LivePreviewActivity : Activity() {
         )
         val entry = candidates.firstOrNull { it.isFile } ?: return false
         content.removeAllViews()
+        selectedPreviewPath = entry.relativeTo(projectRoot).invariantSeparatorsPath
         title.text = "LIVE WEB UI PREVIEW · " + entry.name
         val baseDirectory = entry.parentFile ?: projectRoot
         val relativeDirectory = baseDirectory.relativeTo(projectRoot).invariantSeparatorsPath
@@ -403,8 +433,20 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun refreshCurrentPreview() {
+        val selected = selectedPreviewPath?.let { relative ->
+            runCatching {
+                File(projectRoot, relative).canonicalFile.takeIf { candidate ->
+                    candidate.path.startsWith(projectRoot.canonicalPath + File.separator) && candidate.isFile
+                }
+            }.getOrNull()
+        }
         content.removeAllViews()
-        findLayouts()
+        when (selected?.extension?.lowercase()) {
+            "xml" -> render(selected)
+            "kt" -> renderComposeFile(selected)
+            "html", "htm" -> if (!renderWebPreviewIfAvailable()) findLayouts()
+            else -> if (!renderWebPreviewIfAvailable()) findLayouts()
+        }
     }
 
     /** Static Compose source preview. It approximates common composables without executing app code. */
@@ -425,6 +467,7 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun renderComposeFile(source: File) {
+        selectedPreviewPath = source.relativeTo(projectRoot).invariantSeparatorsPath
         title.text = "SOURCE PREVIEW · " + source.name
         try {
             val code = source.readText()
@@ -968,6 +1011,7 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun render(file: File) {
+        selectedPreviewPath = file.relativeTo(projectRoot).invariantSeparatorsPath
         content.removeAllViews()
         title.text = "PREVIEW · " + file.name
         try {
