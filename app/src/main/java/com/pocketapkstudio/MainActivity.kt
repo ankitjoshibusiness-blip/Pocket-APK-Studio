@@ -75,7 +75,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         override fun run() {
             readBuildLiveLog()
             if (getSharedPreferences("build_state", MODE_PRIVATE).getBoolean("build_running", false)) {
-                buildLogHandler.postDelayed(this, 1000)
+                buildLogHandler.postDelayed(this, 500)
             }
         }
     }
@@ -1360,13 +1360,17 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .putString("last_build_log", "Preparing project…")
             .putString("last_apk_path", null)
             .apply()
-        runCatching { prepareBuildLiveLog() }.onFailure { error ->
+        runCatching {
+            prepareBuildLiveLog()
+            appendBuildLiveLog("BUILD: Live transcript initialized; detailed command tracing enabled.")
+        }.onFailure { error ->
             buildPrefs.edit().putString("last_build_log", "Preparing project…\\nLive log file unavailable: ${error.message}").apply()
         }
         buildLogHandler.removeCallbacks(buildLogPollTask)
         buildLogHandler.post(buildLogPollTask)
         lifecycleScope.launch {
             try {
+                appendBuildLiveLog("APP: Starting project preparation and selected ZIP read.")
                 status.text = "Copying project ZIP to shared Downloads…"
                 logs.text = "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio."
                 buildPrefs.edit()
@@ -1374,10 +1378,16 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .putString("last_build_log", "Preparing project…\nCopying the selected ZIP into Downloads/PocketAPKStudio.")
                     .apply()
                 val prepared = withContext(Dispatchers.IO) {
+                    appendBuildLiveLog("APP: Reading selected ZIP and writing it to shared Downloads.")
                     val zipName = copyZipToDownloads(source)
+                    appendBuildLiveLog("APP: Project ZIP copy complete: $zipName")
                     try {
+                        appendBuildLiveLog("APP: Writing build-project.sh engine asset.")
                         copyBuildEngineToDownloads()
+                        appendBuildLiveLog("APP: Build engine copy complete.")
+                        appendBuildLiveLog("APP: Creating and initializing reserved APK output.")
                         val outputName = createBuildOutput()
+                        appendBuildLiveLog("APP: APK output reserved: $outputName")
                         zipName to outputName
                     } catch (error: Exception) {
                         discardPendingBuildOutput()
@@ -1394,10 +1404,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     .putString("last_build_status", "Starting Termux build…")
                     .putString("last_build_log", copied)
                     .apply()
+                appendBuildLiveLog("APP: Sending build command to Termux RUN_COMMAND service.")
                 launchTermuxBuild(fileName, outputName)
             } catch (e: Exception) {
                 discardPendingBuildOutput()
                 val message = "Could not prepare the project ZIP, build engine or APK output: ${e.message ?: "storage error"}"
+                appendBuildLiveLog("APP ERROR: $message")
                 getSharedPreferences("build_state", MODE_PRIVATE).edit()
                     .putBoolean("build_running", false)
                     .putString("last_build_status", message)
@@ -1431,6 +1443,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
             ?: error("Could not initialize live build log")
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
             .putString("live_build_log_uri", uri.toString()).apply()
+    }
+
+    private fun appendBuildLiveLog(message: String) {
+        val uriText = getSharedPreferences("build_state", MODE_PRIVATE)
+            .getString("live_build_log_uri", null) ?: return
+        runCatching {
+            val stamp = android.text.format.DateFormat.format("HH:mm:ss.SSS", System.currentTimeMillis())
+            contentResolver.openOutputStream(Uri.parse(uriText), "wa")?.use { output ->
+                output.write("[$stamp] $message\\n".toByteArray(Charsets.UTF_8))
+                output.flush()
+            } ?: error("Could not append to live build log")
+        }
     }
 
     private fun readBuildLiveLog() {
