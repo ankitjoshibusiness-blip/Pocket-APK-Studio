@@ -820,7 +820,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard, true, toolsContent)
+        workspaceSection("04  BUILD LOGS", "Real-time build output — updates while the build is running", logCard, true, editorContent)
         homeContent.addView(space(18))
 
         val setupCard = card()
