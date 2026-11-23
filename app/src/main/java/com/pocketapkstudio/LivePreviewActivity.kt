@@ -466,11 +466,69 @@ class LivePreviewActivity : Activity() {
         renderComposeFile(source)
     }
 
+    /**
+     * Follow composable function calls from the selected launcher/source file.
+     * This lets the approximate preview see screens split into App.kt, HomeScreen.kt,
+     * and other Kotlin files instead of rendering only the Activity wrapper.
+     */
+    private fun resolveComposePreviewSources(entry: File): List<File> {
+        val candidateFiles = projectRoot.walkTopDown().maxDepth(12)
+            .filter { file ->
+                file.isFile && file.extension == "kt" && file.length() <= 2_000_000L &&
+                    file.path.split(File.separator).none { part ->
+                        part in setOf(".gradle", "build", ".git", "node_modules", ".idea", "generated", ".dart_tool")
+                    }
+            }
+            .take(250)
+            .sortedBy { it.relativeTo(projectRoot).invariantSeparatorsPath }
+            .toList()
+
+        val sourceText = LinkedHashMap<File, String>()
+        var readBudget = 16L * 1024L * 1024L
+        for (candidate in candidateFiles) {
+            val size = candidate.length()
+            if (size > readBudget) continue
+            val text = runCatching { candidate.readText() }.getOrNull() ?: continue
+            sourceText[candidate.canonicalFile] = text
+            readBudget -= size
+        }
+        val entryFile = entry.canonicalFile
+        if (!sourceText.containsKey(entryFile)) {
+            sourceText[entryFile] = entry.readText()
+        }
+
+        val composableDeclaration = Regex("""@Composable[\s\S]{0,240}?\bfun\s+([A-Za-z_][A-Za-z0-9_]*)""")
+        val declarations = sourceText.entries.flatMap { (file, text) ->
+            composableDeclaration.findAll(text).map { match ->
+                match.groupValues[1] to file
+            }.toList()
+        }.distinctBy { it.first }
+
+        val included = linkedSetOf(entryFile)
+        repeat(8) {
+            val combined = included.mapNotNull { sourceText[it] }.joinToString("\n\n")
+            var added = false
+            for ((functionName, declarationFile) in declarations) {
+                if (declarationFile in included || included.size >= 30) continue
+                val callPattern = Regex("""\b""" + Regex.escape(functionName) + """\s*\(""")
+                if (callPattern.containsMatchIn(combined)) {
+                    included.add(declarationFile)
+                    added = true
+                }
+            }
+            if (!added) return@repeat
+        }
+        return included.mapNotNull { file ->
+            if (file.isFile) file else null
+        }
+    }
+
     private fun renderComposeFile(source: File) {
         selectedPreviewPath = source.relativeTo(projectRoot).invariantSeparatorsPath
         title.text = "SOURCE PREVIEW · " + source.name
         try {
-            val code = source.readText()
+            val sourceFiles = resolveComposePreviewSources(source)
+            val code = sourceFiles.joinToString("\n\n") { it.readText() }
             val screen = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(16), dp(16), dp(16))
@@ -978,7 +1036,8 @@ class LivePreviewActivity : Activity() {
                 })
             } else {
                 screen.addView(TextView(this).apply {
-                    text = "Static Compose preview · $rendered detected elements · App logic and exact layout are not executed"
+                    text = "Static Compose preview · " + rendered + " detected elements · " +
+                        sourceFiles.size + " Kotlin source file(s) scanned · App logic and exact layout are not executed"
                     textSize = 11f
                     setTextColor(0xFF65738B.toInt())
                     setPadding(0, dp(12), 0, dp(8))
