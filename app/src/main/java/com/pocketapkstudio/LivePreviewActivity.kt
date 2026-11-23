@@ -1210,23 +1210,56 @@ class LivePreviewActivity : Activity() {
     }
 
     private fun chooseLayout() {
-        if (layouts.size > 1) {
-            AlertDialog.Builder(this).setTitle("Choose screen / layout")
-                .setItems(layouts.map { it.relativeTo(projectRoot).invariantSeparatorsPath }.toTypedArray()) { _, which ->
-                    render(layouts[which])
-                }
-                .setNegativeButton("Cancel", null).show()
-        } else {
-            val sourceFiles = projectRoot.walkTopDown().maxDepth(10)
-                .filter { it.isFile && it.extension == "kt" &&
-                    it.path.split(File.separator).none { p -> p in setOf(".gradle", "build", ".git", "node_modules") } }
-                .take(100).toList()
-            if (sourceFiles.size > 1) AlertDialog.Builder(this).setTitle("Choose Compose source")
-                .setItems(sourceFiles.map { it.relativeTo(projectRoot).invariantSeparatorsPath }.toTypedArray()) { _, which ->
-                    renderComposeFile(sourceFiles[which])
-                }.setNegativeButton("Cancel", null).show()
-            else refreshCurrentPreview()
+        val choices = ArrayList<Pair<String, File>>()
+        for (layout in layouts) {
+            choices.add("[XML] " + layout.relativeTo(projectRoot).invariantSeparatorsPath to layout)
         }
+
+        // Include only Kotlin files that actually declare or host Compose UI, even when
+        // the project also contains several traditional XML layouts.
+        var remainingReadBytes = 8L * 1024L * 1024L
+        val kotlinFiles = projectRoot.walkTopDown().maxDepth(10)
+            .filter { file ->
+                file.isFile && file.extension.equals("kt", true) &&
+                    file.path.split(File.separator).none { part ->
+                        part in setOf(".gradle", "build", ".git", "node_modules", ".idea", "generated", ".dart_tool")
+                    }
+            }
+            .take(200)
+        for (source in kotlinFiles) {
+            val size = source.length()
+            if (size <= 0L || size > remainingReadBytes) continue
+            val sourceCode = runCatching { source.readText() }.getOrNull() ?: continue
+            remainingReadBytes -= size
+            val hasComposeUi = Regex("""@Composable\b""").containsMatchIn(sourceCode) ||
+                Regex("""\bsetContent\s*\(""").containsMatchIn(sourceCode) ||
+                Regex("""\bComposeView\s*\(""").containsMatchIn(sourceCode)
+            if (hasComposeUi && choices.none { it.second.canonicalFile == source.canonicalFile }) {
+                choices.add("[Compose] " + source.relativeTo(projectRoot).invariantSeparatorsPath to source)
+            }
+        }
+
+        if (choices.isEmpty()) {
+            refreshCurrentPreview()
+            return
+        }
+        val openChoice: (Int) -> Unit = { index ->
+            val file = choices[index].second
+            when (file.extension.lowercase()) {
+                "xml" -> render(file)
+                "kt" -> renderComposeFile(file)
+                else -> refreshCurrentPreview()
+            }
+        }
+        if (choices.size == 1) {
+            openChoice(0)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Choose screen / layout")
+            .setItems(choices.map { it.first }.toTypedArray()) { _, which -> openChoice(which) }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun render(file: File) {
