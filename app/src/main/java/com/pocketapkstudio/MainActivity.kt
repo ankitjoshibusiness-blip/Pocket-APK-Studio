@@ -680,7 +680,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(label("Build status, recent activity and build logs remain available below.", 12, 0xFFB4C0C8.toInt(), false))
         homeContent.addView(space(8))
         // Workspace sections use an Android-Studio-inspired accordion for a clean mobile layout.
-        fun workspaceSection(title: String, subtitle: String, content: View, initiallyExpanded: Boolean = false) {
+        fun workspaceSection(title: String, subtitle: String, content: View, initiallyExpanded: Boolean = false, parent: LinearLayout = editorContent) {
             val section = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = premiumGradient(0xFF263640.toInt(), 0xFF22313B.toInt(), 14)
@@ -725,7 +725,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }
                 arrow.text = if (expand) "⌃" else "⌄"
             }
-            editorContent.addView(section, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            parent.addView(section, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
         val workspaceIntro = card().apply {
@@ -820,7 +820,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Build logs", logs.text))
             Toast.makeText(this, "Logs copied.", Toast.LENGTH_SHORT).show()
         })
-        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard, true)
+        workspaceSection("04  BUILD LOGS", "Build output, diagnostics and copy logs", logCard, true, toolsContent)
         homeContent.addView(space(18))
 
         val setupCard = card()
