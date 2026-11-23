@@ -322,6 +322,16 @@ class LivePreviewActivity : Activity() {
 
     private fun findLayouts() {
         if (renderWebPreviewIfAvailable()) return
+
+        // Prefer the actual launcher Activity's Compose entry point over unrelated XML
+        // layouts that may remain in projects after a migration from Views to Compose.
+        val composeEntry = findLauncherComposeSource()
+        if (composeEntry != null) {
+            layouts = emptyList()
+            renderComposeFile(composeEntry)
+            return
+        }
+
         layouts = projectRoot.walkTopDown().maxDepth(10)
             .filter { it.isFile && it.extension.equals("xml", true) && it.parentFile?.name == "layout" &&
                 it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules") } }
@@ -331,6 +341,35 @@ class LivePreviewActivity : Activity() {
         val first = preferred ?: layouts.firstOrNull { it.name == "activity_main.xml" }
             ?: layouts.firstOrNull { it.name == "main.xml" } ?: layouts.first()
         render(first)
+    }
+
+    private fun findLauncherComposeSource(): File? {
+        val manifests = projectRoot.walkTopDown().maxDepth(8)
+            .filter { it.isFile && it.name == "AndroidManifest.xml" &&
+                it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git") } }
+            .take(10).toList()
+        for (manifest in manifests) {
+            val xml = runCatching { manifest.readText() }.getOrNull() ?: continue
+            val launcher = Regex("""<activity\b([^>]*)>([\s\S]*?)</activity>""")
+                .findAll(xml).firstOrNull {
+                    it.groupValues[2].contains("android.intent.action.MAIN") &&
+                    it.groupValues[2].contains("android.intent.category.LAUNCHER")
+                } ?: continue
+            val activityName = Regex("""android:name=["']([^"']+)["']""")
+                .find(launcher.groupValues[1])?.groupValues?.get(1) ?: continue
+            val simpleName = activityName.substringAfterLast('.').removePrefix(".")
+            val sourceFiles = projectRoot.walkTopDown().maxDepth(12)
+                .filter { it.isFile && it.extension == "kt" && it.nameWithoutExtension == simpleName &&
+                    it.path.split(File.separator).none { part -> part in setOf(".gradle", "build", ".git", "node_modules") } }
+                .take(5).toList()
+            for (source in sourceFiles) {
+                val code = runCatching { source.readText() }.getOrNull() ?: continue
+                if (Regex("""\bsetContent\s*\(""").containsMatchIn(code) || code.contains("ComposeView(")) {
+                    return source
+                }
+            }
+        }
+        return null
     }
 
     private fun findLauncherLayout(): File? {
@@ -666,23 +705,91 @@ class LivePreviewActivity : Activity() {
                         val maxLines = Regex("""maxLines\s*=\s*(\d+)""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
                         if (maxLines != null) view.maxLines = maxLines
                     }
-                    // Apply common Compose dimensions, typography, colors and shape modifiers.
-                    Regex("""fontSize\\s*=\\s*(\\d+(?:\\.\\d+)?)\\.sp""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { if (view is TextView) view.textSize = it }
-                    Regex("""alpha\\s*=\\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()?.let { view.alpha = it.coerceIn(0f, 1f) }
-                    val directColor = Regex("""(?:contentColor|tint|color)\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").find(callArgs)?.groupValues?.get(1)
-                    if (directColor != null && view is TextView) runCatching { view.setTextColor(Color.parseColor("#" + directColor.takeLast(6))) }
-                    val buttonContainerColor = Regex("""containerColor\\s*=\\s*Color\\(0x([0-9A-Fa-f]{8})\\)""").find(callArgs)?.groupValues?.get(1)
-                    if (buttonContainerColor != null) runCatching { view.setBackgroundColor(Color.parseColor("#" + buttonContainerColor.takeLast(6))) }
-                    val cornerDp = Regex("""RoundedCornerShape\\(\\s*(\\d+)\\.dp\\s*\\)""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
+                    // Apply common Compose dimensions, typography, colors, shapes and font resources.
+                    if (view is TextView) {
+                        Regex("""fontSize\s*=\s*(\d+(?:\.\d+)?)\.sp""").find(callArgs)
+                            ?.groupValues?.get(1)?.toFloatOrNull()?.let { view.textSize = it }
+
+                        val fontResource = Regex("""R\.font\.(\w+)""").find(callArgs)?.groupValues?.get(1)
+                        val fontFile = fontResource?.let { resourceName ->
+                            projectRoot.walkTopDown().maxDepth(10).firstOrNull { file ->
+                                file.isFile && file.nameWithoutExtension == resourceName &&
+                                    file.parentFile?.name?.startsWith("font") == true &&
+                                    file.extension.lowercase() in setOf("ttf", "otf", "ttc")
+                            }
+                        }
+                        val familyTypeface = when {
+                            fontFile != null -> runCatching {
+                                android.graphics.Typeface.createFromFile(fontFile.absolutePath)
+                            }.getOrNull()
+                            callArgs.contains("FontFamily.Serif") -> android.graphics.Typeface.SERIF
+                            callArgs.contains("FontFamily.Monospace") -> android.graphics.Typeface.MONOSPACE
+                            callArgs.contains("FontFamily.Cursive") -> android.graphics.Typeface.create("cursive", android.graphics.Typeface.NORMAL)
+                            else -> view.typeface
+                        }
+                        val weightStyle = when {
+                            callArgs.contains("FontWeight.Black") || callArgs.contains("FontWeight.ExtraBold") ||
+                                callArgs.contains("FontWeight.Bold") -> android.graphics.Typeface.BOLD
+                            else -> android.graphics.Typeface.NORMAL
+                        }
+                        val italicStyle = if (callArgs.contains("FontStyle.Italic")) android.graphics.Typeface.ITALIC else 0
+                        if (fontFile != null || callArgs.contains("FontFamily.")) {
+                            view.typeface = android.graphics.Typeface.create(
+                                familyTypeface ?: view.typeface, weightStyle or italicStyle
+                            )
+                        } else if (weightStyle != android.graphics.Typeface.NORMAL || italicStyle != 0) {
+                            view.typeface = android.graphics.Typeface.create(view.typeface, weightStyle or italicStyle)
+                        }
+
+                        Regex("""lineHeight\s*=\s*(\d+(?:\.\d+)?)\.sp""").find(callArgs)
+                            ?.groupValues?.get(1)?.toFloatOrNull()?.let { lineHeightSp ->
+                                val currentTextSp = view.textSize / resources.displayMetrics.scaledDensity
+                                view.setLineSpacing((lineHeightSp - currentTextSp) * resources.displayMetrics.scaledDensity, 1f)
+                            }
+                        Regex("""letterSpacing\s*=\s*(-?\d+(?:\.\d+)?)\.sp""").find(callArgs)
+                            ?.groupValues?.get(1)?.toFloatOrNull()?.let { spacingSp ->
+                                val currentTextSp = (view.textSize / resources.displayMetrics.scaledDensity).coerceAtLeast(1f)
+                                view.letterSpacing = spacingSp / currentTextSp
+                            }
+                        if (callArgs.contains("TextDecoration.Underline")) {
+                            view.paintFlags = view.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+                        }
+                        if (callArgs.contains("TextDecoration.LineThrough")) {
+                            view.paintFlags = view.paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
+                        }
+                        if (callArgs.contains("TextOverflow.Ellipsis")) {
+                            view.ellipsize = android.text.TextUtils.TruncateAt.END
+                        }
+                        when {
+                            callArgs.contains("TextAlign.Center") -> view.gravity = Gravity.CENTER
+                            callArgs.contains("TextAlign.End") -> view.gravity = Gravity.END or (view.gravity and Gravity.VERTICAL_GRAVITY_MASK)
+                            callArgs.contains("TextAlign.Start") -> view.gravity = Gravity.START or (view.gravity and Gravity.VERTICAL_GRAVITY_MASK)
+                            callArgs.contains("TextAlign.Justify") && android.os.Build.VERSION.SDK_INT >= 26 -> {
+                                view.justificationMode = android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
+                            }
+                        }
+                    }
+                    Regex("""alpha\s*=\s*([0-9.]+)f?""").find(callArgs)?.groupValues?.get(1)
+                        ?.toFloatOrNull()?.let { view.alpha = it.coerceIn(0f, 1f) }
+                    val directColor = Regex("""(?:contentColor|tint|color)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""")
+                        .find(callArgs)?.groupValues?.get(1)
+                    if (directColor != null && view is TextView) {
+                        runCatching { view.setTextColor(Color.parseColor("#" + directColor.takeLast(6))) }
+                    }
+                    val buttonContainerColor = Regex("""containerColor\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""")
+                        .find(callArgs)?.groupValues?.get(1)
+                    if (buttonContainerColor != null) {
+                        runCatching { view.setBackgroundColor(Color.parseColor("#" + buttonContainerColor.takeLast(6))) }
+                    }
+                    val cornerDp = Regex("""RoundedCornerShape\(\s*(\d+)\.dp\s*\)""")
+                        .find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
                     if (cornerDp != null) {
                         val fill = (view.background as? android.graphics.drawable.ColorDrawable)?.color ?: 0xFFE8ECF7.toInt()
-                        view.background = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(cornerDp).toFloat() }
+                        view.background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(fill)
+                            cornerRadius = dp(cornerDp).toFloat()
+                        }
                     }
-                    if (callArgs.contains("FontWeight.Black") || callArgs.contains("FontWeight.ExtraBold") || callArgs.contains("FontWeight.Bold")) {
-                        if (view is TextView) view.setTypeface(view.typeface, android.graphics.Typeface.BOLD)
-                    }
-                    if (callArgs.contains("TextAlign.Center") && view is TextView) view.gravity = Gravity.CENTER
-                    if (callArgs.contains("TextAlign.End") && view is TextView) view.gravity = Gravity.END
                     if (callArgs.contains("enabled = false") && view.isEnabled) view.isEnabled = false
                     previewNodes.add(PreviewNode(match.range.first, endOfElement, view, lp, isContainer, callArgs))
                     rendered++
