@@ -1,0 +1,30 @@
+# Live UI Preview — Phase 1–5 status
+
+Last reviewed: 2026-11-24  
+Branch: `main`
+
+This tracker deliberately separates source-derived approximations from a real compiled Android runtime. A successful Pocket APK Studio CI build proves that the Studio app compiles and packages; it does **not** prove that an arbitrary imported project builds or that its screen was validated on a phone.
+
+## Status summary
+
+| Phase | Status | What is implemented | What is still approximate or missing |
+|---|---|---|---|
+| 1. Basic Compose components | Partial | Kotlin source scanning recognizes common Compose calls including Text, buttons, text fields, switches, checkboxes, radio buttons, progress indicators, images, icons, chips, dialogs, and common containers. It builds a visible native-View representation. | This is source inspection, not Compose execution. Unsupported or custom composables may be omitted; modifiers, measurement, state and semantics are not identical to Compose. |
+| 2. Advanced layouts, modifiers, images, icons, fonts and themes | Partial | Nested Column/Row/Box-like structures, common Card/Surface/AppBar/navigation elements, spacing, padding, width/height/fill/weight, alignment, common typography, local font files, raster drawable resources, common icon glyphs, color constants and light/dark color-scheme extraction are handled. The preview offers System/Dark/Light theme selection. | Lazy and flow layouts are simplified to native containers; complex constraints, custom layouts, many modifier chains, vector/remote image resources, dynamic theme expressions and advanced typography are not fully reproduced. The renderer is not a complete Compose layout engine. |
+| 3. Interactive controls | Partial | Generated preview controls respond locally: buttons/chips provide preview feedback, text fields accept input, switches and checkboxes toggle, sliders move, date/time pickers open, dropdowns show extracted options, dialogs open, and navigation/tab items can be selected. | These interactions do not invoke the imported app's callbacks, business logic, ViewModel, navigation, network or `remember` state. RangeSlider is currently a single-thumb approximation; radio-group exclusivity and accessibility semantics are not guaranteed. |
+| 4. Device sizes, orientation and responsive preview | Partial | Compact, Phone and Tablet presets; Rotate; custom width/height from 240–1200 dp by 320–2400 dp; horizontal/vertical scrolling; viewport and source selection are retained across recreation. Native generated views are remeasured at the selected viewport size. | This is a configurable viewport, not an emulator. It does not fully emulate device density, font scale, system bars, cutouts, fold posture, per-device resources or Android configuration changes. Since the UI is approximated with Views, reflow can differ from real Compose. |
+| 5. Real Jetpack Compose runtime rendering | Partial; real-device handoff exists | **Build & Run · Exact Device Preview** packages the imported project and sends it through the local Gradle build/install flow. After installation, **Run Exact Device Preview** launches the compiled app on the same phone. That launched app runs the actual Android/Compose runtime, including app state and callbacks. Build logs and errors are surfaced by the build workflow; the source preview has Refresh and visible failure messages. | The compiled app is launched as a separate installed app; its live Compose UI is not embedded in the source-preview viewport. Refresh re-renders source approximations; it is not Compose hot reload. Import-specific runtime validation requires a successful local build/install and on-device launch. |
+
+## Current verification
+
+- The source-preview theme improvement was committed as `a1d68cb64868bb0fbb060aca87099020b91949e7` on 2026-11-24.
+- GitHub Actions run [#311](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45358430946) completed successfully, including the APK callback unit-test step and debug APK packaging/upload.
+- This CI run validates the Pocket APK Studio app itself. It does not execute an imported customer's Compose app on a physical device.
+
+## Next work
+
+1. Keep improving Phase 2 fidelity without claiming complete Compose rendering (especially `@Preview` configurations, modifier combinations, drawable/vector resources and custom layouts).
+2. Improve Phase 3 control semantics, especially grouped radio selection and range controls, while clearly identifying simulated interactions.
+3. Improve Phase 4 configuration fidelity and show the limitations of a viewport that is not an emulator.
+4. Continue Phase 5 runtime handoff/error diagnostics. Do not label the source pane a true runtime renderer until the imported app is actually compiled and executed; a separate installed-app launch remains the verified path.
+5. Mark a phase complete only after feature coverage and practical validation, not from compilation alone. Physical-device confirmation may still be required.
