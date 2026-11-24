@@ -134,14 +134,11 @@ class TermuxResultService : IntentService("TermuxResultService") {
             sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
             return
         }
-        val apkPath = Regex("APK_SAVED=([^\\r\\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
         val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
         val pendingApkUri = buildPrefs.getString("pending_build_apk_uri", null)
         val pendingApkName = buildPrefs.getString("pending_build_apk_name", null)
-        val verifiedApk = materializeBuiltApk(pendingApkUri, pendingApkName, apkPath)
-        val successful = exitCode == 0 && errCode == -1 && apkPath != null && verifiedApk != null
-        // RUN_COMMAND callback output can be empty on some Android/Termux versions.
-        // In that case, recover the complete transcript from the MediaStore live-log URI.
+        // RUN_COMMAND callback output can be empty or partial on some Android/Termux versions.
+        // Read the persisted transcript before parsing APK_SAVED so the callback can recover it.
         val liveLogUriText = buildPrefs.getString("live_build_log_uri", null)
         val liveLogFallback = liveLogUriText?.let { text ->
             runCatching {
@@ -149,7 +146,10 @@ class TermuxResultService : IntentService("TermuxResultService") {
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
             }.getOrDefault("")
         }.orEmpty()
-        val primaryBuildLog = if (liveLogFallback.length > stdout.length) liveLogFallback else stdout
+        val primaryBuildLog = BuildApkCallbackParser.preferredTranscript(stdout, liveLogFallback)
+        val apkPath = BuildApkCallbackParser.findSavedApkPath(primaryBuildLog)
+        val verifiedApk = materializeBuiltApk(pendingApkUri, pendingApkName, apkPath)
+        val successful = exitCode == 0 && errCode == -1 && apkPath != null && verifiedApk != null
         val combined = buildString {
             append(primaryBuildLog)
             if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
