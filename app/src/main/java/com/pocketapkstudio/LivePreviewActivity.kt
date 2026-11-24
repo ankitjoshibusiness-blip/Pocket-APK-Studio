@@ -777,11 +777,16 @@ class LivePreviewActivity : Activity() {
             val systemDark = (resources.configuration.uiMode and
                 android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                 android.content.res.Configuration.UI_MODE_NIGHT_YES
-            val usesDarkTheme = previewDarkThemeOverride ?: when {
-                darkScheme.isNotEmpty() && lightScheme.isEmpty() -> true
-                lightScheme.isNotEmpty() && darkScheme.isNotEmpty() -> systemDark
-                else -> systemDark && darkScheme.isNotEmpty()
-            }
+            val hasLightScheme = Regex("""\blightColorScheme\s*\(""")
+                .containsMatchIn(structuralCode)
+            val hasDarkScheme = Regex("""\bdarkColorScheme\s*\(""")
+                .containsMatchIn(structuralCode)
+            val usesDarkTheme = ComposePreviewThemeMode.resolve(
+                overrideDark = previewDarkThemeOverride,
+                systemDark = systemDark,
+                hasLightScheme = hasLightScheme,
+                hasDarkScheme = hasDarkScheme
+            )
             colorMap.putAll(if (usesDarkTheme) darkScheme.ifEmpty { lightScheme } else lightScheme.ifEmpty { darkScheme })
             val themeBackground = colorMap["background"] ?: colorMap["surface"] ?:
                 if (usesDarkTheme) 0xFF171B24.toInt() else 0xFFF5F7FF.toInt()
