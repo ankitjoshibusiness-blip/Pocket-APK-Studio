@@ -20,6 +20,7 @@ This tracker deliberately separates source-derived approximations from a real co
 - The source-preview theme improvement was committed as `a1d68cb64868bb0fbb060aca87099020b91949e7` on 2026-11-24.
 - GitHub Actions run [#311](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45358430946) completed successfully, including the APK callback unit-test step and debug APK packaging/upload.
 - GitHub Actions run [#313](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45359172169) completed successfully with the theme-mode helper tests and debug APK packaging/upload.
+- GitHub Actions run [#314](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45359622359) completed successfully. `testDebugUnitTest` passed (including the radio selection state tests), and the debug APK was packaged and uploaded. The tests cover the pure selection-state helper; the generated-view grouping still needs practical on-device confirmation.
 - This CI run validates the Pocket APK Studio app itself. It does not execute an imported customer's Compose app on a physical device.
 
 ## Next work
