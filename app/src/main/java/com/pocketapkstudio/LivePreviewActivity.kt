@@ -1441,6 +1441,55 @@ class LivePreviewActivity : Activity() {
                 }
                 attached.add(index)
             }
+            // Compose RadioButtons share a selection group conceptually. The source-only
+            // renderer cannot recover arbitrary state expressions, so group generated radios
+            // by their nearest shared preview container and enforce one selected item locally.
+            val previewRadioButtons = previewNodes.mapNotNull { it.view as? RadioButton }
+            if (previewRadioButtons.size > 1) {
+                fun collectRadioButtons(view: View, output: MutableList<RadioButton>) {
+                    if (view is RadioButton) {
+                        if (previewRadioButtons.any { it === view }) output.add(view)
+                        return
+                    }
+                    if (view is ViewGroup) {
+                        for (childIndex in 0 until view.childCount) {
+                            collectRadioButtons(view.getChildAt(childIndex), output)
+                        }
+                    }
+                }
+
+                val radioGroups = LinkedHashMap<ViewGroup, MutableList<RadioButton>>()
+                for (radio in previewRadioButtons) {
+                    var ancestor = radio.parent as? ViewGroup
+                    var groupRoot: ViewGroup? = null
+                    while (ancestor != null && ancestor !== screen) {
+                        val descendants = ArrayList<RadioButton>()
+                        collectRadioButtons(ancestor, descendants)
+                        if (descendants.size > 1) {
+                            groupRoot = ancestor
+                            break
+                        }
+                        ancestor = ancestor.parent as? ViewGroup
+                    }
+                    if (groupRoot != null) {
+                        radioGroups.getOrPut(groupRoot) { ArrayList() }.add(radio)
+                    }
+                }
+
+                for (group in radioGroups.values) {
+                    if (group.size < 2) continue
+                    val selection = PreviewRadioSelectionState(group.indexOfFirst { it.isChecked })
+                    group.forEachIndexed { itemIndex, radio ->
+                        radio.isChecked = selection.isSelected(itemIndex)
+                        radio.setOnClickListener {
+                            selection.select(itemIndex, group.size)
+                            group.forEachIndexed { siblingIndex, sibling ->
+                                sibling.isChecked = selection.isSelected(siblingIndex)
+                            }
+                        }
+                    }
+                }
+            }
             if (rendered == 0) {
                 screen.addView(TextView(this).apply {
                     text = "Compose source was found, but supported UI calls could not be extracted. This is a static approximation, not a running Compose renderer."
