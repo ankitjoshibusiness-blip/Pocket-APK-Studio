@@ -27,6 +27,8 @@ class LivePreviewActivity : Activity() {
     private var previewWidthDp = 360
     private var previewHeightDp = 800
     private var selectedPreviewPath: String? = null
+    private var previewDarkThemeOverride: Boolean? = null
+    private lateinit var themeButton: Button
     private var webPreviewView: android.webkit.WebView? = null
     private var layouts: List<File> = emptyList()
 
@@ -35,6 +37,11 @@ class LivePreviewActivity : Activity() {
         previewWidthDp = (savedInstanceState?.getInt("preview_width_dp", 360) ?: 360).coerceIn(240, 1200)
         previewHeightDp = (savedInstanceState?.getInt("preview_height_dp", 800) ?: 800).coerceIn(320, 2400)
         selectedPreviewPath = savedInstanceState?.getString("preview_source_path")
+        previewDarkThemeOverride = when (savedInstanceState?.getInt("preview_theme_mode", 0) ?: 0) {
+            1 -> true
+            2 -> false
+            else -> null
+        }
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
@@ -63,6 +70,11 @@ class LivePreviewActivity : Activity() {
         outState.putInt("preview_width_dp", previewWidthDp)
         outState.putInt("preview_height_dp", previewHeightDp)
         outState.putString("preview_source_path", selectedPreviewPath)
+        outState.putInt("preview_theme_mode", when (previewDarkThemeOverride) {
+            true -> 1
+            false -> 2
+            null -> 0
+        })
         super.onSaveInstanceState(outState)
     }
 
@@ -97,12 +109,39 @@ class LivePreviewActivity : Activity() {
         deviceControls.addView(deviceButton("Tablet", 600, 900), LinearLayout.LayoutParams(0, dp(42), 1f))
         deviceControls.addView(deviceButton("Rotate", 0, 0, true), LinearLayout.LayoutParams(0, dp(42), 1f))
         root.addView(deviceControls, LinearLayout.LayoutParams(-1, -2))
-        root.addView(Button(this).apply {
-            text = "Custom viewport size (dp)"
+        val previewOptions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        previewOptions.addView(Button(this).apply {
+            text = "Custom size"
             isAllCaps = false
             contentDescription = "Set a custom device preview width and height in dp"
             setOnClickListener { showCustomDeviceDialog() }
-        }, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(3); bottomMargin = dp(4) })
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(4) })
+        themeButton = Button(this).apply {
+            text = previewThemeLabel()
+            isAllCaps = false
+            contentDescription = "Cycle between system, dark and light Compose preview themes"
+            setOnClickListener {
+                previewDarkThemeOverride = when (previewDarkThemeOverride) {
+                    null -> true
+                    true -> false
+                    false -> null
+                }
+                text = previewThemeLabel()
+                if (selectedPreviewPath?.endsWith(".kt", ignoreCase = true) == true) {
+                    refreshCurrentPreview()
+                } else {
+                    Toast.makeText(this@LivePreviewActivity, "Theme mode will apply to Compose source previews.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        previewOptions.addView(themeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(4) })
+        root.addView(previewOptions, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(3)
+            bottomMargin = dp(4)
+        })
         val buildRunButton = Button(this).apply {
             text = "Build & Run · Exact Device Preview"
             isAllCaps = false
@@ -234,6 +273,12 @@ class LivePreviewActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun previewThemeLabel(): String = "Theme: " + when (previewDarkThemeOverride) {
+        true -> "Dark"
+        false -> "Light"
+        null -> "System"
     }
 
     private fun applyDeviceProfile() {
@@ -683,15 +728,11 @@ class LivePreviewActivity : Activity() {
                 setBackgroundColor(0xFFF5F7FF.toInt())
             }
             val colorMap = HashMap<String, Int>()
-            Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(structuralCode).forEach {
-                runCatching { colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2].takeLast(6)) }
+            Regex("""(?:private\\s+)?val\\s+(\\w+)\\s*=\\s*Color\\(\\s*0x([0-9A-Fa-f]{8})[Ll]?\\s*\\)""").findAll(structuralCode).forEach {
+                runCatching {
+                    colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2])
+                }
             }
-            Regex("""(primary|secondary|tertiary|background|surface|onPrimary|onSecondary|onSurface|error)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""").findAll(structuralCode).forEach { match ->
-                runCatching { colorMap[match.groupValues[1]] = android.graphics.Color.parseColor("#" + match.groupValues[2].takeLast(6)) }
-            }
-            val usesDarkTheme = Regex("""darkColorScheme\s*\(""").containsMatchIn(structuralCode)
-            val themeBackground = colorMap["background"] ?: colorMap["surface"] ?: if (usesDarkTheme) 0xFF171B24.toInt() else 0xFFF5F7FF.toInt()
-            val themeOnBackground = colorMap["onSurface"] ?: if (usesDarkTheme) Color.WHITE else 0xFF263449.toInt()
             fun findClosing(text: String, open: Int, left: Char, right: Char): Int {
                 var depth = 0
                 var quoted = false
@@ -699,7 +740,7 @@ class LivePreviewActivity : Activity() {
                 for (i in open until text.length) {
                     val ch = text[i]
                     if (quoted) {
-                        if (escaped) escaped = false else if (ch == '\\') escaped = true else if (ch == '"') quoted = false
+                        if (escaped) escaped = false else if (ch == '\\\\') escaped = true else if (ch == '"') quoted = false
                     } else {
                         if (ch == '"') quoted = true
                         else if (ch == left) depth++
@@ -708,6 +749,44 @@ class LivePreviewActivity : Activity() {
                 }
                 return -1
             }
+            fun schemeColors(functionName: String): Map<String, Int> {
+                val match = Regex("""\\b""" + Regex.escape(functionName) + """\\s*\\(""")
+                    .find(structuralCode) ?: return emptyMap()
+                val open = structuralCode.indexOf('(', match.range.first)
+                val close = findClosing(structuralCode, open, '(', ')')
+                if (close <= open) return emptyMap()
+                val arguments = code.substring(open + 1, close)
+                val colors = LinkedHashMap<String, Int>()
+                val parameter = Regex(
+                    """\\b([A-Za-z_]\\w*)\\s*=\\s*(?:Color\\(\\s*0x([0-9A-Fa-f]{8})[Ll]?\\s*\\)|([A-Za-z_]\\w*))"""
+                )
+                parameter.findAll(arguments).forEach { entry ->
+                    val hex = entry.groupValues[2]
+                    val reference = entry.groupValues[3]
+                    val value = if (hex.isNotBlank()) {
+                        runCatching { Color.parseColor("#$hex") }.getOrNull()
+                    } else {
+                        colorMap[reference]
+                    }
+                    if (value != null) colors[entry.groupValues[1]] = value
+                }
+                return colors
+            }
+            val lightScheme = schemeColors("lightColorScheme")
+            val darkScheme = schemeColors("darkColorScheme")
+            val systemDark = (resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val usesDarkTheme = previewDarkThemeOverride ?: when {
+                darkScheme.isNotEmpty() && lightScheme.isEmpty() -> true
+                lightScheme.isNotEmpty() && darkScheme.isNotEmpty() -> systemDark
+                else -> systemDark && darkScheme.isNotEmpty()
+            }
+            colorMap.putAll(if (usesDarkTheme) darkScheme.ifEmpty { lightScheme } else lightScheme.ifEmpty { darkScheme })
+            val themeBackground = colorMap["background"] ?: colorMap["surface"] ?:
+                if (usesDarkTheme) 0xFF171B24.toInt() else 0xFFF5F7FF.toInt()
+            val themeOnBackground = colorMap["onSurface"] ?: colorMap["onBackground"] ?:
+                if (usesDarkTheme) Color.WHITE else 0xFF263449.toInt()
             val stringResources = HashMap<String, String>()
             projectRoot.walkTopDown().maxDepth(10)
                 .filter { file ->
@@ -1366,7 +1445,9 @@ class LivePreviewActivity : Activity() {
             } else {
                 screen.addView(TextView(this).apply {
                     text = "Static Compose preview · " + rendered + " detected elements · " +
-                        sourceFiles.size + " Kotlin source file(s) scanned · App logic and exact layout are not executed"
+                        sourceFiles.size + " Kotlin source file(s) scanned · " +
+                        (if (usesDarkTheme) "dark" else "light") +
+                        " theme · App logic and exact layout are not executed"
                     textSize = 11f
                     setTextColor(0xFF65738B.toInt())
                     setPadding(0, dp(12), 0, dp(8))
