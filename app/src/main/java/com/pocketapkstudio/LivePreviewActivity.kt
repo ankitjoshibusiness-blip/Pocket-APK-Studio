@@ -728,7 +728,7 @@ class LivePreviewActivity : Activity() {
                 setBackgroundColor(0xFFF5F7FF.toInt())
             }
             val colorMap = HashMap<String, Int>()
-            Regex("""(?:private\\s+)?val\\s+(\\w+)\\s*=\\s*Color\\(\\s*0x([0-9A-Fa-f]{8})[Ll]?\\s*\\)""").findAll(structuralCode).forEach {
+            Regex("""(?:private\s+)?val\s+(\w+)\s*=\s*Color\(\s*0x([0-9A-Fa-f]{8})[Ll]?\s*\)""").findAll(structuralCode).forEach {
                 runCatching {
                     colorMap[it.groupValues[1]] = android.graphics.Color.parseColor("#" + it.groupValues[2])
                 }
@@ -740,7 +740,7 @@ class LivePreviewActivity : Activity() {
                 for (i in open until text.length) {
                     val ch = text[i]
                     if (quoted) {
-                        if (escaped) escaped = false else if (ch == '\\\\') escaped = true else if (ch == '"') quoted = false
+                        if (escaped) escaped = false else if (ch == '\\') escaped = true else if (ch == '"') quoted = false
                     } else {
                         if (ch == '"') quoted = true
                         else if (ch == left) depth++
@@ -750,7 +750,7 @@ class LivePreviewActivity : Activity() {
                 return -1
             }
             fun schemeColors(functionName: String): Map<String, Int> {
-                val match = Regex("""\\b""" + Regex.escape(functionName) + """\\s*\\(""")
+                val match = Regex("""\b""" + Regex.escape(functionName) + """\s*\(""")
                     .find(structuralCode) ?: return emptyMap()
                 val open = structuralCode.indexOf('(', match.range.first)
                 val close = findClosing(structuralCode, open, '(', ')')
@@ -758,7 +758,7 @@ class LivePreviewActivity : Activity() {
                 val arguments = code.substring(open + 1, close)
                 val colors = LinkedHashMap<String, Int>()
                 val parameter = Regex(
-                    """\\b([A-Za-z_]\\w*)\\s*=\\s*(?:Color\\(\\s*0x([0-9A-Fa-f]{8})[Ll]?\\s*\\)|([A-Za-z_]\\w*))"""
+                    """\b([A-Za-z_]\w*)\s*=\s*(?:Color\(\s*0x([0-9A-Fa-f]{8})[Ll]?\s*\)|([A-Za-z_]\w*))"""
                 )
                 parameter.findAll(arguments).forEach { entry ->
                     val hex = entry.groupValues[2]
