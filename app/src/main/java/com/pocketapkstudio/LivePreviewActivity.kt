@@ -1379,10 +1379,10 @@ class LivePreviewActivity : Activity() {
                     // not Center. Centering every child made siblings overlap so a trailing
                     // Icon (often a heart) could hide Text and controls underneath.
                     val childAlignment = Regex(
-                        """Modifier\\.align\\s*\\(\\s*Alignment\\.(TopStart|TopEnd|BottomStart|BottomEnd|CenterStart|CenterEnd|TopCenter|BottomCenter|Center)\\s*\\)"""
+                        """Modifier\.align\s*\(\s*Alignment\.(TopStart|TopEnd|BottomStart|BottomEnd|CenterStart|CenterEnd|TopCenter|BottomCenter|Center)\s*\)"""
                     ).find(node.args)?.groupValues?.get(1)
                     val parentAlignment = Regex(
-                        """(?:contentAlignment|alignment)\\s*=\\s*Alignment\\.(TopStart|TopEnd|BottomStart|BottomEnd|CenterStart|CenterEnd|TopCenter|BottomCenter|Center)"""
+                        """(?:contentAlignment|alignment)\s*=\s*Alignment\.(TopStart|TopEnd|BottomStart|BottomEnd|CenterStart|CenterEnd|TopCenter|BottomCenter|Center)"""
                     ).find(parentArgs)?.groupValues?.get(1)
                     val alignment = childAlignment ?: parentAlignment ?: "TopStart"
                     val boxGravity = when (alignment) {
@@ -1440,7 +1440,7 @@ class LivePreviewActivity : Activity() {
                 // Text/Surface/Box with Modifier.clickable gets local preview feedback.
                 // Imported Compose callbacks and app state are intentionally not executed.
                 if (node.kind !in buttonKinds && node.kind !in chipKinds &&
-                    Regex("""Modifier\\.clickable\\s*\\(""").containsMatchIn(node.args)) {
+                    Regex("""Modifier\.clickable\s*\(""").containsMatchIn(node.args)) {
                     node.view.isClickable = true
                     node.view.setOnClickListener {
                         node.view.isSelected = !node.view.isSelected
