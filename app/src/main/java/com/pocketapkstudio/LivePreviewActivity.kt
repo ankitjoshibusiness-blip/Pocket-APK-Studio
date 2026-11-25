@@ -1108,8 +1108,8 @@ class LivePreviewActivity : Activity() {
                         contentDescription = label ?: "Preview checkbox"
                         isChecked = Regex("""checked\s*=\s*true""").containsMatchIn(callArgs)
                     }
-                    "Slider", "RangeSlider" -> SeekBar(this).apply {
-                        contentDescription = label ?: if (kind == "RangeSlider") "Preview range slider (single-thumb approximation)" else "Preview slider"
+                    "Slider" -> SeekBar(this).apply {
+                        contentDescription = label ?: "Preview slider"
                         max = 100
                         val value = Regex("""(?:^|[,\s])value\s*=\s*(-?\d+(?:\.\d+)?)f?""")
                             .find(callArgs)?.groupValues?.get(1)?.toFloatOrNull()
@@ -1120,6 +1120,28 @@ class LivePreviewActivity : Activity() {
                             val upper = range.groupValues[2].toFloatOrNull() ?: 1f
                             if (upper > lower) (((value - lower) / (upper - lower)) * 100f).toInt().coerceIn(0, 100) else 50
                         } else if (value != null && value in 0f..1f) (value * 100f).toInt() else 50
+                    }
+                    "RangeSlider" -> {
+                        val requestedRange = Regex("""valueRange\s*=\s*(-?\d+(?:\.\d+)?)f?\s*\.\.\s*(-?\d+(?:\.\d+)?)f?""")
+                            .find(callArgs)
+                        val requestedMinimum = requestedRange?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
+                        val requestedMaximum = requestedRange?.groupValues?.get(2)?.toFloatOrNull() ?: 1f
+                        val safeMinimum = requestedMinimum.takeIf { it.isFinite() } ?: 0f
+                        val safeMaximum = requestedMaximum.takeIf { it.isFinite() && it > safeMinimum } ?: (safeMinimum + 1f)
+                        val requestedValues = Regex("""\bvalue\s*=\s*(-?\d+(?:\.\d+)?)f?\s*\.\.\s*(-?\d+(?:\.\d+)?)f?""")
+                            .find(callArgs)
+                        val startValue = requestedValues?.groupValues?.get(1)?.toFloatOrNull()
+                            ?: (safeMinimum + (safeMaximum - safeMinimum) * 0.25f)
+                        val endValue = requestedValues?.groupValues?.get(2)?.toFloatOrNull()
+                            ?: (safeMinimum + (safeMaximum - safeMinimum) * 0.75f)
+                        PreviewRangeSliderView(
+                            context = this,
+                            minimum = safeMinimum,
+                            maximum = safeMaximum,
+                            start = startValue,
+                            end = endValue,
+                            description = label ?: "Preview range slider"
+                        )
                     }
                     "Card", "ElevatedCard", "OutlinedCard", "Surface" -> LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
