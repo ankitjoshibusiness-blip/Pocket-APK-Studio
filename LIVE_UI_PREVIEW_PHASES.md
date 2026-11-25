@@ -22,6 +22,8 @@ This tracker deliberately separates source-derived approximations from a real co
 - GitHub Actions run [#313](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45359172169) completed successfully with the theme-mode helper tests and debug APK packaging/upload.
 - GitHub Actions run [#314](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45359622359) completed successfully. `testDebugUnitTest` passed (including the radio selection state tests), and the debug APK was packaged and uploaded. The tests cover the pure selection-state helper; the generated-view grouping still needs practical on-device confirmation.
 - This CI run validates the Pocket APK Studio app itself. It does not execute an imported customer's Compose app on a physical device.
+- GitHub Actions run [#319](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45580392235) on 2026-11-25 validated the two-thumb RangeSlider implementation and its state tests; `testDebugUnitTest`, `assembleDebug`, and both artifact uploads succeeded.
+- Final tracker commit `f7298ffbda8d20e5e21afcbe7c3fe177ebe91f57` was verified by run [#320](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45580439389) on 2026-11-25. The local APK-engine validation, unit-test task, debug APK build, build-log upload and APK upload all completed successfully.
 
 ## Next work
 
