@@ -122,6 +122,50 @@ pas_find_gradle_root() {
     return 1
 }
 
+# A Gradle wrapper is usable only when its launcher, JAR and properties exist.
+# A partial source ZIP can contain gradlew without the files it needs; in that case
+# prefer the installed Gradle instead of failing after selecting a broken wrapper.
+pas_find_gradle_wrapper() {
+    local project_dir="$1"
+    local gradle_root="$2"
+    local search_dir="$gradle_root"
+
+    PAS_GRADLE_WRAPPER=""
+    while [[ "$search_dir" == "$project_dir" || "$search_dir" == "$project_dir/"* ]]; do
+        if [[ -f "$search_dir/gradlew" ]]; then
+            if [[ -s "$search_dir/gradle/wrapper/gradle-wrapper.jar" &&
+                -s "$search_dir/gradle/wrapper/gradle-wrapper.properties" ]]; then
+                PAS_GRADLE_WRAPPER="$search_dir/gradlew"
+                return 0
+            fi
+            pas_log "WARNING: Ignoring incomplete Gradle wrapper at $search_dir (gradle-wrapper.jar or gradle-wrapper.properties is missing)."
+        fi
+        [[ "$search_dir" == "$project_dir" ]] && break
+        search_dir="$(dirname "$search_dir")"
+    done
+    return 1
+}
+
+# Resolve the launcher once so CI self-tests and the phone build use identical rules.
+pas_select_gradle_launcher() {
+    local project_dir="$1"
+    local gradle_root="$2"
+
+    PAS_GRADLE_LAUNCHER=""
+    PAS_GRADLE_KIND=""
+    if pas_find_gradle_wrapper "$project_dir" "$gradle_root"; then
+        PAS_GRADLE_LAUNCHER="$PAS_GRADLE_WRAPPER"
+        PAS_GRADLE_KIND="wrapper"
+        return 0
+    fi
+    if pas_require_command gradle; then
+        PAS_GRADLE_LAUNCHER="$(command -v gradle)"
+        PAS_GRADLE_KIND="system"
+        return 0
+    fi
+    return 1
+}
+
 # Append final overrides so an existing Java 8/Kotlin 1.8 setting does not win.
 pas_align_gradle_targets() {
     local gradle_file="$1"
@@ -232,6 +276,11 @@ pas_run_self_tests() (
     local found_multi_flavored
     local found_release
     local digest
+    local wrapper_project
+    local nested_gradle_root
+    local incomplete_wrapper_project
+    local fake_bin
+    local saved_path="$PATH"
     local test_count=0
 
     test_root="$(mktemp -d "${TMPDIR:-/tmp}/pas-build-engine-test.XXXXXX")"
@@ -326,6 +375,66 @@ PAS_TEST_ZIPS
     else
         test_pass "project without settings.gradle is rejected"
     fi
+
+    # A wrapper script alone is not sufficient; it must have the JAR and properties.
+    wrapper_project="$test_root/wrapper project"
+    mkdir -p "$wrapper_project/gradle/wrapper" "$wrapper_project/app"
+    printf '#!/usr/bin/env sh\n' > "$wrapper_project/gradlew"
+    printf 'wrapper-jar' > "$wrapper_project/gradle/wrapper/gradle-wrapper.jar"
+    printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-bin.zip\n' > "$wrapper_project/gradle/wrapper/gradle-wrapper.properties"
+    : > "$wrapper_project/settings.gradle"
+    : > "$wrapper_project/app/build.gradle"
+    nested_gradle_root="$wrapper_project/app"
+    if pas_find_gradle_wrapper "$wrapper_project" "$nested_gradle_root" &&
+        [[ "$PAS_GRADLE_WRAPPER" == "$wrapper_project/gradlew" ]]; then
+        test_pass "complete parent Gradle wrapper is found for a nested Gradle root"
+    else
+        printf 'FAIL: complete parent Gradle wrapper was not discovered\n' >&2
+        return 1
+    fi
+
+    incomplete_wrapper_project="$test_root/incomplete wrapper project"
+    mkdir -p "$incomplete_wrapper_project/gradle/wrapper"
+    printf '#!/usr/bin/env sh\n' > "$incomplete_wrapper_project/gradlew"
+    printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-bin.zip\n' > "$incomplete_wrapper_project/gradle/wrapper/gradle-wrapper.properties"
+    if pas_find_gradle_wrapper "$incomplete_wrapper_project" "$incomplete_wrapper_project"; then
+        printf 'FAIL: incomplete Gradle wrapper was accepted\n' >&2
+        return 1
+    else
+        test_pass "Gradle wrapper without its JAR is rejected"
+    fi
+
+    fake_bin="$test_root/fake-bin"
+    mkdir -p "$fake_bin"
+    printf '#!/usr/bin/env sh\nexit 0\n' > "$fake_bin/gradle"
+    chmod +x "$fake_bin/gradle"
+    PATH="$fake_bin:$saved_path"
+    if pas_select_gradle_launcher "$incomplete_wrapper_project" "$incomplete_wrapper_project" &&
+        [[ "$PAS_GRADLE_KIND" == "system" && "$PAS_GRADLE_LAUNCHER" == "$fake_bin/gradle" ]]; then
+        test_pass "an incomplete wrapper falls back to the installed Gradle command"
+    else
+        PATH="$saved_path"
+        printf 'FAIL: incomplete wrapper did not fall back to system Gradle\n' >&2
+        return 1
+    fi
+    if pas_select_gradle_launcher "$wrapper_project" "$nested_gradle_root" &&
+        [[ "$PAS_GRADLE_KIND" == "wrapper" && "$PAS_GRADLE_LAUNCHER" == "$wrapper_project/gradlew" ]]; then
+        test_pass "a complete wrapper takes precedence over the installed Gradle command"
+    else
+        PATH="$saved_path"
+        printf 'FAIL: complete wrapper did not take precedence\n' >&2
+        return 1
+    fi
+    mkdir -p "$test_root/empty-bin"
+    PATH="$test_root/empty-bin"
+    if pas_select_gradle_launcher "$incomplete_wrapper_project" "$incomplete_wrapper_project"; then
+        PATH="$saved_path"
+        printf 'FAIL: launcher selection succeeded without a complete wrapper or system Gradle\n' >&2
+        return 1
+    else
+        test_pass "missing complete wrapper and missing system Gradle produce a detectable failure"
+    fi
+    PATH="$saved_path"
 
     kts_file="$test_root/Kotlin Android Module/build.gradle.kts"
     mkdir -p "$(dirname "$kts_file")"
@@ -453,8 +562,6 @@ pas_ubuntu_main() {
     local settings_file
     local gradle_file
     local android_modules=0
-    local wrapper=""
-    local search_dir
     local apk
     local apk_name
     local output_dir="/mnt/shared/Download/PocketAPKStudio/Builds"
@@ -596,27 +703,18 @@ pas_ubuntu_main() {
     (( android_modules > 0 )) ||
         pas_fail 39 "No Android module with an android { } Gradle block was found. This ZIP may not be an Android Gradle project."
 
-    wrapper=""
-    search_dir="$gradle_root"
-    while [[ "$search_dir" == "$project" || "$search_dir" == "$project/"* ]]; do
-        if [[ -f "$search_dir/gradlew" ]]; then
-            wrapper="$search_dir/gradlew"
-            break
-        fi
-        [[ "$search_dir" == "$project" ]] && break
-        search_dir="$(dirname "$search_dir")"
-    done
-
     pas_log "GRADLE_ROOT=$gradle_root"
-    if [[ -n "$wrapper" ]]; then
-        chmod +x "$wrapper" || pas_fail 40 "Could not make the Gradle wrapper executable: $wrapper"
-        pas_log "GRADLE_LAUNCHER=$wrapper"
-        "$wrapper" -p "$gradle_root" --no-daemon --max-workers=2 --console=plain --info assembleDebug
-    elif pas_require_command gradle; then
-        pas_log "GRADLE_LAUNCHER=$(command -v gradle)"
-        gradle --no-daemon --max-workers=2 --console=plain --info -p "$gradle_root" assembleDebug
+    if ! pas_select_gradle_launcher "$project" "$gradle_root"; then
+        pas_fail 12 "No complete Gradle wrapper (gradlew plus gradle/wrapper JAR and properties) was found under the imported project, and Gradle is not installed in Ubuntu."
+    fi
+    if [[ "$PAS_GRADLE_KIND" == "wrapper" ]]; then
+        chmod +x "$PAS_GRADLE_LAUNCHER" ||
+            pas_fail 40 "Could not make the Gradle wrapper executable: $PAS_GRADLE_LAUNCHER"
+        pas_log "GRADLE_LAUNCHER=$PAS_GRADLE_LAUNCHER (complete wrapper)"
+        "$PAS_GRADLE_LAUNCHER" -p "$gradle_root" --no-daemon --max-workers=2 --console=plain --info assembleDebug
     else
-        pas_fail 12 "No gradlew wrapper was found under the imported project and Gradle is not installed in Ubuntu."
+        pas_log "GRADLE_LAUNCHER=$PAS_GRADLE_LAUNCHER (installed Gradle fallback)"
+        gradle --no-daemon --max-workers=2 --console=plain --info -p "$gradle_root" assembleDebug
     fi
 
     mkdir -p "$output_dir"
