@@ -101,7 +101,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
     private var projectIsGradle = false
     private var projectIsFlutter = false
     private var navigateToWorkflow: (() -> Unit)? = null
-    private var pendingRuntimePreviewPackage: String? = null
     private val buildResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
@@ -243,6 +242,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         uri?.let {
             selectedUri = it
             try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            inspectZip(it)
             openProjectEditor(it)
         }
     }
@@ -375,6 +375,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         setupNextButton.isEnabled = false
         setupNextButton.alpha = 0.45f
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
+            .putBoolean("environment_setup_running", true)
             .putBoolean("environment_setup_complete", false)
             .remove("environment_setup_result")
             .apply()
@@ -425,7 +426,6 @@ class MainActivity : androidx.activity.ComponentActivity() {
                     rm -rf /root/Android/cmdline-tools/latest
                     mv /tmp/cmdline-tools/cmdline-tools /root/Android/cmdline-tools/latest
                 fi
-                echo "SCAN_ANDROID_SDK=INSTALLED"
                 NEED_SDK=0
                 [ -f /root/Android/Sdk/platforms/android-35/android.jar ] || NEED_SDK=1
                 [ -x /root/Android/Sdk/platform-tools/adb ] || NEED_SDK=1
@@ -442,14 +442,14 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 echo "SCAN_BUILD_TOOLS=INSTALLED"
                 echo BUILD_SERVER_READY=1
             '
-        """.trimIndent().replace("@D@", "$").replace("@D@", "@D@")
-        val resultIntent = Intent(this, TermuxResultService::class.java).apply {
+        """.trimIndent().replace("@D@", "$")
+        val resultIntent = Intent(this, TermuxResultReceiver::class.java).apply {
             putExtra("task_type", "environment_setup")
         }
         val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
         val flags = PendingIntent.FLAG_ONE_SHOT or
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-        val callback = PendingIntent.getService(this, requestCode, resultIntent, flags)
+        val callback = PendingIntent.getBroadcast(this, requestCode, resultIntent, flags)
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
@@ -461,25 +461,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
         try {
             startService(intent)
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
-                .putString("last_build_status", "Termux command sent. Waiting for build output…")
-                .putString("last_build_log", "Termux command sent.\nIf no output appears, check Termux RUN_COMMAND access and allow-external-apps.")
+                .putString("server_status", "Termux environment setup started. Waiting for scan output…")
                 .apply()
             // Termux environment setup can legitimately take longer than 30 seconds
             // while pkg/proot-distro downloads and configures Ubuntu. Do not mark a
             // still-running command as failed just because its callback is delayed.
             Handler(Looper.getMainLooper()).postDelayed({
                 val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
-                if (prefs.getBoolean("build_running", false)) {
-                    val live = prefs.getString("last_build_log", "").orEmpty()
-                    if (live.isBlank() || live.contains("Build starting…") || live.contains("Build starting...")) {
-                        val message = "Termux is taking longer than expected. The command has not reported back yet; it may still be running. Keep Termux installed and open it once, allow RUN_COMMAND permission, and check allow-external-apps=true in ~/.termux/termux.properties. Do not start a second build yet."
-                        prefs.edit()
-                            .putString("last_build_status", message)
-                            .putString("last_build_log", message)
-                            .apply()
-                        if (::status.isInitialized) status.text = message
-                        if (::logs.isInitialized) logs.text = message
-                    }
+                if (prefs.getBoolean("environment_setup_running", false)) {
+                    val message = "Termux is taking longer than expected. The setup command has not reported back yet; it may still be running. Keep Termux installed and open it once, allow RUN_COMMAND permission, and check allow-external-apps=true in ~/.termux/termux.properties."
+                    prefs.edit().putString("server_status", message).apply()
+                    if (::serverStatus.isInitialized) serverStatus.text = message
+                    if (::setupStatus.isInitialized) setupStatus.text = message
                 }
             }, 120000L)
         } catch (e: Exception) {
@@ -490,17 +483,18 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
             val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
             prefs.edit()
-                .putBoolean("build_running", false)
-                .putString("last_build_status", message)
-                .putString("last_build_log", message)
-                .putInt("last_build_percent", 0)
-                .putString("last_apk_path", null)
+                .putBoolean("environment_setup_running", false)
+                .putBoolean("environment_setup_complete", false)
+                .putString("server_status", message)
+                .putString("environment_setup_result", message)
                 .apply()
-            buildLogHandler.removeCallbacks(buildLogPollTask)
-            if (::buildProgress.isInitialized) buildProgress.visibility = View.GONE
-            if (::status.isInitialized) status.text = message
-            if (::logs.isInitialized) logs.text = message
-            if (::percentText.isInitialized) percentText.text = "BUILD NOT STARTED"
+            if (::setupProgress.isInitialized) setupProgress.visibility = View.GONE
+            if (::setupStatus.isInitialized) setupStatus.text = message
+            if (::setupResults.isInitialized) setupResults.text = message
+            if (::setupNextButton.isInitialized) {
+                setupNextButton.isEnabled = false
+                setupNextButton.alpha = 0.45f
+            }
             if (::serverStatus.isInitialized) serverStatus.text = message
         }
     }
@@ -511,10 +505,10 @@ class MainActivity : androidx.activity.ComponentActivity() {
             return
         }
         val command = "proot-distro login ubuntu -- bash -lc 'if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q 17 && test -x /root/Android/cmdline-tools/latest/bin/sdkmanager && test -f /root/Android/Sdk/platforms/android-35/android.jar && test -x /root/Android/Sdk/platform-tools/adb && test -x /root/Android/Sdk/build-tools/35.0.0/aapt; then echo BUILD_SERVER_READY=1; else echo BUILD_SERVER_FAILED=Ubuntu or Android SDK components are missing; exit 1; fi'"
-        val callbackIntent = Intent(this, TermuxResultService::class.java).apply { putExtra("task_type", "server_check") }
+        val callbackIntent = Intent(this, TermuxResultReceiver::class.java).apply { putExtra("task_type", "server_check") }
         val requestCode = (SystemClock.uptimeMillis() and 0x7fffffff).toInt()
         val flags = PendingIntent.FLAG_ONE_SHOT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-        val callback = PendingIntent.getService(this, requestCode, callbackIntent, flags)
+        val callback = PendingIntent.getBroadcast(this, requestCode, callbackIntent, flags)
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
@@ -931,7 +925,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
         menuHeader.addView(label("•  Live Process Logs", 15, 0xFF111820.toInt(), true), LinearLayout.LayoutParams(0, -2, 1f))
         val menuToggle = TextView(this).apply {
-            text = "⌄"
+            text = "⌃"
             textSize = 25f
             gravity = android.view.Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt())
@@ -1092,7 +1086,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         })
         toolsContent.addView(analysisCard)
         homeContent.addView(space(18))
-        homeContent.addView(label("Version 1.4 • APK analysis + JADX recovery", 12, 0xFF737B8D.toInt(), false))
+        homeContent.addView(label("Version 1.6 • APK analysis + JADX recovery", 12, 0xFF737B8D.toInt(), false))
 
         val previewContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1216,7 +1210,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             }
         }
         openPage = { pageIndex -> showPage(pageIndex) }
-        navigateToWorkflow = { showPage(0) }
+        navigateToWorkflow = { showPage(1) }
         openSettingsPage = { showPage(4) }
 
         fun addPageBackHeader(target: LinearLayout, title: String, home: Boolean = false) {
@@ -1257,6 +1251,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             it.layoutParams = LinearLayout.LayoutParams(0, dp(58), 1f).apply {
                 leftMargin = dp(2); rightMargin = dp(2)
             }
+            tabBar.addView(it)
         }
         val pageContainer = FrameLayout(this).apply {
             clipChildren = true
@@ -1417,7 +1412,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             prepareBuildLiveLog()
             appendBuildLiveLog("BUILD: Live transcript initialized; detailed command tracing enabled.")
         }.onFailure { error ->
-            buildPrefs.edit().putString("last_build_log", "Preparing project…\\nLive log file unavailable: ${error.message}").apply()
+            buildPrefs.edit().putString("last_build_log", "Preparing project…\nLive log file unavailable: ${error.message}").apply()
         }
         buildLogHandler.removeCallbacks(buildLogPollTask)
         buildLogHandler.post(buildLogPollTask)
@@ -1478,21 +1473,68 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
-    private fun prepareBuildLiveLog() {
-        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/"
-        contentResolver.delete(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-            arrayOf("build-live.log", folder)
-        )
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "build-live.log")
-            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+    @Suppress("DEPRECATION")
+    private fun legacyDownloadsSubdir(relativeSubpath: String): File {
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return File(downloads, relativeSubpath).apply { mkdirs() }
+    }
+
+    private fun createSharedDownloadEntry(
+        relativeSubpath: String,
+        displayName: String,
+        mimeType: String,
+        replaceExisting: Boolean
+    ): Uri {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val folder = Environment.DIRECTORY_DOWNLOADS + "/" + relativeSubpath.trim('/') + "/"
+            if (replaceExisting) {
+                contentResolver.delete(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                    arrayOf(displayName, folder)
+                )
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+            }
+            return contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("Could not create $displayName in $folder")
         }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("Could not create live build log")
-        contentResolver.openOutputStream(uri)?.use { it.write("Build starting…\\n".toByteArray()) }
+        val target = File(legacyDownloadsSubdir(relativeSubpath), displayName)
+        if (replaceExisting && target.exists()) target.delete()
+        return Uri.fromFile(target)
+    }
+
+    private fun deleteSharedDownloadUri(uri: Uri) {
+        if (uri.scheme == "file") {
+            uri.path?.let { File(it).delete() }
+        } else {
+            contentResolver.delete(uri, null, null)
+        }
+    }
+
+    private fun openSharedOutputStream(uri: Uri, mode: String = "w"): java.io.OutputStream? {
+        if (uri.scheme == "file") {
+            val file = File(uri.path ?: return null)
+            file.parentFile?.mkdirs()
+            return java.io.FileOutputStream(file, mode.contains("a"))
+        }
+        return contentResolver.openOutputStream(uri, mode)
+    }
+
+    private fun openSharedInputStream(uri: Uri): java.io.InputStream? {
+        if (uri.scheme == "file") {
+            val file = File(uri.path ?: return null)
+            return if (file.isFile) file.inputStream() else null
+        }
+        return contentResolver.openInputStream(uri)
+    }
+
+    private fun prepareBuildLiveLog() {
+        val uri = createSharedDownloadEntry("PocketAPKStudio", "build-live.log", "text/plain", replaceExisting = true)
+        openSharedOutputStream(uri)?.use { it.write("Build starting…\n".toByteArray(Charsets.UTF_8)) }
             ?: error("Could not initialize live build log")
         getSharedPreferences("build_state", MODE_PRIVATE).edit()
             .putString("live_build_log_uri", uri.toString()).apply()
@@ -1503,7 +1545,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .getString("live_build_log_uri", null) ?: return
         runCatching {
             val stamp = android.text.format.DateFormat.format("HH:mm:ss.SSS", System.currentTimeMillis())
-            contentResolver.openOutputStream(Uri.parse(uriText), "wa")?.use { output ->
+            openSharedOutputStream(Uri.parse(uriText), "wa")?.use { output ->
                 output.write("[$stamp] $message\n".toByteArray(Charsets.UTF_8))
                 output.flush()
             } ?: error("Could not append to live build log")
@@ -1515,7 +1557,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
         val uriText = prefs.getString("live_build_log_uri", null) ?: return
         try {
-            val text = contentResolver.openInputStream(Uri.parse(uriText))
+            val text = openSharedInputStream(Uri.parse(uriText))
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (text.isNotBlank()) {
                 val visible = text.takeLast(40000)
@@ -1578,17 +1620,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
         // A unique name prevents MediaStore auto-renaming the file while the
         // Termux command still tries to read the original name.
         val safeName = "project-${System.currentTimeMillis()}-$normalizedName"
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio")
-        }
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val outputUri = contentResolver.insert(collection, values) ?: error("Could not create ZIP in Downloads")
+        val outputUri = createSharedDownloadEntry("PocketAPKStudio", safeName, "application/zip", replaceExisting = false)
         try {
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "Cannot read selected ZIP" }
-                contentResolver.openOutputStream(outputUri).use { output ->
+                openSharedOutputStream(outputUri).use { output ->
                     requireNotNull(output) { "Cannot write ZIP to Downloads" }
                     val buffer = ByteArray(64 * 1024)
                     var copiedBytes = 0L
@@ -1608,7 +1644,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
                 }
             }
         } catch (e: Exception) {
-            contentResolver.delete(outputUri, null, null)
+            deleteSharedDownloadUri(outputUri)
             throw e
         }
         return safeName
@@ -1616,53 +1652,30 @@ class MainActivity : androidx.activity.ComponentActivity() {
 
     private fun copyBuildEngineToDownloads() {
         val displayName = "build-project.sh"
-        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/"
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        contentResolver.delete(
-            collection,
-            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-            arrayOf(displayName, folder)
-        )
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "text/x-shellscript")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
-        }
-        val uri = contentResolver.insert(collection, values)
-            ?: error("Could not copy the local APK build engine to Downloads")
+        val uri = createSharedDownloadEntry("PocketAPKStudio", displayName, "text/x-shellscript", replaceExisting = true)
         try {
             assets.open(displayName).use { input ->
-                contentResolver.openOutputStream(uri)?.use { output -> input.copyTo(output) }
+                openSharedOutputStream(uri)?.use { output -> input.copyTo(output) }
                     ?: error("Could not write the local APK build engine to Downloads")
             }
         } catch (e: Exception) {
-            contentResolver.delete(uri, null, null)
+            deleteSharedDownloadUri(uri)
             throw e
         }
     }
 
     private fun createBuildOutput(): String {
-        check(Build.VERSION.SDK_INT >= 29) {
-            "Automatic APK output registration requires Android 10 or newer."
-        }
         val displayName = "PocketAPKStudio-${System.currentTimeMillis()}.apk"
-        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Builds/"
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("Could not reserve an APK output file in Downloads/PocketAPKStudio/Builds")
+        val uri = createSharedDownloadEntry("PocketAPKStudio/Builds", displayName, "application/vnd.android.package-archive", replaceExisting = false)
         try {
-            contentResolver.openOutputStream(uri)?.use { }
+            openSharedOutputStream(uri)?.use { }
                 ?: error("Could not initialize the reserved APK output file")
             getSharedPreferences("build_state", MODE_PRIVATE).edit()
                 .putString("pending_build_apk_uri", uri.toString())
                 .putString("pending_build_apk_name", displayName)
                 .apply()
         } catch (error: Exception) {
-            contentResolver.delete(uri, null, null)
+            deleteSharedDownloadUri(uri)
             throw error
         }
         return displayName
@@ -1672,7 +1685,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
         val uriText = prefs.getString("pending_build_apk_uri", null)
         if (!uriText.isNullOrBlank()) {
-            runCatching { contentResolver.delete(Uri.parse(uriText), null, null) }
+            runCatching { deleteSharedDownloadUri(Uri.parse(uriText)) }
         }
         prefs.edit()
             .remove("pending_build_apk_uri")
@@ -1699,11 +1712,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
         // can read that item and materialize a private copy for install/share/preview.
         val command = "exec bash \"$scriptPath\" \"$zipName\" \"$outputName\""
 
-        val resultIntent = Intent(this, TermuxResultService::class.java)
+        val resultIntent = Intent(this, TermuxResultReceiver::class.java)
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
         val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+        val resultPendingIntent = PendingIntent.getBroadcast(this, requestCode, resultIntent, pendingFlags)
 
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
@@ -1885,13 +1898,28 @@ class MainActivity : androidx.activity.ComponentActivity() {
         recoveryProgress.progress = 1
         recoveryProgress.visibility = View.VISIBLE
         exportRecoveryButton.visibility = View.GONE
-        getSharedPreferences("recovery_state", MODE_PRIVATE).edit().clear()
+        val recoveryPrefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
+        val selectedMode = recoveryPrefs.getString("decompile_mode", "balanced") ?: "balanced"
+        recoveryPrefs.edit()
+            .putString("decompile_mode", selectedMode)
             .putString("status", "Preparing selected APK…")
             .putBoolean("running", true)
+            .putBoolean("failed", false)
+            .putBoolean("partial", false)
+            .putInt("percent", 1)
+            .putString("stage", "Preparing selected APK…")
+            .remove("zip_path")
+            .remove("log")
+            .remove("live_log")
+            .remove("pending_recovery_zip_uri")
+            .remove("pending_recovery_zip_name")
             .apply()
         lifecycleScope.launch {
             try {
-                withContext(Dispatchers.IO) { copyApkToRecoveryFolder(uri) }
+                withContext(Dispatchers.IO) {
+                    copyApkToRecoveryFolder(uri)
+                    createRecoveryOutput()
+                }
                 createRecoveryProgressFile()
                 recoveryStatus.text = "APK copied. Starting JADX in Ubuntu…"
                 getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
@@ -1909,50 +1937,53 @@ class MainActivity : androidx.activity.ComponentActivity() {
         }
     }
 
+    private fun createRecoveryOutput() {
+        val displayName = "CustomerManager-Recovered.zip"
+        val uri = createSharedDownloadEntry("PocketAPKStudio/Recovery", displayName, "application/zip", replaceExisting = true)
+        try {
+            openSharedOutputStream(uri)?.use { }
+                ?: error("Could not reserve recovery ZIP output")
+            getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+                .putString("pending_recovery_zip_uri", uri.toString())
+                .putString("pending_recovery_zip_name", displayName)
+                .apply()
+        } catch (error: Exception) {
+            deleteSharedDownloadUri(uri)
+            throw error
+        }
+    }
+
     private fun copyApkToRecoveryFolder(uri: Uri) {
-        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Recovery"
-        if (Build.VERSION.SDK_INT >= 29) {
-            contentResolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-                arrayOf("customer-manager.apk", folder + "/"))
-        }
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "customer-manager.apk")
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
-        }
-        val outputUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("Could not create APK in Downloads/PocketAPKStudio/Recovery")
+        val outputUri = createSharedDownloadEntry(
+            "PocketAPKStudio/Recovery",
+            "customer-manager.apk",
+            "application/vnd.android.package-archive",
+            replaceExisting = true
+        )
         try {
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "Cannot read selected APK" }
-                contentResolver.openOutputStream(outputUri).use { output ->
+                openSharedOutputStream(outputUri).use { output ->
                     requireNotNull(output) { "Cannot write APK to Recovery folder" }
                     input.copyTo(output)
                 }
             }
         } catch (e: Exception) {
-            contentResolver.delete(outputUri, null, null)
+            deleteSharedDownloadUri(outputUri)
             throw e
         }
     }
 
     private fun createRecoveryProgressFile() {
-        val folder = Environment.DIRECTORY_DOWNLOADS + "/PocketAPKStudio/Recovery"
-        val name = "decompile_progress.txt"
-        contentResolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
-            arrayOf(name, folder + "/"))
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
-        }
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("Could not create live decompilation progress file")
-        contentResolver.openOutputStream(uri).use { output ->
-            requireNotNull(output).write("P|1|Starting decompilation…\n".toByteArray())
-        }
+        val uri = createSharedDownloadEntry(
+            "PocketAPKStudio/Recovery",
+            "decompile_progress.txt",
+            "text/plain",
+            replaceExisting = true
+        )
+        openSharedOutputStream(uri)?.use { output ->
+            output.write("P|1|Starting decompilation…\n".toByteArray(Charsets.UTF_8))
+        } ?: error("Could not initialize live decompilation progress file")
         getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
             .putString("progress_uri", uri.toString()).putInt("percent", 1)
             .putString("stage", "Starting decompilation…").putString("live_log", "Progress tracking initialized.")
@@ -1969,7 +2000,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         val prefs = getSharedPreferences("recovery_state", MODE_PRIVATE)
         val uriText = prefs.getString("progress_uri", null) ?: return
         try {
-            val content = contentResolver.openInputStream(Uri.parse(uriText))?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val content = openSharedInputStream(Uri.parse(uriText))?.bufferedReader()?.use { it.readText() }.orEmpty()
             var percent = prefs.getInt("percent", 1)
             var stage = prefs.getString("stage", "Working…") ?: "Working…"
             val logLines = mutableListOf<String>()
@@ -2102,9 +2133,12 @@ class MainActivity : androidx.activity.ComponentActivity() {
               fi
               progress 82 "Decompilation finished. Preparing ZIP archive"
               OUTPUT="/mnt/shared/Download/PocketAPKStudio/Recovery/CustomerManager-Recovered.zip"
-              rm -f "@D@OUTPUT"
+              TMP_ZIP="/tmp/CustomerManager-Recovered.zip"
+              rm -f "@D@TMP_ZIP"
               cd "@D@(dirname "@D@OUT")"
-              zip ${zipLevel} -qr "@D@OUTPUT" "@D@(basename "@D@OUT")"
+              zip ${zipLevel} -qr "@D@TMP_ZIP" "@D@(basename "@D@OUT")"
+              cp -f -- "@D@TMP_ZIP" "@D@OUTPUT"
+              rm -f "@D@TMP_ZIP"
               progress 95 "Verifying recovered ZIP"
               test -s "@D@OUTPUT" || { logline "ERROR: recovered ZIP was not created"; exit 23; }
               logline "Recovered ZIP verified."
@@ -2120,11 +2154,11 @@ class MainActivity : androidx.activity.ComponentActivity() {
               fi
             '
         """.trimIndent().replace("@D@", "$")
-        val resultIntent = Intent(this, TermuxResultService::class.java).putExtra("task_type", "apk_decompile")
+        val resultIntent = Intent(this, TermuxResultReceiver::class.java).putExtra("task_type", "apk_decompile")
         val requestCode = (System.currentTimeMillis() and 0x7fffffff).toInt()
         val pendingFlags = PendingIntent.FLAG_ONE_SHOT or
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-        val resultPendingIntent = PendingIntent.getService(this, requestCode, resultIntent, pendingFlags)
+        val resultPendingIntent = PendingIntent.getBroadcast(this, requestCode, resultIntent, pendingFlags)
         val intent = Intent("com.termux.RUN_COMMAND").apply {
             setClassName("com.termux", "com.termux.app.RunCommandService")
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
@@ -2443,7 +2477,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             val uri=FileProvider.getUriForFile(this,"$packageName.fileprovider",zip)
             editProjectResult.launch(Intent(this,ProjectEditorActivity::class.java).putExtra("zip_uri",uri.toString()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             Toast.makeText(this,"$template project created.",Toast.LENGTH_SHORT).show()
-        }catch(e:Exception){Toast.makeText(this,"Project creation failed: \${e.message}",Toast.LENGTH_LONG).show()}
+        }catch(e:Exception){Toast.makeText(this,"Project creation failed: ${e.message}",Toast.LENGTH_LONG).show()}
     }
 
     private fun starterSource(pkg:String,appName:String,template:String,kotlin:Boolean):String{
@@ -2458,7 +2492,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
             "Custom Template" -> if(kotlin) """root.addView(TextView(this).apply{text="Your custom app starts here."})""" else """TextView note=new TextView(this);note.setText("Your custom app starts here.");root.addView(note);"""
             else -> if(kotlin) """val message=TextView(this).apply{text="Welcome to $app";textSize=20f};root.addView(message);root.addView(Button(this).apply{text="Get Started";setOnClickListener{message.text="Ready!"}})""" else """TextView message=new TextView(this);message.setText("Welcome to $app");root.addView(message);"""
         }
-        val webImport=if(template=="WebView App") "import android.webkit.WebView\n" else ""
+        val webImport=if(template=="WebView App") (if(kotlin) "import android.webkit.WebView\n" else "import android.webkit.WebView;\n") else ""
         return if(kotlin) """
             package $pkg
             import android.app.Activity

@@ -394,7 +394,7 @@ class LivePreviewActivity : Activity() {
                 ) {
                     if (request.isForMainFrame) runOnUiThread {
                         showMessage("Web preview could not load: " + error.description +
-                            "\\nCheck that the project's bundled HTML and asset files are present.")
+                            "\nCheck that the project's bundled HTML and asset files are present.")
                     }
                 }
             }
@@ -988,7 +988,7 @@ class LivePreviewActivity : Activity() {
                             val themeTint = Regex("""tint\s*=\s*MaterialTheme\.colorScheme\.(\w+)""")
                                 .find(callArgs)?.groupValues?.get(1)
                             val resolvedTint = directTint?.let {
-                                runCatching { Color.parseColor("#" + it.takeLast(6)) }.getOrNull()
+                                runCatching { Color.parseColor("#$it") }.getOrNull()
                             } ?: themeTint?.let { colorMap[it] } ?: themeOnBackground
                             setTextColor(resolvedTint)
                             contentDescription = iconName
@@ -1150,11 +1150,6 @@ class LivePreviewActivity : Activity() {
                             description = label ?: "Preview range slider"
                         )
                     }
-                    "Card", "ElevatedCard", "OutlinedCard", "Surface" -> LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(12), dp(12), dp(12), dp(12))
-                        setBackgroundColor(0xFFE8ECF7.toInt())
-                    }
                     "CircularProgressIndicator", "LinearProgressIndicator" -> ProgressBar(this)
                     "RadioButton" -> RadioButton(this).apply {
                         contentDescription = label ?: "Radio option"
@@ -1206,7 +1201,7 @@ class LivePreviewActivity : Activity() {
                     val bottomPad = Regex("""bottom\s*=\s*(\d+)\.dp""").find(callArgs)?.groupValues?.get(1)?.toIntOrNull()?.let { dp(it) } ?: verticalPad
                     if (paddingMatch != null) view.setPadding(startPad, topPad, endPad, bottomPad)
                     val bgHex = Regex("""background\s*\(\s*Color\(0x([0-9A-Fa-f]{8})\)""").find(callArgs)?.groupValues?.get(1)
-                    if (bgHex != null) runCatching { view.setBackgroundColor(Color.parseColor("#" + bgHex.takeLast(6))) }
+                    if (bgHex != null) runCatching { view.setBackgroundColor(Color.parseColor("#$bgHex")) }
                     val bgName = Regex("""background\s*\(\s*([A-Za-z_]\w*)""").find(callArgs)?.groupValues?.get(1)
                     if (bgName != null) colorMap[bgName]?.let { view.setBackgroundColor(it) }
                     val schemeBg = Regex("""(?:containerColor|color)\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
@@ -1343,12 +1338,12 @@ class LivePreviewActivity : Activity() {
                     val directColor = Regex("""(?:contentColor|tint|color)\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""")
                         .find(callArgs)?.groupValues?.get(1)
                     if (directColor != null && view is TextView) {
-                        runCatching { view.setTextColor(Color.parseColor("#" + directColor.takeLast(6))) }
+                        runCatching { view.setTextColor(Color.parseColor("#$directColor")) }
                     }
                     val buttonContainerColor = Regex("""containerColor\s*=\s*Color\(0x([0-9A-Fa-f]{8})\)""")
                         .find(callArgs)?.groupValues?.get(1)
                     if (buttonContainerColor != null) {
-                        runCatching { view.setBackgroundColor(Color.parseColor("#" + buttonContainerColor.takeLast(6))) }
+                        runCatching { view.setBackgroundColor(Color.parseColor("#$buttonContainerColor")) }
                     }
                     val cornerDp = Regex("""RoundedCornerShape\(\s*(\d+)\.dp\s*\)""")
                         .find(callArgs)?.groupValues?.get(1)?.toIntOrNull()
@@ -1366,11 +1361,12 @@ class LivePreviewActivity : Activity() {
             }
             // Rebuild the detected Compose call tree so nested composables stay inside their parent.
             val attached = HashSet<Int>()
-            previewNodes.sortedBy { it.start }.forEachIndexed { index, node ->
+            val sortedNodes = previewNodes.sortedBy { it.start }
+            sortedNodes.forEachIndexed { index, node ->
                 var parentIndex = -1
                 var parentSpan = Int.MAX_VALUE
                 if (node.start >= 0) {
-                    previewNodes.forEachIndexed { candidateIndex, candidate ->
+                    sortedNodes.forEachIndexed { candidateIndex, candidate ->
                         if (candidateIndex != index && candidate.container &&
                             candidate.start < node.start && candidate.end > node.end) {
                             val span = candidate.end - candidate.start
@@ -1378,9 +1374,9 @@ class LivePreviewActivity : Activity() {
                         }
                     }
                 }
-                val parent = if (parentIndex >= 0) previewNodes[parentIndex].view else screen
+                val parent = if (parentIndex >= 0) sortedNodes[parentIndex].view else screen
                 if (parent is FrameLayout) {
-                    val parentArgs = if (parentIndex >= 0) previewNodes[parentIndex].args else ""
+                    val parentArgs = if (parentIndex >= 0) sortedNodes[parentIndex].args else ""
                     // Box children use their own Modifier.align(...) first. The Box's
                     // contentAlignment is only the fallback; Compose defaults to TopStart,
                     // not Center. Centering every child made siblings overlap so a trailing
@@ -1405,7 +1401,7 @@ class LivePreviewActivity : Activity() {
                     }
                     parent.addView(node.view, FrameLayout.LayoutParams(node.params.width, node.params.height, boxGravity))
                 } else if (parent is LinearLayout) {
-                    val parentArgs = if (parentIndex >= 0) previewNodes[parentIndex].args else ""
+                    val parentArgs = if (parentIndex >= 0) sortedNodes[parentIndex].args else ""
                     val horizontal = parent.orientation == LinearLayout.HORIZONTAL
 
                     if (node.params.weight > 0f) {

@@ -132,7 +132,7 @@ class AiChatActivity : Activity() {
     private fun settings() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
         val choice = Spinner(this)
-        choice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Auto: Gemini first, Groq backup", "Gemini 3.8 Flash", "Groq GPT-OSS 120B"))
+        choice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Auto: Gemini first, Groq backup", "Gemini 4 Flash", "Groq GPT-OSS 120B"))
         choice.setSelection(when (prefs.getString("provider", "auto")) { "gemini" -> 1; "groq" -> 2; else -> 0 })
         box.addView(TextView(this).apply { text = "Free AI provider"; setTextColor(0xFFE8F0F7.toInt()) })
         box.addView(choice)
@@ -157,7 +157,7 @@ class AiChatActivity : Activity() {
     }
 
     private fun providerName() = when (prefs.getString("provider", "auto")) {
-        "gemini" -> "Free tier • Gemini 3.8 Flash"
+        "gemini" -> "Free tier • Gemini 4 Flash"
         "groq" -> "Free tier • Groq GPT-OSS 120B"
         else -> "Free tier • Auto: Gemini → Groq"
     }
@@ -178,7 +178,7 @@ class AiChatActivity : Activity() {
         val attachmentSnapshot = attachments.toList()
         attachments.clear()
         updateAttachmentInfo()
-        addMessage("YOU", (if (question.isBlank()) "Please inspect attached file(s)." else question) + if (attachmentSnapshot.isNotEmpty()) "\\nAttachments: " + attachmentSnapshot.joinToString { it.name } else "")
+        addMessage("YOU", (if (question.isBlank()) "Please inspect attached file(s)." else question) + if (attachmentSnapshot.isNotEmpty()) "\nAttachments: " + attachmentSnapshot.joinToString { it.name } else "")
         logActivity("Request submitted to AI provider")
         logActivity("Reading project files and attached documents…")
         busy = true; send.isEnabled = false; progress.visibility = View.VISIBLE
@@ -222,7 +222,7 @@ class AiChatActivity : Activity() {
     }
 
     private fun projectContext(): String {
-        val all = projectRoot.walkTopDown().filter { it.isFile && safeProjectFile(it) }.take(20).toList()
+        val all = projectRoot.walkTopDown().filter { it.isFile && safeProjectFile(it) }.take(250).toList()
         val out = StringBuilder("PROJECT FILE TREE:\n")
         all.take(250).forEach { out.append(it.relativeTo(projectRoot).invariantSeparatorsPath).append('\n') }
         out.append("\nSOURCE CONTENTS:\n")
@@ -299,7 +299,7 @@ For build fixes, use evidence from the supplied log. If uncertain, explain inste
             .put("systemInstruction", systemInstruction)
             .put("contents", contents)
             .put("generationConfig", generation)
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=" + key
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent?key=" + key
         val response = JSONObject(post(endpoint, body))
         val parts = response.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
             ?: throw IllegalStateException("Gemini returned no content")

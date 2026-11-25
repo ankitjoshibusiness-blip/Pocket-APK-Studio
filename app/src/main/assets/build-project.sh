@@ -537,7 +537,7 @@ PAS_TEST_GROOVY
         cmp -s "$fake_apk" "$output_apk"; then
         test_pass "APK copying overwrites an app-created placeholder and preserves spaced paths"
     else
-        printf 'FAIL: APK copy to registered output path failed\\n' >&2
+        printf 'FAIL: APK copy to registered output path failed\n' >&2
         return 1
     fi
 
@@ -569,7 +569,7 @@ pas_ubuntu_main() {
     local candidate
     local -a build_files=()
 
-    trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\\n" "$rc"' EXIT
+    trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\n" "$rc"' EXIT
     export PS4='+[${EPOCHREALTIME}] ${BASH_SOURCE##*/}:${LINENO}: '
     set -x
 

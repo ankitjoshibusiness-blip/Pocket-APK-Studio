@@ -1,51 +1,63 @@
 package com.pocketapkstudio
 
 import android.app.IntentService
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import java.io.File
 import android.util.Log
+import java.io.File
 
-class TermuxResultService : IntentService("TermuxResultService") {
+internal object TermuxResultHandler {
 
-    private fun materializeBuiltApk(pendingUriText: String?, pendingName: String?, reportedPath: String?): File? {
+    private fun materializeOutputFile(
+        context: Context,
+        subDirName: String,
+        expectedExtension: String,
+        pendingUriText: String?,
+        pendingName: String?,
+        reportedPath: String?
+    ): File? {
         val reportedFile = reportedPath?.let(::File)
-        val fileNamePattern = Regex("^[A-Za-z0-9._-]+\\.apk$", RegexOption.IGNORE_CASE)
+        val fileNamePattern = Regex("^[A-Za-z0-9._-]+\\.${Regex.escape(expectedExtension)}$", RegexOption.IGNORE_CASE)
         val fileName = pendingName?.takeIf { fileNamePattern.matches(it) }
             ?: reportedFile?.name?.takeIf { fileNamePattern.matches(it) }
             ?: return null
 
         val uri = pendingUriText?.let { runCatching { Uri.parse(it) }.getOrNull() }
         if (uri != null) {
-            val targetDir = File(filesDir, "built-apks")
+            val targetDir = File(context.filesDir, subDirName)
             if (!targetDir.exists() && !targetDir.mkdirs()) {
-                Log.e("PocketAPKStudio", "Could not create private built-apks directory")
+                Log.e("PocketAPKStudio", "Could not create private $subDirName directory")
                 return null
             }
             val target = File(targetDir, fileName)
             val temporary = File(targetDir, ".$fileName.part")
             return try {
-                val input = contentResolver.openInputStream(uri)
-                    ?: error("Android could not open the reserved Downloads APK output")
+                val input = if (uri.scheme == "file") {
+                    File(uri.path ?: error("Invalid file URI")).inputStream()
+                } else {
+                    context.contentResolver.openInputStream(uri)
+                        ?: error("Android could not open the reserved Downloads output")
+                }
                 input.use { source ->
                     temporary.outputStream().buffered().use { output -> source.copyTo(output) }
                 }
                 if (!temporary.isFile || temporary.length() <= 0L) {
-                    error("The reserved APK output is empty")
+                    error("The reserved output file is empty")
                 }
                 if (target.exists() && !target.delete()) {
-                    error("Could not replace the previous private APK copy")
+                    error("Could not replace the previous private output copy")
                 }
                 if (!temporary.renameTo(target)) {
                     temporary.copyTo(target, overwrite = true)
                     temporary.delete()
                 }
                 target.takeIf { it.isFile && it.length() > 0L }
-                    ?: error("The private APK copy failed verification")
+                    ?: error("The private output copy failed verification")
             } catch (error: Exception) {
                 temporary.delete()
-                Log.e("PocketAPKStudio", "Could not materialize built APK from MediaStore", error)
-                null
+                Log.e("PocketAPKStudio", "Could not materialize output file from URI", error)
+                reportedFile?.takeIf { it.isFile && it.length() > 0L }
             }
         }
 
@@ -53,20 +65,43 @@ class TermuxResultService : IntentService("TermuxResultService") {
         return reportedFile?.takeIf { it.isFile && it.length() > 0L }
     }
 
-    override fun onHandleIntent(intent: Intent?) {
-        if (intent == null) return
+    private fun deletePendingUri(context: Context, uriText: String?) {
+        if (uriText.isNullOrBlank()) return
+        runCatching {
+            val uri = Uri.parse(uriText)
+            if (uri.scheme == "file") {
+                uri.path?.let { File(it).delete() }
+            } else {
+                context.contentResolver.delete(uri, null, null)
+            }
+        }
+    }
+
+    fun handle(context: Context, intent: Intent) {
         val result = intent.getBundleExtra("result")
         val stdout = result?.getString("stdout").orEmpty()
         val stderr = result?.getString("stderr").orEmpty()
         val exitCode = result?.getInt("exitCode", -1) ?: -1
         val errCode = result?.getInt("err", -1) ?: -1
         val errMessage = result?.getString("errmsg").orEmpty()
+
         if (intent.getStringExtra("task_type") == "apk_decompile") {
+            val recoveryPrefs = context.getSharedPreferences("recovery_state", Context.MODE_PRIVATE)
+            val pendingZipUri = recoveryPrefs.getString("pending_recovery_zip_uri", null)
+            val pendingZipName = recoveryPrefs.getString("pending_recovery_zip_name", null)
             val outputPath = Regex("RECOVERY_SAVED=([^\\r\n]+)").findAll(stdout).lastOrNull()?.groupValues?.get(1)?.trim()
-            val outputFile = outputPath?.let { java.io.File(it) }?.takeIf { it.isFile && it.length() > 0L }
+            val outputFile = materializeOutputFile(
+                context = context,
+                subDirName = "recovered-zips",
+                expectedExtension = "zip",
+                pendingUriText = pendingZipUri,
+                pendingName = pendingZipName,
+                reportedPath = outputPath
+            )
             val successful = exitCode == 0 && errCode == -1 && outputFile != null && stdout.contains("JADX_DECOMPILE_SUCCESS=1")
             val partial = exitCode == 0 && errCode == -1 && outputFile != null && stdout.contains("JADX_PARTIAL=1")
             val hasRecovery = successful || partial
+            if (!hasRecovery) deletePendingUri(context, pendingZipUri)
             val combined = buildString {
                 append(stdout)
                 if (stderr.isNotBlank()) append("\n\nERROR OUTPUT:\n").append(stderr)
@@ -78,21 +113,28 @@ class TermuxResultService : IntentService("TermuxResultService") {
                 errCode != -1 -> "Termux could not run JADX: $errMessage"
                 else -> "Decompilation failed (exit code $exitCode).\n" + combined.takeLast(2500)
             }
-            getSharedPreferences("recovery_state", MODE_PRIVATE).edit()
+            recoveryPrefs.edit()
                 .putString("status", status)
                 .putBoolean("running", false)
                 .putBoolean("failed", !hasRecovery)
                 .putBoolean("partial", partial)
                 .putInt("percent", if (hasRecovery) 100 else 0)
-                .putString("stage", when { successful -> "Decompilation successful"; partial -> "Partial recovery ZIP created"; else -> "Decompilation failed — exit code $exitCode" })
+                .putString("stage", when {
+                    successful -> "Decompilation successful"
+                    partial -> "Partial recovery ZIP created"
+                    else -> "Decompilation failed — exit code $exitCode"
+                })
                 .putString("zip_path", if (hasRecovery) outputFile!!.absolutePath else null)
                 .putString("log", combined.takeLast(30000))
                 .putString("live_log", combined.takeLast(12000))
+                .remove("pending_recovery_zip_uri")
+                .remove("pending_recovery_zip_name")
                 .apply()
-            sendBroadcast(Intent("com.pocketapkstudio.RECOVERY_RESULT").setPackage(packageName))
+            context.sendBroadcast(Intent("com.pocketapkstudio.RECOVERY_RESULT").setPackage(context.packageName))
             Log.i("PocketAPKStudio", "JADX decompilation finished. exit=$exitCode err=$errCode")
             return
         }
+
         if (intent.getStringExtra("task_type") == "environment_setup") {
             val successful = exitCode == 0 && errCode == -1 && stdout.contains("BUILD_SERVER_READY=1")
             val combined = buildString {
@@ -115,26 +157,29 @@ class TermuxResultService : IntentService("TermuxResultService") {
             ).joinToString("\n") { item ->
                 item.first + ": " + if (stdout.contains(item.second + "=INSTALLED")) "INSTALLED" else "MISSING / NOT VERIFIED"
             }
-            getSharedPreferences("build_state", MODE_PRIVATE).edit()
+            context.getSharedPreferences("build_state", Context.MODE_PRIVATE).edit()
+                .putBoolean("environment_setup_running", false)
                 .putString("server_status", message)
                 .putString("environment_setup_result", scanSummary + if (successful) "\n\nAll components are ready." else "\n\nSetup incomplete. Review the error and retry.")
                 .putBoolean("environment_setup_complete", successful)
                 .apply()
-            sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
+            context.sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(context.packageName))
             Log.i("PocketAPKStudio", "Environment setup finished. exit=$exitCode err=$errCode")
             return
         }
+
         if (intent.getStringExtra("task_type") == "server_check") {
             val successful = exitCode == 0 && errCode == -1
             val ready = successful && stdout.contains("BUILD_SERVER_READY=1")
             val failure = Regex("BUILD_SERVER_FAILED=([^\\r\n]+)").find(stdout)?.groupValues?.get(1)
             val detail = failure ?: errMessage.ifBlank { stderr.ifBlank { "Check Termux and Ubuntu setup." } }
             val message = if (ready) "Build server READY - Termux + Ubuntu + Java + Android SDK connected." else "Build server NOT READY. " + detail
-            getSharedPreferences("build_state", MODE_PRIVATE).edit().putString("server_status", message).apply()
-            sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(packageName))
+            context.getSharedPreferences("build_state", Context.MODE_PRIVATE).edit().putString("server_status", message).apply()
+            context.sendBroadcast(Intent("com.pocketapkstudio.SERVER_STATUS").setPackage(context.packageName))
             return
         }
-        val buildPrefs = getSharedPreferences("build_state", MODE_PRIVATE)
+
+        val buildPrefs = context.getSharedPreferences("build_state", Context.MODE_PRIVATE)
         val pendingApkUri = buildPrefs.getString("pending_build_apk_uri", null)
         val pendingApkName = buildPrefs.getString("pending_build_apk_name", null)
         // RUN_COMMAND callback output can be empty or partial on some Android/Termux versions.
@@ -142,13 +187,25 @@ class TermuxResultService : IntentService("TermuxResultService") {
         val liveLogUriText = buildPrefs.getString("live_build_log_uri", null)
         val liveLogFallback = liveLogUriText?.let { text ->
             runCatching {
-                contentResolver.openInputStream(Uri.parse(text))
-                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                val uri = Uri.parse(text)
+                val stream = if (uri.scheme == "file") {
+                    File(uri.path ?: return@runCatching "").inputStream()
+                } else {
+                    context.contentResolver.openInputStream(uri)
+                }
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             }.getOrDefault("")
         }.orEmpty()
         val primaryBuildLog = BuildApkCallbackParser.preferredTranscript(stdout, liveLogFallback)
         val apkPath = BuildApkCallbackParser.findSavedApkPath(primaryBuildLog)
-        val verifiedApk = materializeBuiltApk(pendingApkUri, pendingApkName, apkPath)
+        val verifiedApk = materializeOutputFile(
+            context = context,
+            subDirName = "built-apks",
+            expectedExtension = "apk",
+            pendingUriText = pendingApkUri,
+            pendingName = pendingApkName,
+            reportedPath = apkPath
+        )
         val successful = exitCode == 0 && errCode == -1 && apkPath != null && verifiedApk != null
         val combined = buildString {
             append(primaryBuildLog)
@@ -162,9 +219,7 @@ class TermuxResultService : IntentService("TermuxResultService") {
             errCode != -1 -> "Termux could not run the build: $errMessage"
             else -> "BUILD FAILED (exit code $exitCode).\n${combined.takeLast(2200)}"
         }
-        if (!successful && !pendingApkUri.isNullOrBlank()) {
-            runCatching { contentResolver.delete(Uri.parse(pendingApkUri), null, null) }
-        }
+        if (!successful) deletePendingUri(context, pendingApkUri)
         buildPrefs.edit()
             .putString("last_build_status", status)
             .putString("last_build_log", combined.takeLast(40000))
@@ -174,7 +229,15 @@ class TermuxResultService : IntentService("TermuxResultService") {
             .remove("pending_build_apk_uri")
             .remove("pending_build_apk_name")
             .apply()
-        sendBroadcast(Intent("com.pocketapkstudio.BUILD_RESULT").setPackage(packageName))
+        context.sendBroadcast(Intent("com.pocketapkstudio.BUILD_RESULT").setPackage(context.packageName))
         Log.i("PocketAPKStudio", "Termux build finished. exit=$exitCode err=$errCode")
+    }
+}
+
+@Suppress("DEPRECATION")
+class TermuxResultService : IntentService("TermuxResultService") {
+    override fun onHandleIntent(intent: Intent?) {
+        if (intent == null) return
+        TermuxResultHandler.handle(applicationContext, intent)
     }
 }

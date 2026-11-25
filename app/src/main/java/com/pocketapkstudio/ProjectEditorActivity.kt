@@ -628,7 +628,7 @@ class ProjectEditorActivity : Activity() {
                         it.isFile && it.name == "colors.xml" && it.path.contains("/values")
                     }
                     val color = file?.readText()?.let {
-                        Regex("""<color\s+name=["']\${Regex.escape(name)}["']\s*>([^<]+)</color>""").find(it)?.groupValues?.get(1)?.trim()
+                        EditorHelpers.findColorHexInColorsXml(it, name)
                     }
                     color?.takeIf { it.startsWith("#") }?.let { android.graphics.Color.parseColor(it) }
                 }
@@ -646,10 +646,8 @@ class ProjectEditorActivity : Activity() {
             return
         }
         val originalElement = matches[index].value
-        fun readAttr(name: String, fallback: String = ""): String {
-            return Regex("""\\b${Regex.escape(name)}\\s*=\\s*["']([^"']*)["']""")
-                .find(originalElement)?.groupValues?.get(1) ?: fallback
-        }
+        fun readAttr(name: String, fallback: String = ""): String =
+            EditorHelpers.readXmlAttribute(originalElement, name, fallback)
         fun field(hintText: String, value: String): EditText = EditText(this).apply {
             hint = hintText
             setSingleLine(true)
@@ -684,13 +682,7 @@ class ProjectEditorActivity : Activity() {
                 }
                 var element = latestMatches[index].value
                 fun writeAttr(name: String, value: String) {
-                    val attrPattern = Regex("""\\b${Regex.escape(name)}\\s*=\\s*["'][^"']*["']""")
-                    val escaped = value.trim().replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
-                    element = if (attrPattern.containsMatchIn(element)) {
-                        attrPattern.replace(element, "$name=\"$escaped\"")
-                    } else if (value.isNotBlank()) {
-                        element.replace(Regex("\\s*/?>$")) { suffix -> " $name=\"$escaped\"" + suffix.value }
-                    } else element
+                    element = EditorHelpers.writeXmlAttribute(element, name, value)
                 }
                 if (tag != "ImageView" && tag != "ProgressBar") {
                     writeAttr(if (tag == "EditText") "android:hint" else "android:text", textField.text.toString())
@@ -949,8 +941,7 @@ class ProjectEditorActivity : Activity() {
         }
         if (source == currentFile && !saveCurrent(false)) return
         val relative = source.relativeTo(rootDir).invariantSeparatorsPath
-        val baseName = if (source.name.startsWith(".") && source.name.count { it == '.' } == 1) source.name else source.name.substringBeforeLast('.', source.name)
-        val defaultCopyName = relative.substringBeforeLast('/') .let { parent -> if (parent.isEmpty()) "" else "$parent/" } + baseName + "_copy" + source.extension.takeIf { it.isNotEmpty() }?.let { ".$it" }.orEmpty()
+        val defaultCopyName = EditorHelpers.defaultCopyRelativePath(relative, source.name, source.extension)
         val box = EditText(this).apply { setText(defaultCopyName); setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Copy file").setView(box).setPositiveButton("Copy") { _, _ ->
             try {
@@ -1035,12 +1026,22 @@ class ProjectEditorActivity : Activity() {
                 return
             }
             refreshExplorer()
-            if (!saveCurrent(false)) return
+            // Current file was already saved before opening AiChatActivity; do NOT call
+            // saveCurrent() here or stale editor contents will overwrite AI changes on disk.
             val fileToReload = currentFile
+            openTabs.keys.toList().forEach { tabFile ->
+                if (tabFile.isFile) {
+                    runCatching { openTabs[tabFile] = tabFile.readText(Charsets.UTF_8) }
+                } else {
+                    openTabs.remove(tabFile)
+                }
+            }
             if (fileToReload != null && fileToReload.isFile) {
-                openTabs.remove(fileToReload)
                 currentFile = null
+                dirty = false
                 openFile(fileToReload)
+            } else {
+                renderTabs()
             }
             return
         }
@@ -1221,9 +1222,9 @@ class ProjectEditorActivity : Activity() {
         when (ext) {
             "kt" -> {
                 patterns += Pair("""//[^\n]*|/\*[\s\S]*?\*/""", commentColor)
-                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'|""" + "'''" + """[\s\S]*?""" + "'''", stringColor)
+                patterns += Pair("\"\"\"[\\s\\S]*?\"\"\"|\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'", stringColor)
                 patterns += Pair("""@\w+""", annotationColor)
-                patterns += Pair("""\b(package|import|as|class|object|interface|typealias|fun|val|var|if|else|when|for|while|do|return|break|continue|throw|try|catch|finally|this|super|is|in|as|public|private|protected|internal|override|open|abstract|final|data|sealed|enum|annotation|companion|suspend|inline|noinline|crossinline|reified|const|lateinit|by|init|constructor|where|true|false|null)\b""", keywordColor)
+                patterns += Pair("""\b(package|import|as|class|object|interface|typealias|fun|val|var|if|else|when|for|while|do|return|break|continue|throw|try|catch|finally|this|super|is|in|public|private|protected|internal|override|open|abstract|final|data|sealed|enum|annotation|companion|suspend|inline|noinline|crossinline|reified|const|lateinit|by|init|constructor|where|true|false|null)\b""", keywordColor)
                 patterns += Pair("""\b(String|Int|Long|Short|Byte|Float|Double|Boolean|Char|Unit|Any|Nothing|List|MutableList|Set|Map|Array|Pair|Triple)\b""", typeColor)
             }
             "java" -> {
@@ -1235,7 +1236,7 @@ class ProjectEditorActivity : Activity() {
             }
             "xml" -> {
                 patterns += Pair("""<!--[\s\S]*?-->""", commentColor)
-                patterns += Pair(""""([^"\\]|\\.)*|'([^'\\]|\\.)*'""", stringColor)
+                patterns += Pair(""""([^"\\]|\\.)*"|'([^'\\]|\\.)*'""", stringColor)
                 patterns += Pair("""</?[A-Za-z_][\w:.-]*|/?>""", tagColor)
                 patterns += Pair("""\b[A-Za-z_][\w:.-]*(?=\s*=)""", attributeColor)
                 patterns += Pair("""\b(true|false|match_parent|wrap_content|dp|sp|px)\b""", keywordColor)
@@ -1278,57 +1279,7 @@ class ProjectEditorActivity : Activity() {
         if (!::editor.isInitialized || !::problemPanel.isInitialized) return
         val source = editor.text.toString()
         val ext = currentFile?.extension?.lowercase() ?: ""
-        val stack = ArrayDeque<Pair<Char, Int>>()
-        val issues = mutableListOf<Pair<Int, String>>()
-        var quote: Char? = null
-        var quoteStart = -1
-        var escaped = false
-        var lineComment = false
-        var blockComment = false
-        var xmlComment = false
-        var i = 0
-        while (i < source.length) {
-            val c = source[i]
-            val next = source.getOrNull(i + 1)
-            if (xmlComment) {
-                if (c == '-' && next == '-' && source.getOrNull(i + 2) == '>') { xmlComment = false; i += 3; continue }
-                i++; continue
-            }
-            if (lineComment) {
-                if (c == '\n') lineComment = false
-                i++; continue
-            }
-            if (blockComment) {
-                if (c == '*' && next == '/') { blockComment = false; i += 2; continue }
-                i++; continue
-            }
-            if (quote != null) {
-                if (escaped) escaped = false
-                else if (c == '\\') escaped = true
-                else if (c == quote) quote = null
-                i++; continue
-            }
-            if (ext == "xml" && c == '<' && source.startsWith("<!--", i)) { xmlComment = true; i += 4; continue }
-            if (ext != "xml" && c == '/' && next == '/') { lineComment = true; i += 2; continue }
-            if (ext != "xml" && c == '/' && next == '*') { blockComment = true; i += 2; continue }
-            if (c == '"' || c == '\'') { quote = c; quoteStart = i; i++; continue }
-            if (c == '(' || c == '[' || c == '{') stack.addLast(c to i)
-            else if (c == ')' || c == ']' || c == '}') {
-                val expected = when (c) { ')' -> '('; ']' -> '['; else -> '{' }
-                if (stack.isEmpty() || stack.last().first != expected) {
-                    issues += i to ("Unexpected '" + c + "' — no matching opening bracket")
-                } else stack.removeLast()
-            }
-            i++
-        }
-        if (quote != null) issues += quoteStart.coerceAtLeast(0) to "Unclosed string literal"
-        if (blockComment) issues += source.lastIndexOf("/*").coerceAtLeast(0) to "Unclosed block comment"
-        if (xmlComment) issues += source.lastIndexOf("<!--").coerceAtLeast(0) to "Unclosed XML comment"
-        stack.forEach { (ch, pos) ->
-            val close = when (ch) { '(' -> ')'; '[' -> ']'; else -> '}' }
-            issues += pos to ("Missing closing '" + close + "'")
-        }
-        editorProblems = issues.distinctBy { it.first to it.second }.sortedBy { it.first }
+        editorProblems = EditorHelpers.scanDiagnostics(source, ext)
         val red = if (darkTheme) 0xFFFF7777.toInt() else 0xFFB3261E.toInt()
         val editable = editor.text
         editorProblems.forEach { (position, _) ->
@@ -1370,12 +1321,18 @@ class ProjectEditorActivity : Activity() {
                 }
             } else if (typed in closing.keys) {
                 val next = editable.getOrNull(cursor)
-                if (next != closing[typed]) {
+                if ((typed == '"' || typed == '\'') && next == typed) {
+                    editable.delete(start, start + 1)
+                    editor.setSelection(cursor)
+                } else if (next != closing[typed]) {
                     editable.insert(cursor, closing.getValue(typed).toString())
                     editor.setSelection(cursor)
                 }
-            } else if (typed in listOf(')', ']', '}', '"', '\'')) {
-                if (editable.getOrNull(cursor) == typed) editor.setSelection(cursor + 1)
+            } else if (typed in listOf(')', ']', '}')) {
+                if (editable.getOrNull(cursor) == typed) {
+                    editable.delete(start, start + 1)
+                    editor.setSelection(cursor)
+                }
             } else if (typed == '\t') {
                 editable.replace(start, start + 1, "    ")
                 editor.setSelection(start + 4)
@@ -1389,15 +1346,8 @@ class ProjectEditorActivity : Activity() {
         updateInlineCompletion()
     }
 
-    private fun completionWords(): List<String> {
-        return when (currentFile?.extension?.lowercase() ?: "") {
-            "kt" -> listOf("function", "fun", "val", "var", "class", "object", "override", "private", "public", "return", "if", "else", "when", "for", "while", "import", "package", "suspend", "data")
-            "java" -> listOf("function", "public", "private", "protected", "class", "interface", "void", "static", "final", "return", "new", "if", "else", "for", "while", "import", "package")
-            "xml" -> listOf("LinearLayout", "ConstraintLayout", "TextView", "EditText", "Button", "ImageView", "android:layout_width", "android:layout_height", "android:id", "match_parent", "wrap_content")
-            "gradle", "kts" -> listOf("plugins", "dependencies", "implementation", "api", "android", "repositories", "mavenCentral", "google", "compileSdk", "minSdk", "targetSdk", "namespace")
-            else -> listOf("function", "TODO", "if", "else", "return", "class", "true", "false", "null")
-        }
-    }
+    private fun completionWords(): List<String> =
+        EditorHelpers.completionWordsForExtension(currentFile?.extension ?: "")
 
     private fun updateInlineCompletion() {
         if (!::inlineGhostView.isInitialized || !::editor.isInitialized) return
