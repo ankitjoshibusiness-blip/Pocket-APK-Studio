@@ -1059,14 +1059,14 @@ class LivePreviewActivity : Activity() {
                         // or cannot be resolved from source. A missing label used to return null
                         // here, making the preview appear to contain only an unrelated Icon.
                         val textValue = label
-                            ?: Regex("""(?:text\\s*=\\s*)?([A-Za-z_]\\w*)""")
+                            ?: Regex("""(?:text\s*=\s*)?([A-Za-z_]\w*)""")
                                 .find(callArgs)?.groupValues?.get(1)
                             ?: "Text (dynamic)"
                         TextView(this).apply {
                             text = textValue
-                            textSize = Regex("""fontSize\\s*=\\s*(\\d+(?:\\.\\d+)?)\\.sp""")
+                            textSize = Regex("""fontSize\s*=\s*(\d+(?:\.\d+)?)\.sp""")
                                 .find(callArgs)?.groupValues?.get(1)?.toFloatOrNull() ?: 16f
-                            val textColorName = Regex("""color\\s*=\\s*MaterialTheme\\.colorScheme\\.(\\w+)""").find(callArgs)?.groupValues?.get(1)
+                            val textColorName = Regex("""color\s*=\s*MaterialTheme\.colorScheme\.(\w+)""").find(callArgs)?.groupValues?.get(1)
                             setTextColor(colorMap[textColorName] ?: colorMap["Ink"] ?: themeOnBackground)
                             if (callArgs.contains("FontWeight.Bold") || callArgs.contains("fontWeight = FontWeight.SemiBold")) setTypeface(typeface, android.graphics.Typeface.BOLD)
                             if (callArgs.contains("TextAlign.Center")) gravity = Gravity.CENTER
