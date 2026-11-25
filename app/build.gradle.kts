@@ -15,18 +15,21 @@ android {
         versionName = "1.6"
     }
 
-    signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+    val projectDebugKeystore = file("${rootDir}/debug.keystore")
+    if (projectDebugKeystore.exists()) {
+        signingConfigs {
+            create("debugConfig") {
+                storeFile = projectDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
-    }
 
-    buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
+        buildTypes {
+            debug {
+                signingConfig = signingConfigs.getByName("debugConfig")
+            }
         }
     }
 
