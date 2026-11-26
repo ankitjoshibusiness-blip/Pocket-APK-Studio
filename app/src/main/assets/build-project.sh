@@ -137,15 +137,15 @@ pas_read_gradle_wrapper_metadata() {
     distribution_url="$(sed -n 's/^[[:space:]]*distributionUrl[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1)"
     distribution_url="${distribution_url//\\:/:}"
     distribution_url="${distribution_url//\\=/=}"
-    distribution_url="${distribution_url%%\\?*}"
+    distribution_url="${distribution_url%%\?*}"
     base_name="${distribution_url##*/}"
-    if [[ "$base_name" =~ ^gradle-([0-9]+([.][0-9]+){1,2}([.-][A-Za-z0-9]+)*)-(bin|all)\\.zip$ ]]; then
+    if [[ "$base_name" =~ ^gradle-([0-9]+([.][0-9]+){1,2}([.-][A-Za-z0-9]+)*)-(bin|all)\.zip$ ]]; then
         PAS_GRADLE_VERSION="${BASH_REMATCH[1]}"
     else
         return 1
     fi
 
-    checksum="$(sed -n 's/^[[:space:]]*distributionSha256Sum[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1 | tr -d '\\r')"
+    checksum="$(sed -n 's/^[[:space:]]*distributionSha256Sum[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1 | tr -d '\r')"
     if [[ "$checksum" =~ ^[A-Fa-f0-9]{64}$ ]]; then
         PAS_GRADLE_WRAPPER_SHA256="${checksum,,}"
     fi
@@ -260,7 +260,7 @@ pas_install_gradle_distribution() {
     fi
 
     if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]]; then
-        expected_sha="$(awk 'NF { print $1; exit }' "$checksum_file" | tr -d '\\r')"
+        expected_sha="$(awk 'NF { print $1; exit }' "$checksum_file" | tr -d '\r')"
     fi
     if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]] ||
         ! pas_verify_sha256 "$archive" "${expected_sha,,}" ||
@@ -327,7 +327,7 @@ pas_select_gradle_launcher() {
     fi
 
     if pas_require_command gradle; then
-        system_version="$(gradle --version 2>/dev/null | sed -nE 's/^Gradle ([0-9]+([.][0-9]+){0,2}).*/\\1/p' | head -n 1)"
+        system_version="$(gradle --version 2>/dev/null | awk '$1 == "Gradle" { print $2; exit }')"
         system_major="${system_version%%.*}"
         if [[ "$system_major" =~ ^[0-9]+$ ]] && (( system_major >= 8 )); then
             PAS_GRADLE_LAUNCHER="$(command -v gradle)"
