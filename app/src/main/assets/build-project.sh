@@ -474,7 +474,7 @@ pas_run_self_tests() (
     local test_count=0
 
     test_root="$(mktemp -d "${TMPDIR:-/tmp}/pas-build-engine-test.XXXXXX")"
-    trap 'rm -rf -- "$test_root"' EXIT
+    trap '/bin/rm -rf -- "$test_root"' EXIT
 
     test_pass() {
         printf 'PASS: %s\n' "$1"
@@ -662,7 +662,9 @@ PAS_TEST_WRAPPER_JAR
     fi
 
     HOME="$test_root/empty home"
+    PATH="$saved_path"
     mkdir -p "$HOME"
+    PATH="$test_root/empty-bin"
     PAS_DISABLE_GRADLE_BOOTSTRAP=1
     if pas_select_gradle_launcher "$plain_gradle_project" "$plain_gradle_project"; then
         PATH="$saved_path"
