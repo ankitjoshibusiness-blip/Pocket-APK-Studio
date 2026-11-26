@@ -699,6 +699,7 @@ PAS_TEST_MOCK_CURL
     plain_gradle_project="$test_root/project without wrapper"
     mkdir -p "$plain_gradle_project"
     : > "$plain_gradle_project/settings.gradle"
+    PATH="$fake_bin:$saved_path"
     if pas_select_gradle_launcher "$plain_gradle_project" "$plain_gradle_project" &&
         [[ "$PAS_GRADLE_KIND" == "system" && "$PAS_GRADLE_LAUNCHER" == "$fake_bin/gradle" ]]; then
         test_pass "supported installed Gradle 8+ is used when wrapper metadata is absent"
