@@ -354,6 +354,216 @@ pas_select_gradle_launcher() {
     return 1
 }
 
+# Derive Android SDK package requirements from the imported Gradle project.
+pas_sdk_append_unique() {
+    local collection="$1"
+    local value="$2"
+    local existing
+    case "$collection" in
+        compile)
+            for existing in "${PAS_REQUIRED_COMPILE_SDKS[@]}"; do
+                [[ "$existing" == "$value" ]] && return 0
+            done
+            PAS_REQUIRED_COMPILE_SDKS+=("$value")
+            ;;
+        build-tools)
+            for existing in "${PAS_REQUIRED_BUILD_TOOLS[@]}"; do
+                [[ "$existing" == "$value" ]] && return 0
+            done
+            PAS_REQUIRED_BUILD_TOOLS+=("$value")
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+pas_default_build_tools_for_api() {
+    case "$1" in
+        36) printf '36.0.0\n' ;;
+        35) printf '35.0.0\n' ;;
+        34) printf '34.0.0\n' ;;
+        33) printf '33.0.2\n' ;;
+        32) printf '32.0.0\n' ;;
+        31) printf '31.0.0\n' ;;
+        30) printf '30.0.3\n' ;;
+        29) printf '29.0.3\n' ;;
+        28) printf '28.0.3\n' ;;
+        27) printf '27.0.3\n' ;;
+        26) printf '26.0.2\n' ;;
+        *) printf '35.0.0\n' ;;
+    esac
+}
+
+pas_detect_android_sdk_requirements() {
+    local project_root="$1"
+    local gradle_file
+    local line
+    local normalized
+    local catalog_file
+    local catalog_line
+    local in_versions=0
+    local sdk_version
+    local build_tools_version
+    local mapped_tools
+    local -a catalogs=()
+
+    PAS_REQUIRED_COMPILE_SDKS=()
+    PAS_REQUIRED_BUILD_TOOLS=()
+    [[ -d "$project_root" ]] || return 1
+
+    while IFS= read -r -d '' gradle_file; do
+        case "$gradle_file" in
+            */libs.versions.toml|*/gradle/*versions*.toml)
+                catalogs+=("$gradle_file")
+                continue
+                ;;
+        esac
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            normalized="${line//\"/}"
+            normalized="${normalized//\'/}"
+            if [[ "$normalized" =~ compileSdk(Version)?[[:space:]]*=?[[:space:]]*\(?[[:space:]]*([0-9]{2,3}) ]]; then
+                sdk_version="${BASH_REMATCH[2]}"
+                pas_sdk_append_unique compile "$sdk_version"
+            fi
+            if [[ "$normalized" =~ buildToolsVersion[[:space:]]*=?[[:space:]]*\(?[[:space:]]*([0-9]+[.][0-9]+[.][0-9]+) ]]; then
+                build_tools_version="${BASH_REMATCH[1]}"
+                pas_sdk_append_unique build-tools "$build_tools_version"
+            fi
+        done < "$gradle_file"
+    done < <(
+        find "$project_root" \
+            -type d \( -name .gradle -o -name build \) -prune -o \
+            -type f \( -name build.gradle -o -name build.gradle.kts -o -name '*.toml' \) -print0 2>/dev/null
+    )
+
+    for catalog_file in "${catalogs[@]}"; do
+        in_versions=0
+        while IFS= read -r catalog_line || [[ -n "$catalog_line" ]]; do
+            if [[ "$catalog_line" =~ ^[[:space:]]*\[versions\][[:space:]]*$ ]]; then
+                in_versions=1
+                continue
+            fi
+            if [[ "$catalog_line" =~ ^[[:space:]]*\[ ]]; then
+                in_versions=0
+            fi
+            (( in_versions )) || continue
+            if [[ "$catalog_line" =~ ^[[:space:]]*(compileSdk|compileSdkVersion|androidCompileSdk|androidCompileSdkVersion)[[:space:]]*=[[:space:]]*\"?([0-9]{2,3}) ]]; then
+                pas_sdk_append_unique compile "${BASH_REMATCH[2]}"
+            elif [[ "$catalog_line" =~ ^[[:space:]]*(buildTools|buildToolsVersion|androidBuildTools)[[:space:]]*=[[:space:]]*\"?([0-9]+[.][0-9]+[.][0-9]+) ]]; then
+                pas_sdk_append_unique build-tools "${BASH_REMATCH[2]}"
+            fi
+        done < "$catalog_file"
+    done
+
+    if (( "${#PAS_REQUIRED_COMPILE_SDKS[@]}" == 0 )); then
+        PAS_REQUIRED_COMPILE_SDKS+=(35)
+        pas_log "WARNING: No numeric compileSdk was found; using Android API 35 as the baseline."
+    fi
+    for sdk_version in "${PAS_REQUIRED_COMPILE_SDKS[@]}"; do
+        mapped_tools="$(pas_default_build_tools_for_api "$sdk_version")"
+        pas_sdk_append_unique build-tools "$mapped_tools"
+    done
+    pas_log "SDK_REQUIREMENTS: platforms=[${PAS_REQUIRED_COMPILE_SDKS[*]}] build-tools=[${PAS_REQUIRED_BUILD_TOOLS[*]}]"
+    return 0
+}
+
+pas_resolve_android_sdk_manager() {
+    local sdk_root="$1"
+    local candidate
+    PAS_ANDROID_SDKMANAGER=""
+    if [[ -n "${ANDROID_SDK_MANAGER:-}" && -x "$ANDROID_SDK_MANAGER" ]]; then
+        PAS_ANDROID_SDKMANAGER="$ANDROID_SDK_MANAGER"
+        return 0
+    fi
+    for candidate in "$sdk_root/cmdline-tools/latest/bin/sdkmanager" "/root/Android/cmdline-tools/latest/bin/sdkmanager"; do
+        if [[ -x "$candidate" ]]; then
+            PAS_ANDROID_SDKMANAGER="$candidate"
+            return 0
+        fi
+    done
+    if command -v sdkmanager >/dev/null 2>&1; then
+        PAS_ANDROID_SDKMANAGER="$(command -v sdkmanager)"
+        return 0
+    fi
+    return 1
+}
+
+pas_ensure_android_sdk() {
+    local sdk_root="$1"
+    local sdk_version
+    local build_tools_version
+    local sdkmanager_dir
+    local path_entry
+    local -a packages=()
+    local -a path_entries=()
+
+    [[ -d "$sdk_root" ]] || mkdir -p "$sdk_root" || return 1
+    for sdk_version in "${PAS_REQUIRED_COMPILE_SDKS[@]}"; do
+        [[ -s "$sdk_root/platforms/android-$sdk_version/android.jar" ]] ||
+            packages+=("platforms;android-$sdk_version")
+    done
+    [[ -x "$sdk_root/platform-tools/adb" ]] || packages+=("platform-tools")
+    for build_tools_version in "${PAS_REQUIRED_BUILD_TOOLS[@]}"; do
+        [[ -x "$sdk_root/build-tools/$build_tools_version/aapt" ]] ||
+            packages+=("build-tools;$build_tools_version")
+    done
+
+    if (( "${#packages[@]}" > 0 )); then
+        if ! pas_resolve_android_sdk_manager "$sdk_root"; then
+            pas_log "ERROR: Required Android SDK packages are missing (${packages[*]}) and sdkmanager was not found."
+            pas_log "ERROR: Expected sdkmanager at $sdk_root/cmdline-tools/latest/bin/sdkmanager or /root/Android/cmdline-tools/latest/bin/sdkmanager."
+            return 1
+        fi
+        pas_log "SDKMANAGER=[$PAS_ANDROID_SDKMANAGER]"
+        pas_log "SDK_INSTALL_PACKAGES=(${packages[*]})"
+        if command -v yes >/dev/null 2>&1; then
+            yes | "$PAS_ANDROID_SDKMANAGER" "--sdk_root=$sdk_root" --licenses >/dev/null 2>&1 || true
+        else
+            "$PAS_ANDROID_SDKMANAGER" "--sdk_root=$sdk_root" --licenses </dev/null >/dev/null 2>&1 || true
+        fi
+        if ! "$PAS_ANDROID_SDKMANAGER" "--sdk_root=$sdk_root" "${packages[@]}"; then
+            pas_log "ERROR: sdkmanager failed while installing required Android SDK packages."
+            return 1
+        fi
+    else
+        pas_log "SDK_COMPONENTS: all required components are already installed."
+    fi
+
+    for sdk_version in "${PAS_REQUIRED_COMPILE_SDKS[@]}"; do
+        [[ -s "$sdk_root/platforms/android-$sdk_version/android.jar" ]] || {
+            pas_log "ERROR: Android SDK Platform $sdk_version is still missing after sdkmanager completed."
+            return 1
+        }
+    done
+    [[ -x "$sdk_root/platform-tools/adb" ]] || {
+        pas_log "ERROR: Android SDK platform-tools/adb is missing after sdkmanager completed."
+        return 1
+    }
+    for build_tools_version in "${PAS_REQUIRED_BUILD_TOOLS[@]}"; do
+        [[ -x "$sdk_root/build-tools/$build_tools_version/aapt" ]] || {
+            pas_log "ERROR: Android Build Tools $build_tools_version are still missing after sdkmanager completed."
+            return 1
+        }
+    done
+
+    if [[ -n "$PAS_ANDROID_SDKMANAGER" ]]; then
+        sdkmanager_dir="$(dirname "$PAS_ANDROID_SDKMANAGER")"
+        path_entries+=("$sdkmanager_dir")
+    fi
+    path_entries+=("$sdk_root/platform-tools")
+    for build_tools_version in "${PAS_REQUIRED_BUILD_TOOLS[@]}"; do
+        path_entries+=("$sdk_root/build-tools/$build_tools_version")
+    done
+    path_entry="$(IFS=:; printf '%s' "${path_entries[*]}")"
+    export PATH="$path_entry:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    for sdk_version in "${PAS_REQUIRED_COMPILE_SDKS[@]}"; do
+        pas_log "SDK_PLATFORM_VERIFIED=android-$sdk_version"
+    done
+    for build_tools_version in "${PAS_REQUIRED_BUILD_TOOLS[@]}"; do
+        pas_log "SDK_BUILD_TOOLS_VERIFIED=$build_tools_version"
+    done
+    return 0
+}
+
 # Append final overrides so an existing Java 8/Kotlin 1.8 setting does not win.
 pas_align_gradle_targets() {
     local gradle_file="$1"
@@ -477,6 +687,11 @@ pas_run_self_tests() (
     local mock_request_log
     local bootstrap_home
     local fake_bin
+    local sdk_project
+    local sdkmanager_fixture
+    local sdk_root_fixture
+    local missing_sdk_root
+    local sdk_request_log
     local saved_path="$PATH"
     local saved_home="${HOME:-/root}"
     local test_count=0
@@ -808,6 +1023,109 @@ PAS_TEST_GROOVY
         test_pass "missing tool detection returns a failure"
     fi
 
+    # Detect API/build-tools requirements across Kotlin DSL, Groovy DSL and version catalogs.
+    sdk_project="$test_root/SDK Project With Spaces"
+    mkdir -p "$sdk_project/app" "$sdk_project/legacy" "$sdk_project/catalog" "$sdk_project/gradle"
+    cat > "$sdk_project/app/build.gradle.kts" <<'PAS_TEST_SDK_KTS'
+plugins { id("com.android.application") }
+android { compileSdk = 36 }
+PAS_TEST_SDK_KTS
+    cat > "$sdk_project/legacy/build.gradle" <<'PAS_TEST_SDK_GROOVY'
+android {
+    compileSdkVersion 34
+    buildToolsVersion "34.0.0"
+}
+PAS_TEST_SDK_GROOVY
+    cat > "$sdk_project/catalog/build.gradle.kts" <<'PAS_TEST_SDK_CATALOG_MODULE'
+android { compileSdk = libs.versions.androidCompileSdk.get().toInt() }
+PAS_TEST_SDK_CATALOG_MODULE
+    cat > "$sdk_project/gradle/libs.versions.toml" <<'PAS_TEST_SDK_TOML'
+[versions]
+androidCompileSdk = "33"
+androidBuildTools = "33.0.2"
+PAS_TEST_SDK_TOML
+    pas_detect_android_sdk_requirements "$sdk_project"
+    if [[ " ${PAS_REQUIRED_COMPILE_SDKS[*]} " == *" 36 "* ]] &&
+        [[ " ${PAS_REQUIRED_COMPILE_SDKS[*]} " == *" 34 "* ]] &&
+        [[ " ${PAS_REQUIRED_COMPILE_SDKS[*]} " == *" 33 "* ]] &&
+        [[ " ${PAS_REQUIRED_BUILD_TOOLS[*]} " == *" 34.0.0 "* ]] &&
+        [[ " ${PAS_REQUIRED_BUILD_TOOLS[*]} " == *" 36.0.0 "* ]] &&
+        [[ " ${PAS_REQUIRED_BUILD_TOOLS[*]} " == *" 33.0.2 "* ]]; then
+        test_pass "compileSdk detection supports Kotlin DSL, Groovy DSL and version-catalog API values"
+    else
+        printf 'FAIL: SDK requirements are incomplete: platforms=[%s] build-tools=[%s]\n' \
+            "${PAS_REQUIRED_COMPILE_SDKS[*]}" "${PAS_REQUIRED_BUILD_TOOLS[*]}" >&2
+        return 1
+    fi
+
+    # Exercise package installation with an offline sdkmanager stub and spaced paths.
+    sdk_root_fixture="$test_root/Android SDK With Spaces"
+    sdkmanager_fixture="$test_root/Mock SDK Manager Path/sdkmanager"
+    sdk_request_log="$test_root/sdkmanager-requests.log"
+    mkdir -p "$(dirname "$sdkmanager_fixture")"
+    cat > "$sdkmanager_fixture" <<'PAS_TEST_SDKMANAGER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+sdk_root=""
+for argument in "$@"; do
+    case "$argument" in
+        --sdk_root=*) sdk_root="${argument#*=}" ;;
+    esac
+done
+printf '%s\n' "$*" >> "$MOCK_SDK_REQUEST_LOG"
+for argument in "$@"; do
+    case "$argument" in
+        "platforms;android-36")
+            mkdir -p "$sdk_root/platforms/android-36"
+            printf 'android-36' > "$sdk_root/platforms/android-36/android.jar"
+            ;;
+        "platform-tools")
+            mkdir -p "$sdk_root/platform-tools"
+            printf '#!/bin/sh\nexit 0\n' > "$sdk_root/platform-tools/adb"
+            chmod +x "$sdk_root/platform-tools/adb"
+            ;;
+        "build-tools;36.0.0")
+            mkdir -p "$sdk_root/build-tools/36.0.0"
+            printf '#!/bin/sh\nexit 0\n' > "$sdk_root/build-tools/36.0.0/aapt"
+            chmod +x "$sdk_root/build-tools/36.0.0/aapt"
+            ;;
+    esac
+done
+PAS_TEST_SDKMANAGER
+    chmod +x "$sdkmanager_fixture"
+    export MOCK_SDK_REQUEST_LOG="$sdk_request_log"
+    ANDROID_SDK_MANAGER="$sdkmanager_fixture"
+    PAS_REQUIRED_COMPILE_SDKS=(36)
+    PAS_REQUIRED_BUILD_TOOLS=(36.0.0)
+    if pas_ensure_android_sdk "$sdk_root_fixture" &&
+        [[ -s "$sdk_root_fixture/platforms/android-36/android.jar" ]] &&
+        [[ -x "$sdk_root_fixture/platform-tools/adb" ]] &&
+        [[ -x "$sdk_root_fixture/build-tools/36.0.0/aapt" ]] &&
+        grep -q 'platforms;android-36' "$sdk_request_log" &&
+        grep -q 'build-tools;36.0.0' "$sdk_request_log" &&
+        grep -q 'platform-tools' "$sdk_request_log"; then
+        test_pass "sdkmanager installs API 36, platform-tools and build-tools with spaces in SDK paths"
+    else
+        printf 'FAIL: sdkmanager did not install and verify all requested SDK packages\n' >&2
+        return 1
+    fi
+    unset MOCK_SDK_REQUEST_LOG ANDROID_SDK_MANAGER
+
+    # Missing packages and no sdkmanager must fail clearly without network access.
+    missing_sdk_root="$test_root/SDK Without Command Line Tools"
+    mkdir -p "$missing_sdk_root" "$test_root/no-sdkmanager-bin"
+    ANDROID_SDK_MANAGER="$test_root/missing-sdkmanager"
+    PATH="$test_root/no-sdkmanager-bin"
+    if pas_ensure_android_sdk "$missing_sdk_root"; then
+        PATH="$saved_path"
+        printf 'FAIL: missing sdkmanager was reported as a successful SDK installation\n' >&2
+        return 1
+    else
+        test_pass "missing SDK components and missing sdkmanager produce a detectable failure"
+    fi
+    PATH="$saved_path"
+    unset ANDROID_SDK_MANAGER
+
     fake_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/debug/app-debug.apk"
     flavored_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/free/debug/app-free-debug.apk"
     multi_flavored_apk="$test_root/Android Project With Spaces/app/build/outputs/apk/demo/google/debug/app-demo-google-debug.apk"
@@ -926,9 +1244,7 @@ pas_ubuntu_main() {
     ANDROID_HOME="$android_sdk"
     ANDROID_SDK_ROOT="$android_sdk"
     export ANDROID_HOME ANDROID_SDK_ROOT
-    export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/35.0.0:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    [[ -f "$ANDROID_HOME/platforms/android-35/android.jar" ]] ||
-        pas_fail 15 "Android SDK Platform 35 is missing: $ANDROID_HOME/platforms/android-35/android.jar. Install platform 35 in Ubuntu."
+    export PATH="$ANDROID_HOME/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     pas_require_command unzip || pas_fail 33 "The unzip command is missing in Ubuntu."
     pas_require_command find || pas_fail 34 "The find command is missing in Ubuntu."
     pas_require_command sha256sum || pas_fail 35 "The sha256sum command is missing in Ubuntu."
@@ -1001,6 +1317,11 @@ pas_ubuntu_main() {
     (( ${#build_files[@]} > 0 )) ||
         pas_fail 14 "Gradle settings were found, but no build.gradle or build.gradle.kts module files were discovered."
 
+    pas_detect_android_sdk_requirements "$gradle_root" ||
+        pas_fail 41 "Could not inspect the imported project for Android SDK requirements."
+    pas_ensure_android_sdk "$android_sdk" ||
+        pas_fail 42 "Required Android SDK platforms/build-tools could not be installed or verified. Review SDKMANAGER messages above."
+
     for gradle_file in "${build_files[@]}"; do
         if grep -Eq 'android[[:space:]]*\{' "$gradle_file"; then
             pas_align_gradle_targets "$gradle_file" ||
@@ -1014,7 +1335,7 @@ pas_ubuntu_main() {
 
     pas_log "GRADLE_ROOT=$gradle_root"
     if ! pas_select_gradle_launcher "$project" "$gradle_root"; then
-        pas_fail 12 "No complete Gradle wrapper (gradlew plus gradle/wrapper JAR and properties) was found under the imported project, and Gradle is not installed in Ubuntu."
+        pas_fail 12 "No usable Gradle wrapper, compatible cached/system Gradle or verified Gradle distribution could be selected. Check preceding Gradle bootstrap and network/checksum messages."
     fi
     if [[ "$PAS_GRADLE_KIND" == "wrapper" ]]; then
         chmod +x "$PAS_GRADLE_LAUNCHER" ||
