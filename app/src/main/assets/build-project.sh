@@ -1547,7 +1547,7 @@ pas_ubuntu_main() {
     pas_validate_zip "$shared_zip" ||
         pas_fail 20 "The imported ZIP is corrupt, empty, missing, or contains an unsafe absolute/parent-traversal path."
     mkdir -p "$project_base"
-    [[ "$project" == "/root/pocket-apk-studio/project" ]] ||
+    [[ "$project" == "$project_base/project" ]] ||
         pas_fail 26 "Internal project workspace path validation failed."
     rm -rf -- "$project"
     mkdir -p -- "$project"
