@@ -122,23 +122,52 @@ pas_find_gradle_root() {
     return 1
 }
 
-# A Gradle wrapper is usable only when its launcher, JAR and properties exist.
-# A partial source ZIP can contain gradlew without the files it needs; in that case
-# prefer the installed Gradle instead of failing after selecting a broken wrapper.
+# A Gradle wrapper is usable only when its launcher, JAR and properties exist and the
+# wrapper JAR is a valid ZIP. Source archives sometimes omit or truncate wrapper files.
+pas_read_gradle_wrapper_metadata() {
+    local properties_file="$1"
+    local distribution_url
+    local base_name
+    local checksum
+
+    PAS_GRADLE_VERSION=""
+    PAS_GRADLE_WRAPPER_SHA256=""
+    [[ -s "$properties_file" ]] || return 1
+
+    distribution_url="$(sed -n 's/^[[:space:]]*distributionUrl[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1)"
+    distribution_url="${distribution_url//\\:/:}"
+    distribution_url="${distribution_url//\\=/=}"
+    distribution_url="${distribution_url%%\\?*}"
+    base_name="${distribution_url##*/}"
+    if [[ "$base_name" =~ ^gradle-([0-9]+([.][0-9]+){1,2}([.-][A-Za-z0-9]+)*)-(bin|all)\\.zip$ ]]; then
+        PAS_GRADLE_VERSION="${BASH_REMATCH[1]}"
+    else
+        return 1
+    fi
+
+    checksum="$(sed -n 's/^[[:space:]]*distributionSha256Sum[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1 | tr -d '\\r')"
+    if [[ "$checksum" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+        PAS_GRADLE_WRAPPER_SHA256="${checksum,,}"
+    fi
+    return 0
+}
+
 pas_find_gradle_wrapper() {
     local project_dir="$1"
     local gradle_root="$2"
     local search_dir="$gradle_root"
+    local wrapper_jar
+    local wrapper_properties
 
     PAS_GRADLE_WRAPPER=""
     while [[ "$search_dir" == "$project_dir" || "$search_dir" == "$project_dir/"* ]]; do
-        if [[ -f "$search_dir/gradlew" ]]; then
-            if [[ -s "$search_dir/gradle/wrapper/gradle-wrapper.jar" &&
-                -s "$search_dir/gradle/wrapper/gradle-wrapper.properties" ]]; then
-                PAS_GRADLE_WRAPPER="$search_dir/gradlew"
-                return 0
-            fi
-            pas_log "WARNING: Ignoring incomplete Gradle wrapper at $search_dir (gradle-wrapper.jar or gradle-wrapper.properties is missing)."
+        wrapper_jar="$search_dir/gradle/wrapper/gradle-wrapper.jar"
+        wrapper_properties="$search_dir/gradle/wrapper/gradle-wrapper.properties"
+        if [[ -s "$search_dir/gradlew" && -s "$wrapper_jar" && -s "$wrapper_properties" ]] &&
+            unzip -tqq "$wrapper_jar" >/dev/null 2>&1 &&
+            pas_read_gradle_wrapper_metadata "$wrapper_properties"; then
+            PAS_GRADLE_WRAPPER="$search_dir/gradlew"
+            return 0
         fi
         [[ "$search_dir" == "$project_dir" ]] && break
         search_dir="$(dirname "$search_dir")"
@@ -146,21 +175,177 @@ pas_find_gradle_wrapper() {
     return 1
 }
 
-# Resolve the launcher once so CI self-tests and the phone build use identical rules.
+pas_find_gradle_wrapper_properties() {
+    local project_dir="$1"
+    local gradle_root="$2"
+    local search_dir="$gradle_root"
+
+    PAS_GRADLE_WRAPPER_PROPERTIES=""
+    while [[ "$search_dir" == "$project_dir" || "$search_dir" == "$project_dir/"* ]]; do
+        if [[ -s "$search_dir/gradle/wrapper/gradle-wrapper.properties" ]]; then
+            PAS_GRADLE_WRAPPER_PROPERTIES="$search_dir/gradle/wrapper/gradle-wrapper.properties"
+            return 0
+        fi
+        [[ "$search_dir" == "$project_dir" ]] && break
+        search_dir="$(dirname "$search_dir")"
+    done
+    return 1
+}
+
+pas_find_cached_gradle() {
+    local version="$1"
+    local candidate="${HOME:-/root}/.local/share/pocket-apk-studio/gradle-$version/bin/gradle"
+
+    [[ -x "$candidate" ]] || return 1
+    "$candidate" --version >/dev/null 2>&1 || return 1
+    PAS_GRADLE_LAUNCHER="$candidate"
+    return 0
+}
+
+# Download an official Gradle distribution only when no complete wrapper or suitable
+# installed Gradle is available. Verify the official SHA-256 sidecar (or wrapper checksum).
+pas_install_gradle_distribution() {
+    local version="$1"
+    local expected_sha="${2-}"
+    local cache_root="${HOME:-/root}/.local/share/pocket-apk-studio"
+    local install_dir="$cache_root/gradle-$version"
+    local temp_dir
+    local archive
+    local checksum_file
+    local distribution_url="https://services.gradle.org/distributions/gradle-$version-bin.zip"
+
+    if [[ -x "$install_dir/bin/gradle" ]] && "$install_dir/bin/gradle" --version >/dev/null 2>&1; then
+        PAS_GRADLE_LAUNCHER="$install_dir/bin/gradle"
+        return 0
+    fi
+
+    pas_require_command unzip || return 1
+    pas_require_command sha256sum || return 1
+    if ! pas_require_command curl && ! pas_require_command wget; then
+        pas_log "ERROR: curl or wget is required to download the Gradle distribution."
+        return 1
+    fi
+
+    mkdir -p "$cache_root" || return 1
+    temp_dir="$(mktemp -d "$cache_root/.gradle-$version.XXXXXX")" || return 1
+    archive="$temp_dir/gradle-$version-bin.zip"
+    checksum_file="$temp_dir/gradle-$version-bin.zip.sha256"
+
+    if pas_require_command curl; then
+        if ! curl -fL --retry 2 --silent --show-error "$distribution_url" -o "$archive"; then
+            pas_log "ERROR: Gradle $version download failed: $distribution_url"
+            rm -rf -- "$temp_dir"
+            return 1
+        fi
+        if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+            if ! curl -fL --retry 2 --silent --show-error "$distribution_url.sha256" -o "$checksum_file"; then
+                pas_log "ERROR: official Gradle $version SHA-256 file could not be downloaded."
+                rm -rf -- "$temp_dir"
+                return 1
+            fi
+        fi
+    else
+        if ! wget -q "$distribution_url" -O "$archive"; then
+            pas_log "ERROR: Gradle $version download failed: $distribution_url"
+            rm -rf -- "$temp_dir"
+            return 1
+        fi
+        if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+            if ! wget -q "$distribution_url.sha256" -O "$checksum_file"; then
+                pas_log "ERROR: official Gradle $version SHA-256 file could not be downloaded."
+                rm -rf -- "$temp_dir"
+                return 1
+            fi
+        fi
+    fi
+
+    if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+        expected_sha="$(awk 'NF { print $1; exit }' "$checksum_file" | tr -d '\\r')"
+    fi
+    if [[ ! "$expected_sha" =~ ^[A-Fa-f0-9]{64}$ ]] ||
+        ! pas_verify_sha256 "$archive" "${expected_sha,,}" ||
+        ! unzip -tqq "$archive" >/dev/null 2>&1; then
+        pas_log "ERROR: downloaded Gradle $version archive failed SHA-256 or ZIP integrity validation."
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+
+    if ! unzip -q "$archive" -d "$temp_dir" ||
+        [[ ! -x "$temp_dir/gradle-$version/bin/gradle" ]] ||
+        ! "$temp_dir/gradle-$version/bin/gradle" --version >/dev/null 2>&1; then
+        pas_log "ERROR: Gradle $version archive did not contain a runnable distribution."
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+
+    rm -rf -- "$install_dir"
+    if ! mv -- "$temp_dir/gradle-$version" "$install_dir"; then
+        pas_log "ERROR: could not install Gradle $version into $install_dir."
+        rm -rf -- "$temp_dir"
+        return 1
+    fi
+    rm -rf -- "$temp_dir"
+    PAS_GRADLE_LAUNCHER="$install_dir/bin/gradle"
+    pas_log "GRADLE_BOOTSTRAPPED=$version"
+    return 0
+}
+
 pas_select_gradle_launcher() {
     local project_dir="$1"
     local gradle_root="$2"
+    local wrapper_version=""
+    local wrapper_sha=""
+    local system_version=""
+    local system_major=""
 
     PAS_GRADLE_LAUNCHER=""
     PAS_GRADLE_KIND=""
+
     if pas_find_gradle_wrapper "$project_dir" "$gradle_root"; then
         PAS_GRADLE_LAUNCHER="$PAS_GRADLE_WRAPPER"
         PAS_GRADLE_KIND="wrapper"
         return 0
     fi
+
+    # If wrapper files are incomplete but properties survived, keep the project's
+    # declared Gradle version. Fall back to the pinned version only without metadata.
+    if pas_find_gradle_wrapper_properties "$project_dir" "$gradle_root" &&
+        pas_read_gradle_wrapper_metadata "$PAS_GRADLE_WRAPPER_PROPERTIES"; then
+        wrapper_version="$PAS_GRADLE_VERSION"
+        wrapper_sha="$PAS_GRADLE_WRAPPER_SHA256"
+        if pas_find_cached_gradle "$wrapper_version"; then
+            PAS_GRADLE_KIND="cached-wrapper-version"
+            pas_log "WARNING: Gradle wrapper files are incomplete; using cached Gradle $wrapper_version from its wrapper properties."
+            return 0
+        fi
+        if [[ "${PAS_DISABLE_GRADLE_BOOTSTRAP:-0}" != "1" ]] &&
+            pas_install_gradle_distribution "$wrapper_version" "$wrapper_sha"; then
+            PAS_GRADLE_KIND="bootstrapped-wrapper-version"
+            pas_log "WARNING: Gradle wrapper files are incomplete; using a verified Gradle $wrapper_version distribution."
+            return 0
+        fi
+    fi
+
     if pas_require_command gradle; then
-        PAS_GRADLE_LAUNCHER="$(command -v gradle)"
-        PAS_GRADLE_KIND="system"
+        system_version="$(gradle --version 2>/dev/null | sed -nE 's/^Gradle ([0-9]+([.][0-9]+){0,2}).*/\\1/p' | head -n 1)"
+        system_major="${system_version%%.*}"
+        if [[ "$system_major" =~ ^[0-9]+$ ]] && (( system_major >= 8 )); then
+            PAS_GRADLE_LAUNCHER="$(command -v gradle)"
+            PAS_GRADLE_KIND="system"
+            return 0
+        fi
+        pas_log "WARNING: Ignoring unsupported system Gradle version [${system_version:-unknown}]; Gradle 8 or newer is required for the fallback."
+    fi
+
+    if pas_find_cached_gradle "9.3.1"; then
+        PAS_GRADLE_KIND="cached-default"
+        return 0
+    fi
+    if [[ "${PAS_DISABLE_GRADLE_BOOTSTRAP:-0}" == "1" ]]; then
+        return 1
+    fi
+    if pas_install_gradle_distribution "9.3.1"; then
+        PAS_GRADLE_KIND="bootstrapped-default"
         return 0
     fi
     return 1
@@ -279,8 +464,13 @@ pas_run_self_tests() (
     local wrapper_project
     local nested_gradle_root
     local incomplete_wrapper_project
+    local plain_gradle_project
+    local wrapper_jar
+    local cache_home
+    local cached_gradle
     local fake_bin
     local saved_path="$PATH"
+    local saved_home="${HOME:-/root}"
     local test_count=0
 
     test_root="$(mktemp -d "${TMPDIR:-/tmp}/pas-build-engine-test.XXXXXX")"
@@ -376,18 +566,32 @@ PAS_TEST_ZIPS
         test_pass "project without settings.gradle is rejected"
     fi
 
-    # A wrapper script alone is not sufficient; it must have the JAR and properties.
+    # Validate complete, corrupt and partial Gradle wrapper layouts.
     wrapper_project="$test_root/wrapper project"
+    wrapper_jar="$wrapper_project/gradle/wrapper/gradle-wrapper.jar"
     mkdir -p "$wrapper_project/gradle/wrapper" "$wrapper_project/app"
-    printf '#!/usr/bin/env sh\n' > "$wrapper_project/gradlew"
-    printf 'wrapper-jar' > "$wrapper_project/gradle/wrapper/gradle-wrapper.jar"
+    printf '#!/usr/bin/env sh\nexit 0\n' > "$wrapper_project/gradlew"
     printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-bin.zip\n' > "$wrapper_project/gradle/wrapper/gradle-wrapper.properties"
+    printf 'not-a-valid-jar' > "$wrapper_jar"
+    if pas_find_gradle_wrapper "$wrapper_project" "$wrapper_project"; then
+        printf 'FAIL: invalid Gradle wrapper JAR was accepted\n' >&2
+        return 1
+    else
+        test_pass "corrupt Gradle wrapper JAR is rejected"
+    fi
+    python3 - "$wrapper_jar" <<'PAS_TEST_WRAPPER_JAR'
+import sys
+import zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+PAS_TEST_WRAPPER_JAR
     : > "$wrapper_project/settings.gradle"
     : > "$wrapper_project/app/build.gradle"
     nested_gradle_root="$wrapper_project/app"
     if pas_find_gradle_wrapper "$wrapper_project" "$nested_gradle_root" &&
-        [[ "$PAS_GRADLE_WRAPPER" == "$wrapper_project/gradlew" ]]; then
-        test_pass "complete parent Gradle wrapper is found for a nested Gradle root"
+        [[ "$PAS_GRADLE_WRAPPER" == "$wrapper_project/gradlew" ]] &&
+        [[ "$PAS_GRADLE_VERSION" == "8.9" ]]; then
+        test_pass "valid parent Gradle wrapper is found and its declared version is read"
     else
         printf 'FAIL: complete parent Gradle wrapper was not discovered\n' >&2
         return 1
@@ -395,45 +599,81 @@ PAS_TEST_ZIPS
 
     incomplete_wrapper_project="$test_root/incomplete wrapper project"
     mkdir -p "$incomplete_wrapper_project/gradle/wrapper"
-    printf '#!/usr/bin/env sh\n' > "$incomplete_wrapper_project/gradlew"
+    printf '#!/usr/bin/env sh\nexit 0\n' > "$incomplete_wrapper_project/gradlew"
     printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-bin.zip\n' > "$incomplete_wrapper_project/gradle/wrapper/gradle-wrapper.properties"
     if pas_find_gradle_wrapper "$incomplete_wrapper_project" "$incomplete_wrapper_project"; then
-        printf 'FAIL: incomplete Gradle wrapper was accepted\n' >&2
+        printf 'FAIL: Gradle wrapper without its JAR was accepted\n' >&2
         return 1
     else
         test_pass "Gradle wrapper without its JAR is rejected"
     fi
 
+    cache_home="$test_root/gradle cache home"
+    cached_gradle="$cache_home/.local/share/pocket-apk-studio/gradle-8.9/bin/gradle"
+    mkdir -p "$(dirname "$cached_gradle")"
+    printf '#!/bin/sh\necho "Gradle 8.9"\n' > "$cached_gradle"
+    chmod +x "$cached_gradle"
+    HOME="$cache_home"
+
     fake_bin="$test_root/fake-bin"
     mkdir -p "$fake_bin"
-    printf '#!/usr/bin/env sh\nexit 0\n' > "$fake_bin/gradle"
+    printf '#!/bin/sh\necho "Gradle 8.9"\n' > "$fake_bin/gradle"
     chmod +x "$fake_bin/gradle"
     PATH="$fake_bin:$saved_path"
     if pas_select_gradle_launcher "$incomplete_wrapper_project" "$incomplete_wrapper_project" &&
+        [[ "$PAS_GRADLE_KIND" == "cached-wrapper-version" ]] &&
+        [[ "$PAS_GRADLE_LAUNCHER" == "$cached_gradle" ]]; then
+        test_pass "incomplete wrapper uses cached Gradle matching its declared version"
+    else
+        PATH="$saved_path"
+        HOME="$saved_home"
+        printf 'FAIL: incomplete wrapper did not select its matching cached Gradle version\n' >&2
+        return 1
+    fi
+
+    plain_gradle_project="$test_root/project without wrapper"
+    mkdir -p "$plain_gradle_project"
+    : > "$plain_gradle_project/settings.gradle"
+    if pas_select_gradle_launcher "$plain_gradle_project" "$plain_gradle_project" &&
         [[ "$PAS_GRADLE_KIND" == "system" && "$PAS_GRADLE_LAUNCHER" == "$fake_bin/gradle" ]]; then
-        test_pass "an incomplete wrapper falls back to the installed Gradle command"
+        test_pass "supported installed Gradle 8+ is used when wrapper metadata is absent"
     else
         PATH="$saved_path"
-        printf 'FAIL: incomplete wrapper did not fall back to system Gradle\n' >&2
+        HOME="$saved_home"
+        printf 'FAIL: supported system Gradle fallback was not selected\n' >&2
         return 1
     fi
-    if pas_select_gradle_launcher "$wrapper_project" "$nested_gradle_root" &&
-        [[ "$PAS_GRADLE_KIND" == "wrapper" && "$PAS_GRADLE_LAUNCHER" == "$wrapper_project/gradlew" ]]; then
-        test_pass "a complete wrapper takes precedence over the installed Gradle command"
-    else
-        PATH="$saved_path"
-        printf 'FAIL: complete wrapper did not take precedence\n' >&2
-        return 1
-    fi
+
+    cached_gradle="$cache_home/.local/share/pocket-apk-studio/gradle-9.3.1/bin/gradle"
+    mkdir -p "$(dirname "$cached_gradle")"
+    printf '#!/bin/sh\necho "Gradle 9.3.1"\n' > "$cached_gradle"
+    chmod +x "$cached_gradle"
     mkdir -p "$test_root/empty-bin"
     PATH="$test_root/empty-bin"
-    if pas_select_gradle_launcher "$incomplete_wrapper_project" "$incomplete_wrapper_project"; then
+    if pas_select_gradle_launcher "$plain_gradle_project" "$plain_gradle_project" &&
+        [[ "$PAS_GRADLE_KIND" == "cached-default" ]] &&
+        [[ "$PAS_GRADLE_LAUNCHER" == "$cached_gradle" ]]; then
+        test_pass "project without wrapper can use cached pinned Gradle 9.3.1"
+    else
         PATH="$saved_path"
-        printf 'FAIL: launcher selection succeeded without a complete wrapper or system Gradle\n' >&2
+        HOME="$saved_home"
+        printf 'FAIL: cached Gradle 9.3.1 fallback was not selected\n' >&2
+        return 1
+    fi
+
+    HOME="$test_root/empty home"
+    mkdir -p "$HOME"
+    PAS_DISABLE_GRADLE_BOOTSTRAP=1
+    if pas_select_gradle_launcher "$plain_gradle_project" "$plain_gradle_project"; then
+        PATH="$saved_path"
+        HOME="$saved_home"
+        printf 'FAIL: Gradle selection succeeded without wrapper, system Gradle or cache\n' >&2
         return 1
     else
-        test_pass "missing complete wrapper and missing system Gradle produce a detectable failure"
+        test_pass "missing wrapper, system Gradle and cache fail clearly without network access"
     fi
+    unset PAS_DISABLE_GRADLE_BOOTSTRAP
+    HOME="$saved_home"
     PATH="$saved_path"
 
     kts_file="$test_root/Kotlin Android Module/build.gradle.kts"
@@ -713,8 +953,8 @@ pas_ubuntu_main() {
         pas_log "GRADLE_LAUNCHER=$PAS_GRADLE_LAUNCHER (complete wrapper)"
         "$PAS_GRADLE_LAUNCHER" -p "$gradle_root" --no-daemon --max-workers=2 --console=plain --info assembleDebug
     else
-        pas_log "GRADLE_LAUNCHER=$PAS_GRADLE_LAUNCHER (installed Gradle fallback)"
-        gradle --no-daemon --max-workers=2 --console=plain --info -p "$gradle_root" assembleDebug
+        pas_log "GRADLE_LAUNCHER=$PAS_GRADLE_LAUNCHER ($PAS_GRADLE_KIND)"
+        "$PAS_GRADLE_LAUNCHER" --no-daemon --max-workers=2 --console=plain --info -p "$gradle_root" assembleDebug
     fi
 
     mkdir -p "$output_dir"
