@@ -1177,6 +1177,228 @@ PAS_TEST_SDKMANAGER
         return 1
     fi
 
+
+    # Exercise the actual Ubuntu orchestration in an isolated fixture: ARM64/JDK
+    # probes, already-installed SDK, AAPT2 verification, ZIP extraction/root
+    # discovery, wrapper invocation, APK discovery/copy and exit diagnostics.
+    local test_script
+    local ubuntu_source
+    local ubuntu_project
+    local ubuntu_zip
+    local ubuntu_zip_name="project-9001-Pipeline_Project.zip"
+    local ubuntu_shared_mount
+    local ubuntu_workspace
+    local ubuntu_sdk
+    local ubuntu_home
+    local ubuntu_aapt2_dir
+    local ubuntu_fake_bin
+    local ubuntu_aapt2_sha
+    local ubuntu_log
+    local ubuntu_original_sha
+    local ubuntu_apk_source
+    local ubuntu_apk_output
+    local termux_shared_root
+    local termux_build_dir
+    local termux_fake_bin
+    local termux_args
+    local termux_log
+    local termux_failure_log
+    local termux_zip_name="project-9002-Original_Project.zip"
+    local termux_output_name="PocketAPKStudio-9002.apk"
+    local termux_original_sha
+    local termux_rc
+
+    test_script="$0"
+    [[ "$test_script" == /* ]] || test_script="$PWD/$test_script"
+
+    ubuntu_source="$test_root/Ubuntu Pipeline Source"
+    ubuntu_project="$ubuntu_source/Sample Project"
+    ubuntu_zip="$test_root/Ubuntu Pipeline Project.zip"
+    ubuntu_shared_mount="$test_root/Ubuntu Shared Mount"
+    ubuntu_workspace="$test_root/Ubuntu Workspace"
+    ubuntu_sdk="$test_root/Android SDK With Spaces"
+    ubuntu_home="$test_root/Ubuntu Home"
+    ubuntu_aapt2_dir="$test_root/AAPT2 Tools"
+    ubuntu_fake_bin="$test_root/Ubuntu Fake Bin"
+    ubuntu_log="$test_root/Ubuntu Pipeline Log.txt"
+    mkdir -p "$ubuntu_project/app" \
+        "$ubuntu_shared_mount/Download/PocketAPKStudio" \
+        "$ubuntu_sdk/platforms/android-35" \
+        "$ubuntu_sdk/platform-tools" \
+        "$ubuntu_sdk/build-tools/35.0.0" \
+        "$ubuntu_aapt2_dir" "$ubuntu_fake_bin" "$ubuntu_home"
+    cat > "$ubuntu_project/settings.gradle.kts" <<'PAS_TEST_PIPELINE_SETTINGS'
+rootProject.name = "Pipeline Project"
+include(":app")
+PAS_TEST_PIPELINE_SETTINGS
+    cat > "$ubuntu_project/app/build.gradle.kts" <<'PAS_TEST_PIPELINE_MODULE'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+android {
+    namespace = "com.example.pipeline"
+    compileSdk = 35
+}
+PAS_TEST_PIPELINE_MODULE
+    cat > "$ubuntu_project/gradlew" <<'PAS_TEST_PIPELINE_GRADLEW'
+#!/bin/sh
+root=""
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-p" ]; then
+        root="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+[ -n "$root" ] || exit 2
+mkdir -p "$root/app/build/outputs/apk/demo/google/debug"
+printf 'fake full Ubuntu pipeline APK' > "$root/app/build/outputs/apk/demo/google/debug/app-demo-google-debug.apk"
+printf 'MOCK_GRADLE_ASSEMBLE_DEBUG=1\n'
+PAS_TEST_PIPELINE_GRADLEW
+    cat > "$ubuntu_project/gradle-wrapper-placeholder" <<'PAS_TEST_PIPELINE_PLACEHOLDER'
+This file is intentionally not used by Gradle.
+PAS_TEST_PIPELINE_PLACEHOLDER
+    mkdir -p "$ubuntu_project/gradle/wrapper"
+    python3 - "$ubuntu_project/gradle/wrapper/gradle-wrapper.jar" <<'PAS_TEST_PIPELINE_JAR'
+import sys
+import zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+PAS_TEST_PIPELINE_JAR
+    cat > "$ubuntu_project/gradle/wrapper/gradle-wrapper.properties" <<'PAS_TEST_PIPELINE_PROPERTIES'
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
+PAS_TEST_PIPELINE_PROPERTIES
+    python3 - "$ubuntu_source" "$ubuntu_zip" <<'PAS_TEST_PIPELINE_ZIP'
+import pathlib
+import sys
+import zipfile
+source = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(source.rglob("*")):
+        if path.is_file():
+            archive.write(path, path.relative_to(source).as_posix())
+PAS_TEST_PIPELINE_ZIP
+    cp "$ubuntu_zip" "$ubuntu_shared_mount/Download/PocketAPKStudio/$ubuntu_zip_name"
+    ubuntu_original_sha="$(sha256sum "$ubuntu_shared_mount/Download/PocketAPKStudio/$ubuntu_zip_name" | awk '{print $1}')"
+    : > "$ubuntu_sdk/platforms/android-35/android.jar"
+    printf '#!/bin/sh\nexit 0\n' > "$ubuntu_sdk/platform-tools/adb"
+    printf '#!/bin/sh\nexit 0\n' > "$ubuntu_sdk/build-tools/35.0.0/aapt"
+    chmod +x "$ubuntu_sdk/platform-tools/adb" "$ubuntu_sdk/build-tools/35.0.0/aapt"
+    printf '#!/bin/sh\nprintf "Android Asset Packaging Tool (aapt2) test fixture\\n"\n' > "$ubuntu_aapt2_dir/aapt2"
+    chmod +x "$ubuntu_aapt2_dir/aapt2"
+    ubuntu_aapt2_sha="$(sha256sum "$ubuntu_aapt2_dir/aapt2" | awk '{print $1}')"
+    cat > "$ubuntu_fake_bin/uname" <<'PAS_TEST_PIPELINE_UNAME'
+#!/bin/sh
+if [ "$1" = "-m" ]; then
+    printf 'aarch64\n'
+else
+    /usr/bin/uname "$@"
+fi
+PAS_TEST_PIPELINE_UNAME
+    cat > "$ubuntu_fake_bin/java" <<'PAS_TEST_PIPELINE_JAVA'
+#!/bin/sh
+printf 'openjdk version "17.0.8"\n' >&2
+PAS_TEST_PIPELINE_JAVA
+    chmod +x "$ubuntu_fake_bin/uname" "$ubuntu_fake_bin/java"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_WORKSPACE_BASE="$ubuntu_workspace" \
+        PAS_TEST_SHARED_MOUNT_ROOT="$ubuntu_shared_mount" \
+        PAS_TEST_AAPT2_DIR="$ubuntu_aapt2_dir" \
+        PAS_TEST_AAPT2_SHA256="$ubuntu_aapt2_sha" \
+        ANDROID_HOME="$ubuntu_sdk" HOME="$ubuntu_home" \
+        PATH="$ubuntu_fake_bin:$saved_path" \
+        bash "$test_script" --ubuntu "$ubuntu_zip_name" "Pipeline.apk" > "$ubuntu_log" 2>&1; then
+        :
+    else
+        printf 'FAIL: isolated Ubuntu pipeline returned a non-zero exit code\n' >&2
+        tail -n 80 "$ubuntu_log" >&2
+        return 1
+    fi
+    ubuntu_apk_source="$ubuntu_workspace/project/Sample Project/app/build/outputs/apk/demo/google/debug/app-demo-google-debug.apk"
+    ubuntu_apk_output="$ubuntu_shared_mount/Download/PocketAPKStudio/Builds/Pipeline.apk"
+    if [[ -s "$ubuntu_apk_source" && -s "$ubuntu_apk_output" ]] &&
+        cmp -s "$ubuntu_apk_source" "$ubuntu_apk_output" &&
+        [[ "$ubuntu_original_sha" == "$(sha256sum "$ubuntu_shared_mount/Download/PocketAPKStudio/$ubuntu_zip_name" | awk '{print $1}')" ]] &&
+        grep -Fq "AAPT2_CHECKSUM=VERIFIED" "$ubuntu_log" &&
+        grep -Fq "SDK_COMPONENTS: all required components are already installed." "$ubuntu_log" &&
+        grep -Fq "JVM_TARGETS_ALIGNED=17" "$ubuntu_log" &&
+        grep -Fq "GRADLE_LAUNCHER=" "$ubuntu_log" &&
+        grep -Fq "APK_SAVED=" "$ubuntu_log" &&
+        grep -Fq "UBUNTU_BUILD_EXIT=0" "$ubuntu_log"; then
+        test_pass "isolated Ubuntu pipeline validates SDK/AAPT2, extracts the ZIP, runs a wrapper, copies a flavor APK and preserves the source ZIP"
+    else
+        printf 'FAIL: isolated Ubuntu pipeline output, diagnostics or source ZIP verification was incomplete\n' >&2
+        tail -n 80 "$ubuntu_log" >&2
+        return 1
+    fi
+
+    # Exercise the actual Termux-side handoff with a fake proot-distro executable.
+    # The bind source deliberately contains spaces so it must remain one argument.
+    termux_shared_root="$test_root/Termux Shared Storage"
+    termux_build_dir="$termux_shared_root/Download/PocketAPKStudio"
+    termux_fake_bin="$test_root/Termux Fake Bin"
+    termux_args="$test_root/Termux PRoot Arguments.txt"
+    termux_log="$test_root/Termux Handoff Log.txt"
+    termux_failure_log="$test_root/Termux Handoff Failure Log.txt"
+    mkdir -p "$termux_build_dir" "$termux_fake_bin"
+    cp "$test_script" "$termux_build_dir/build-project.sh"
+    printf 'original imported project ZIP bytes\n' > "$termux_build_dir/$termux_zip_name"
+    termux_original_sha="$(sha256sum "$termux_build_dir/$termux_zip_name" | awk '{print $1}')"
+    cat > "$termux_fake_bin/proot-distro" <<'PAS_TEST_PROOT_DISTRO'
+#!/bin/sh
+printf '%s\n' "$@" > "$PAS_TEST_PROOT_ARGS"
+printf 'MOCK_PROOT_DISTRO_CALLED=1\n'
+exit "$PAS_TEST_PROOT_EXIT"
+PAS_TEST_PROOT_DISTRO
+    chmod +x "$termux_fake_bin/proot-distro"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_shared_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=0 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_log" 2>&1; then
+        :
+    else
+        printf 'FAIL: Termux-side mocked PRoot handoff returned a non-zero exit code\n' >&2
+        tail -n 80 "$termux_log" >&2
+        return 1
+    fi
+    if cmp -s "$test_script" "$termux_build_dir/build-project.sh" &&
+        [[ "$termux_original_sha" == "$(sha256sum "$termux_build_dir/$termux_zip_name" | awk '{print $1}')" ]] &&
+        grep -Fxq "$termux_shared_root:/mnt/shared" "$termux_args" &&
+        grep -Fxq "/mnt/shared/Download/PocketAPKStudio/build-project.sh" "$termux_args" &&
+        grep -Fxq -- "--ubuntu" "$termux_args" &&
+        grep -Fq "BUILD_ENGINE_COMPLETE=1" "$termux_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=0" "$termux_log"; then
+        test_pass "Termux PRoot handoff preserves spaced bind paths, copies the engine and leaves the imported ZIP unchanged"
+    else
+        printf 'FAIL: Termux PRoot handoff arguments, logs or source ZIP verification were incomplete\n' >&2
+        cat "$termux_args" >&2
+        tail -n 80 "$termux_log" >&2
+        return 1
+    fi
+
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_shared_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=73 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_failure_log" 2>&1; then
+        printf 'FAIL: Termux handoff ignored a failing PRoot process\n' >&2
+        return 1
+    else
+        termux_rc=$?
+    fi
+    if [[ "$termux_rc" -eq 43 ]] &&
+        grep -Fq "Ubuntu PRoot build process returned a failure" "$termux_failure_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=43" "$termux_failure_log"; then
+        test_pass "Termux reports a non-zero PRoot result with a persisted, explicit exit code"
+    else
+        printf 'FAIL: Termux did not persist a clear PRoot failure result (exit=%s)\n' "$termux_rc" >&2
+        tail -n 80 "$termux_failure_log" >&2
+        return 1
+    fi
+
     printf 'SELF_TESTS_PASSED=%s\n' "$test_count"
 )
 
@@ -1192,18 +1414,43 @@ pas_ubuntu_main() {
     local aapt2_tmp
     local aapt2_sha256="7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b"
     local gradle_properties
-    local project_base="/root/pocket-apk-studio"
-    local project="$project_base/project"
+    local project_base
+    local project
+    local shared_mount
+    local output_dir
     local gradle_root
     local settings_file
     local gradle_file
     local android_modules=0
     local apk
     local apk_name
-    local output_dir="/mnt/shared/Download/PocketAPKStudio/Builds"
     local apk_count=0
     local candidate
     local -a build_files=()
+
+    # Keep production paths fixed. Test-only overrides let CI exercise the real
+    # Ubuntu build orchestration without writing into /root or /mnt/shared.
+    if [[ "${PAS_TEST_MODE-0}" == "1" ]]; then
+        project_base="${PAS_TEST_WORKSPACE_BASE:-/root/pocket-apk-studio}"
+        shared_mount="${PAS_TEST_SHARED_MOUNT_ROOT:-/mnt/shared}"
+        aapt2_dir="${PAS_TEST_AAPT2_DIR:-/root/.local/bin}"
+        if [[ "${PAS_TEST_AAPT2_SHA256:-}" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+            aapt2_sha256="${PAS_TEST_AAPT2_SHA256,,}"
+        fi
+    else
+        project_base="/root/pocket-apk-studio"
+        shared_mount="/mnt/shared"
+        aapt2_dir="/root/.local/bin"
+    fi
+    project_base="${project_base%/}"
+    shared_mount="${shared_mount%/}"
+    project="$project_base/project"
+    output_dir="$shared_mount/Download/PocketAPKStudio/Builds"
+
+    [[ "$project_base" == /* && "$project_base" != "/" &&
+        "$shared_mount" == /* && "$shared_mount" != "/" &&
+        "$aapt2_dir" == /* && "$aapt2_dir" != "/" ]] ||
+        pas_fail 26 "Workspace, shared mount and AAPT2 paths must be absolute non-root directories."
 
     trap 'rc=$?; printf "UBUNTU_BUILD_EXIT=%s\n" "$rc"' EXIT
     export PS4='+[${EPOCHREALTIME}] ${BASH_SOURCE##*/}:${LINENO}: '
@@ -1229,7 +1476,7 @@ pas_ubuntu_main() {
         *) pas_fail 25 "Reserved APK output file must end in .apk." ;;
     esac
 
-    shared_zip="/mnt/shared/Download/PocketAPKStudio/$zip_name"
+    shared_zip="$shared_mount/Download/PocketAPKStudio/$zip_name"
     [[ -r "$shared_zip" ]] || pas_fail 25 "Imported ZIP is not readable in the Ubuntu shared mount: $shared_zip"
 
     case "$(uname -m)" in
@@ -1260,7 +1507,6 @@ pas_ubuntu_main() {
     pas_require_command grep || pas_fail 36 "The grep command is missing in Ubuntu."
     pas_require_command sed || pas_fail 37 "The sed command is missing in Ubuntu."
 
-    aapt2_dir="/root/.local/bin"
     aapt2="$aapt2_dir/aapt2"
     mkdir -p "$aapt2_dir"
     if [[ ! -x "$aapt2" ]] || ! pas_verify_sha256 "$aapt2" "$aapt2_sha256" || ! "$aapt2" version >/dev/null 2>&1; then
@@ -1395,9 +1641,18 @@ pas_termux_main() {
     local zip_name="${1-}"
     local output_name="${2-}"
     local shared="/storage/emulated/0"
-    local build_dir="$shared/Download/PocketAPKStudio"
-    local live_log="$build_dir/build-live.log"
-    local engine_in_shared="$build_dir/build-project.sh"
+    local build_dir
+    local live_log
+    local engine_in_shared
+
+    # A temporary shared-root override is used only by the isolated CI handoff test.
+    if [[ "${PAS_TEST_MODE-0}" == "1" && -n "${PAS_TEST_SHARED_STORAGE_ROOT-}" ]]; then
+        shared="$PAS_TEST_SHARED_STORAGE_ROOT"
+    fi
+    shared="${shared%/}"
+    build_dir="$shared/Download/PocketAPKStudio"
+    live_log="$build_dir/build-live.log"
+    engine_in_shared="$build_dir/build-project.sh"
 
     trap 'rc=$?; printf "BUILD_ENGINE_EXIT=%s\n" "$rc"' EXIT
 
