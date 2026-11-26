@@ -132,6 +132,7 @@ pas_read_gradle_wrapper_metadata() {
 
     PAS_GRADLE_VERSION=""
     PAS_GRADLE_WRAPPER_SHA256=""
+    PAS_GRADLE_DISTRIBUTION_TYPE=""
     [[ -s "$properties_file" ]] || return 1
 
     distribution_url="$(sed -n 's/^[[:space:]]*distributionUrl[[:space:]]*=[[:space:]]*//p' "$properties_file" | tail -n 1)"
@@ -141,6 +142,7 @@ pas_read_gradle_wrapper_metadata() {
     base_name="${distribution_url##*/}"
     if [[ "$base_name" =~ ^gradle-([0-9]+([.][0-9]+){1,2}([.-][A-Za-z0-9]+)*)-(bin|all)\.zip$ ]]; then
         PAS_GRADLE_VERSION="${BASH_REMATCH[1]}"
+        PAS_GRADLE_DISTRIBUTION_TYPE="${BASH_REMATCH[4]}"
     else
         return 1
     fi
@@ -207,12 +209,13 @@ pas_find_cached_gradle() {
 pas_install_gradle_distribution() {
     local version="$1"
     local expected_sha="${2-}"
+    local distribution_type="${3:-bin}"
     local cache_root="${HOME:-/root}/.local/share/pocket-apk-studio"
     local install_dir="$cache_root/gradle-$version"
     local temp_dir
     local archive
     local checksum_file
-    local distribution_url="https://services.gradle.org/distributions/gradle-$version-bin.zip"
+    local distribution_url="https://services.gradle.org/distributions/gradle-$version-$distribution_type.zip"
 
     if [[ -x "$install_dir/bin/gradle" ]] && "$install_dir/bin/gradle" --version >/dev/null 2>&1; then
         PAS_GRADLE_LAUNCHER="$install_dir/bin/gradle"
@@ -228,8 +231,8 @@ pas_install_gradle_distribution() {
 
     mkdir -p "$cache_root" || return 1
     temp_dir="$(mktemp -d "$cache_root/.gradle-$version.XXXXXX")" || return 1
-    archive="$temp_dir/gradle-$version-bin.zip"
-    checksum_file="$temp_dir/gradle-$version-bin.zip.sha256"
+    archive="$temp_dir/gradle-$version-$distribution_type.zip"
+    checksum_file="$temp_dir/gradle-$version-$distribution_type.zip.sha256"
 
     if pas_require_command curl; then
         if ! curl -fL --retry 2 --silent --show-error "$distribution_url" -o "$archive"; then
@@ -319,7 +322,7 @@ pas_select_gradle_launcher() {
             return 0
         fi
         if [[ "${PAS_DISABLE_GRADLE_BOOTSTRAP:-0}" != "1" ]] &&
-            pas_install_gradle_distribution "$wrapper_version" "$wrapper_sha"; then
+            pas_install_gradle_distribution "$wrapper_version" "$wrapper_sha" "$PAS_GRADLE_DISTRIBUTION_TYPE"; then
             PAS_GRADLE_KIND="bootstrapped-wrapper-version"
             pas_log "WARNING: Gradle wrapper files are incomplete; using a verified Gradle $wrapper_version distribution."
             return 0
@@ -468,6 +471,11 @@ pas_run_self_tests() (
     local wrapper_jar
     local cache_home
     local cached_gradle
+    local mock_bin
+    local mock_gradle_zip
+    local mock_gradle_sha
+    local mock_request_log
+    local bootstrap_home
     local fake_bin
     local saved_path="$PATH"
     local saved_home="${HOME:-/root}"
@@ -631,6 +639,63 @@ PAS_TEST_WRAPPER_JAR
         return 1
     fi
 
+    # Exercise the actual download/checksum/extract/install path without network access.
+    printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-all.zip\n' > "$incomplete_wrapper_project/gradle/wrapper/gradle-wrapper.properties"
+    mock_bin="$test_root/mock-download-bin"
+    mock_gradle_zip="$test_root/mock-gradle-8.9-all.zip"
+    mock_request_log="$test_root/mock-gradle-requests.log"
+    bootstrap_home="$test_root/Gradle bootstrap home"
+    mkdir -p "$mock_bin" "$bootstrap_home"
+    python3 - "$mock_gradle_zip" <<'PAS_TEST_GRADLE_DISTRIBUTION'
+import sys
+import zipfile
+with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    info = zipfile.ZipInfo("gradle-8.9/bin/gradle")
+    info.create_system = 3
+    info.external_attr = (0o100755 << 16)
+    archive.writestr(info, "#!/bin/sh\necho 'Gradle 8.9'\n")
+PAS_TEST_GRADLE_DISTRIBUTION
+    mock_gradle_sha="$(sha256sum "$mock_gradle_zip" | awk '{print $1}')"
+    cat > "$mock_bin/curl" <<'PAS_TEST_MOCK_CURL'
+#!/bin/sh
+url=""
+output=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output="$2"; shift 2; continue ;;
+        https://*) url="$1" ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >> "$MOCK_GRADLE_REQUEST_LOG"
+case "$url" in
+    *.sha256) printf '%s  mock-gradle.zip\n' "$MOCK_GRADLE_SHA" > "$output" ;;
+    *) cp "$MOCK_GRADLE_ZIP" "$output" ;;
+esac
+PAS_TEST_MOCK_CURL
+    chmod +x "$mock_bin/curl"
+    export MOCK_GRADLE_SHA="$mock_gradle_sha"
+    export MOCK_GRADLE_ZIP="$mock_gradle_zip"
+    export MOCK_GRADLE_REQUEST_LOG="$mock_request_log"
+    HOME="$bootstrap_home"
+    PATH="$mock_bin:$saved_path"
+    if pas_select_gradle_launcher "$incomplete_wrapper_project" "$incomplete_wrapper_project" &&
+        [[ "$PAS_GRADLE_KIND" == "bootstrapped-wrapper-version" ]] &&
+        [[ "$PAS_GRADLE_DISTRIBUTION_TYPE" == "all" ]] &&
+        [[ -x "$PAS_GRADLE_LAUNCHER" ]] &&
+        "$PAS_GRADLE_LAUNCHER" --version | grep -q "Gradle 8.9" &&
+        grep -q 'gradle-8.9-all.zip$' "$mock_request_log" &&
+        grep -q 'gradle-8.9-all.zip.sha256$' "$mock_request_log"; then
+        test_pass "incomplete wrapper bootstraps its declared all distribution after SHA-256 verification"
+    else
+        PATH="$saved_path"
+        HOME="$saved_home"
+        printf 'FAIL: verified Gradle wrapper distribution bootstrap did not complete\n' >&2
+        return 1
+    fi
+    unset MOCK_GRADLE_SHA MOCK_GRADLE_ZIP MOCK_GRADLE_REQUEST_LOG
+    HOME="$saved_home"
+    PATH="$saved_path"
     plain_gradle_project="$test_root/project without wrapper"
     mkdir -p "$plain_gradle_project"
     : > "$plain_gradle_project/settings.gradle"
