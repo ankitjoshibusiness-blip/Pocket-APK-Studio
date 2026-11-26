@@ -995,29 +995,57 @@ class LivePreviewActivity : Activity() {
                         }
                     }
                     "Image", "AsyncImage" -> {
-                        val resourceName = Regex("""R\.drawable\.(\w+)""").find(callArgs)?.groupValues?.get(1)
-                            ?: Regex("""painterResource\s*\(\s*R\.drawable\.(\w+)""").find(callArgs)?.groupValues?.get(1)
-                        val imageFile = resourceName?.let { name ->
-                            projectRoot.walkTopDown().maxDepth(10).firstOrNull {
-                                it.isFile && it.nameWithoutExtension == name && it.parentFile?.name?.startsWith("drawable") == true &&
-                                    it.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp")
-                            }
+                        val resourceName = Regex("""R\.(?:drawable|mipmap)\.(\w+)""")
+                            .find(callArgs)?.groupValues?.get(1)
+                        val imageResources = resourceName?.let {
+                            PreviewImageResourceFinder.findResources(projectRoot, it)
+                        }.orEmpty()
+                        val vectorFile = imageResources.firstOrNull {
+                            it.extension.equals("xml", ignoreCase = true)
                         }
-                        if (imageFile != null) {
-                            ImageView(this).apply {
-                                setImageBitmap(android.graphics.BitmapFactory.decodeFile(imageFile.absolutePath))
-                                scaleType = ImageView.ScaleType.CENTER_CROP
+                        val vectorDrawable = vectorFile?.let { file ->
+                            runCatching {
+                                val parser = Xml.newPullParser()
+                                file.inputStream().use { input ->
+                                    parser.setInput(input, "UTF-8")
+                                    android.graphics.drawable.Drawable.createFromXml(resources, parser)
+                                }
+                            }.getOrNull()
+                        }
+                        val bitmapFile = imageResources.firstOrNull {
+                            it.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp")
+                        }
+                        val bitmap = bitmapFile?.let { file ->
+                            runCatching {
+                                android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                            }.getOrNull()
+                        }
+                        when {
+                            vectorDrawable != null || bitmap != null -> ImageView(this).apply {
+                                if (vectorDrawable != null) {
+                                    setImageDrawable(vectorDrawable)
+                                    scaleType = ImageView.ScaleType.FIT_CENTER
+                                } else {
+                                    setImageBitmap(bitmap)
+                                    scaleType = ImageView.ScaleType.CENTER_CROP
+                                }
                                 adjustViewBounds = true
-                                contentDescription = label ?: resourceName
+                                contentDescription = label ?: resourceName ?: "Image preview"
                                 minimumHeight = dp(72)
                             }
-                        } else TextView(this).apply {
-                            text = "▧ " + (label ?: resourceName ?: "Image preview")
-                            gravity = Gravity.CENTER
-                            textSize = 12f
-                            setTextColor(0xFF65738B.toInt())
-                            setBackgroundColor(0xFFE8ECF7.toInt())
-                            minimumHeight = dp(72)
+                            else -> TextView(this).apply {
+                                text = if (resourceName == null) {
+                                    "▧ " + (label ?: "Image preview")
+                                } else {
+                                    "▧ Image unavailable: $resourceName"
+                                }
+                                gravity = Gravity.CENTER
+                                textSize = 12f
+                                setTextColor(0xFF65738B.toInt())
+                                setBackgroundColor(0xFFE8ECF7.toInt())
+                                minimumHeight = dp(72)
+                                contentDescription = label ?: resourceName ?: "Image preview"
+                            }
                         }
                     }
                     "DropdownMenu" -> Button(this).apply {

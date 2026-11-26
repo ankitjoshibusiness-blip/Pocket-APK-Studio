@@ -25,6 +25,9 @@ This tracker deliberately separates source-derived approximations from a real co
 - GitHub Actions run [#319](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45580392235) on 2026-11-25 validated the two-thumb RangeSlider implementation and its state tests; `testDebugUnitTest`, `assembleDebug`, and both artifact uploads succeeded.
 - Final tracker commit `f7298ffbda8d20e5e21afcbe7c3fe177ebe91f57` was verified by run [#320](https://github.com/ankitjoshibusiness-blip/Pocket-APK-Studio/actions/runs/45580439389) on 2026-11-25. The local APK-engine validation, unit-test task, debug APK build, build-log upload and APK upload all completed successfully.
 
+
+- **2026-11-26:** Phase 2 image preview now searches Android `drawable` and `mipmap` resource folders, including XML drawable resources. Native Android drawable XML (including supported vector drawables) is inflated in the source preview; raster decode failures and missing/unsupported resources show an explicit placeholder. This remains a best-effort preview: XML drawables that depend on resource IDs or theme attributes from the imported app may not inflate in Pocket APK Studio's own Resources and will fall back to the placeholder. Physical-device visual confirmation is still required.
+
 ## Next work
 
 1. Keep improving Phase 2 fidelity without claiming complete Compose rendering (especially `@Preview` configurations, modifier combinations, drawable/vector resources and custom layouts).
