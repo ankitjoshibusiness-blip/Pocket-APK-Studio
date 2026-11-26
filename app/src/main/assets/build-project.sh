@@ -710,6 +710,7 @@ PAS_TEST_MOCK_CURL
         return 1
     fi
 
+    HOME="$cache_home"
     cached_gradle="$cache_home/.local/share/pocket-apk-studio/gradle-9.3.1/bin/gradle"
     mkdir -p "$(dirname "$cached_gradle")"
     printf '#!/bin/sh\necho "Gradle 9.3.1"\n' > "$cached_gradle"
