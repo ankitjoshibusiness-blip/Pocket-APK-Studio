@@ -1282,7 +1282,7 @@ with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:
 PAS_TEST_PIPELINE_ZIP
     cp "$ubuntu_zip" "$ubuntu_shared_mount/Download/PocketAPKStudio/$ubuntu_zip_name"
     ubuntu_original_sha="$(sha256sum "$ubuntu_shared_mount/Download/PocketAPKStudio/$ubuntu_zip_name" | awk '{print $1}')"
-    : > "$ubuntu_sdk/platforms/android-35/android.jar"
+    printf 'mock Android platform API 35\\n' > "$ubuntu_sdk/platforms/android-35/android.jar"
     printf '#!/bin/sh\nexit 0\n' > "$ubuntu_sdk/platform-tools/adb"
     printf '#!/bin/sh\nexit 0\n' > "$ubuntu_sdk/build-tools/35.0.0/aapt"
     chmod +x "$ubuntu_sdk/platform-tools/adb" "$ubuntu_sdk/build-tools/35.0.0/aapt"
