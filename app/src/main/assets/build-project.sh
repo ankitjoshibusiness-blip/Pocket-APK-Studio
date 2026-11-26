@@ -489,6 +489,7 @@ pas_resolve_android_sdk_manager() {
 
 pas_ensure_android_sdk() {
     local sdk_root="$1"
+    PAS_ANDROID_SDKMANAGER=""
     local sdk_version
     local build_tools_version
     local sdkmanager_dir
@@ -1110,6 +1111,14 @@ PAS_TEST_SDKMANAGER
         return 1
     fi
     unset MOCK_SDK_REQUEST_LOG ANDROID_SDK_MANAGER
+
+    # Re-check a fully provisioned SDK without requiring sdkmanager to remain resolvable.
+    if pas_ensure_android_sdk "$sdk_root_fixture" && [[ -z "$PAS_ANDROID_SDKMANAGER" ]]; then
+        test_pass "already-installed SDK components pass without a resolvable sdkmanager"
+    else
+        printf 'FAIL: an already-installed Android SDK still required sdkmanager\n' >&2
+        return 1
+    fi
 
     # Missing packages and no sdkmanager must fail clearly without network access.
     missing_sdk_root="$test_root/SDK Without Command Line Tools"
