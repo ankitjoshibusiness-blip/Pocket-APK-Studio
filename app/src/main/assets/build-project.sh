@@ -53,6 +53,15 @@ pas_validate_zip() {
         [[ -z "$entry" ]] && continue
         pas_zip_entry_is_safe "$entry" || return 1
     done <<< "$listing"
+
+    # Info-ZIP preserves Unix symbolic links and special-file types. Extracting
+    # a link before a later ZIP entry beneath that link can redirect writes
+    # outside the isolated project directory. Imported projects support only
+    # regular files and directories.
+    if unzip -Z -v "$zip_file" 2>/dev/null | grep -Eq \
+        'Unix file attributes \([0-7]{6} octal\):[[:space:]]*[lbcps]'; then
+        return 1
+    fi
     return 0
 }
 
@@ -661,6 +670,7 @@ pas_run_self_tests() (
     local test_root
     local valid_zip
     local unsafe_zip
+    local unsafe_symlink_zip
     local extracted
     local kts_file
     local groovy_file
@@ -728,7 +738,8 @@ pas_run_self_tests() (
 
     valid_zip="$test_root/project archive with spaces.zip"
     unsafe_zip="$test_root/unsafe archive.zip"
-    python3 - "$valid_zip" "$unsafe_zip" <<'PAS_TEST_ZIPS'
+    unsafe_symlink_zip="$test_root/unsafe symlink archive.zip"
+    python3 - "$valid_zip" "$unsafe_zip" "$unsafe_symlink_zip" <<'PAS_TEST_ZIPS'
 import sys
 import zipfile
 
@@ -741,6 +752,12 @@ with zipfile.ZipFile(sys.argv[1], "w") as archive:
     )
 with zipfile.ZipFile(sys.argv[2], "w") as archive:
     archive.writestr("../escaped.txt", "must be rejected")
+with zipfile.ZipFile(sys.argv[3], "w") as archive:
+    link = zipfile.ZipInfo("project-link")
+    link.create_system = 3
+    link.external_attr = (0o120777 << 16)
+    archive.writestr(link, "../../outside")
+    archive.writestr("project-link/payload.txt", "must not escape")
 PAS_TEST_ZIPS
 
     if pas_validate_zip "$valid_zip"; then
@@ -754,6 +771,12 @@ PAS_TEST_ZIPS
         return 1
     else
         test_pass "ZIP containing parent traversal is rejected"
+    fi
+    if pas_validate_zip "$unsafe_symlink_zip"; then
+        printf 'FAIL: ZIP containing a Unix symlink and a child entry was accepted\n' >&2
+        return 1
+    else
+        test_pass "ZIP containing a Unix symlink is rejected before extraction"
     fi
     if pas_validate_zip "$test_root/missing project.zip"; then
         printf 'FAIL: missing ZIP was accepted\n' >&2
@@ -1545,7 +1568,7 @@ pas_ubuntu_main() {
 
     pas_log "ZIP_VALIDATION: checking archive integrity and entry paths"
     pas_validate_zip "$shared_zip" ||
-        pas_fail 20 "The imported ZIP is corrupt, empty, missing, or contains an unsafe absolute/parent-traversal path."
+        pas_fail 20 "The imported ZIP is corrupt, empty, missing, contains an unsafe path, or includes a symbolic link/special filesystem entry."
     mkdir -p "$project_base"
     [[ "$project" == "$project_base/project" ]] ||
         pas_fail 26 "Internal project workspace path validation failed."
