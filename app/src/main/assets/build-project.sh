@@ -6,6 +6,22 @@
 
 set -Eeuo pipefail
 
+# The Termux runner writes stdout/stderr through a process-substitution tee.
+# Remember its PID so the EXIT handler can close the pipe and wait for the log
+# writer to flush before RUN_COMMAND reports the child process as finished.
+PAS_TERMUX_LOG_TEE_PID=""
+pas_termux_exit_trap() {
+    local rc=$?
+    set +x
+    trap - EXIT
+    printf 'BUILD_ENGINE_EXIT=%s\n' "$rc"
+    if [[ -n "$PAS_TERMUX_LOG_TEE_PID" ]]; then
+        exec 1>&- 2>&-
+        wait "$PAS_TERMUX_LOG_TEE_PID" 2>/dev/null || true
+    fi
+    exit "$rc"
+}
+
 pas_log() {
     printf '%s\n' "$*"
 }
@@ -1415,7 +1431,8 @@ PAS_TEST_PROOT_DISTRO
         grep -Fxq "/mnt/shared/Download/PocketAPKStudio/build-project.sh" "$termux_args" &&
         grep -Fxq -- "--ubuntu" "$termux_args" &&
         grep -Fq "BUILD_ENGINE_COMPLETE=1" "$termux_log" &&
-        grep -Fq "BUILD_ENGINE_EXIT=0" "$termux_log"; then
+        grep -Fq "BUILD_ENGINE_EXIT=0" "$termux_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=0" "$termux_build_dir/build-live.log"; then
         test_pass "Termux PRoot handoff preserves spaced bind paths, copies the engine and leaves the imported ZIP unchanged"
     else
         printf 'FAIL: Termux PRoot handoff arguments, logs or source ZIP verification were incomplete\n' >&2
@@ -1436,7 +1453,8 @@ PAS_TEST_PROOT_DISTRO
     fi
     if [[ "$termux_rc" -eq 43 ]] &&
         test_log_contains "$termux_failure_log" "Ubuntu PRoot build process returned a failure" &&
-        test_log_contains "$termux_failure_log" "BUILD_ENGINE_EXIT=43"; then
+        test_log_contains "$termux_failure_log" "BUILD_ENGINE_EXIT=43" &&
+        grep -Fq "BUILD_ENGINE_EXIT=43" "$termux_build_dir/build-live.log"; then
         test_pass "Termux reports a non-zero PRoot result with a persisted, explicit exit code"
     else
         printf 'FAIL: Termux did not persist a clear PRoot failure result (exit=%s)\n' "$termux_rc" >&2
@@ -1802,7 +1820,7 @@ pas_termux_main() {
     live_log="$build_dir/build-live.log"
     engine_in_shared="$build_dir/build-project.sh"
 
-    trap 'rc=$?; printf "BUILD_ENGINE_EXIT=%s\n" "$rc"' EXIT
+    trap pas_termux_exit_trap EXIT
 
     # MainActivity creates the ZIP and engine under MediaStore Downloads before
     # this command starts. Check Downloads before mkdir creates the child path
@@ -1814,6 +1832,7 @@ pas_termux_main() {
     mkdir -p "$build_dir" || pas_fail 20 "Could not create Downloads/PocketAPKStudio."
     : > "$live_log" || pas_fail 20 "Could not create the live build log: $live_log"
     exec > >(tee -a "$live_log") 2>&1
+    PAS_TERMUX_LOG_TEE_PID=$!
     export PS4='+[${EPOCHREALTIME}] ${BASH_SOURCE##*/}:${LINENO}: '
     set -x
 
