@@ -1229,6 +1229,9 @@ PAS_TEST_SDKMANAGER
     local termux_zip_name="project-9002-Original_Project.zip"
     local termux_output_name="PocketAPKStudio-9002.apk"
     local termux_original_sha
+    local termux_empty_engine_log
+    local termux_syntax_engine_log
+    local termux_empty_zip_log
     local termux_rc
 
     test_script="$0"
@@ -1419,6 +1422,83 @@ PAS_TEST_PROOT_DISTRO
     else
         printf 'FAIL: Termux did not persist a clear PRoot failure result (exit=%s)\n' "$termux_rc" >&2
         tail -n 80 "$termux_failure_log" >&2
+        return 1
+    fi
+
+    # Validate the copied engine itself before attempting to enter PRoot.
+    termux_empty_engine_log="$test_root/Termux Empty Engine Log.txt"
+    termux_syntax_engine_log="$test_root/Termux Syntax Engine Log.txt"
+    termux_empty_zip_log="$test_root/Termux Empty ZIP Log.txt"
+    : > "$termux_build_dir/build-project.sh"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_shared_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=0 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_empty_engine_log" 2>&1; then
+        printf 'FAIL: Termux accepted an empty copied build engine\n' >&2
+        return 1
+    else
+        termux_rc=$?
+    fi
+    if [[ "$termux_rc" -eq 23 ]] &&
+        grep -Fq "script is missing, empty or unreadable" "$termux_empty_engine_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=23" "$termux_empty_engine_log"; then
+        test_pass "Termux rejects an empty copied build engine before PRoot"
+    else
+        printf 'FAIL: empty copied build engine was not reported clearly (exit=%s)\n' "$termux_rc" >&2
+        tail -n 40 "$termux_empty_engine_log" >&2
+        return 1
+    fi
+
+    cp "$test_script" "$termux_build_dir/build-project.sh"
+    printf 'if then\n' > "$termux_build_dir/build-project.sh"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_shared_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=0 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_syntax_engine_log" 2>&1; then
+        printf 'FAIL: Termux accepted invalid Bash syntax in the copied engine\n' >&2
+        return 1
+    else
+        termux_rc=$?
+    fi
+    if [[ "$termux_rc" -eq 23 ]] &&
+        grep -Fq "contains invalid Bash syntax" "$termux_syntax_engine_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=23" "$termux_syntax_engine_log"; then
+        test_pass "Termux syntax-checks the copied engine before PRoot"
+    else
+        printf 'FAIL: invalid copied engine syntax was not reported clearly (exit=%s)\n' "$termux_rc" >&2
+        tail -n 40 "$termux_syntax_engine_log" >&2
+        return 1
+    fi
+
+    cp "$test_script" "$termux_build_dir/build-project.sh"
+    : > "$termux_build_dir/$termux_zip_name"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_shared_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=0 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_empty_zip_log" 2>&1; then
+        printf 'FAIL: Termux accepted an empty imported project ZIP\n' >&2
+        return 1
+    else
+        termux_rc=$?
+    fi
+    if [[ "$termux_rc" -eq 25 ]] &&
+        grep -Fq "ZIP is missing, empty or not readable" "$termux_empty_zip_log" &&
+        grep -Fq "BUILD_ENGINE_EXIT=25" "$termux_empty_zip_log"; then
+        test_pass "Termux rejects an empty imported ZIP before PRoot"
+    else
+        printf 'FAIL: empty imported ZIP was not reported clearly (exit=%s)\n' "$termux_rc" >&2
+        tail -n 40 "$termux_empty_zip_log" >&2
+        return 1
+    fi
+
+    printf 'original imported project ZIP bytes\n' > "$termux_build_dir/$termux_zip_name"
+    if [[ "$termux_original_sha" == "$(sha256sum "$termux_build_dir/$termux_zip_name" | awk '{print $1}')" ]]; then
+        test_pass "Termux preflight failure tests leave the imported ZIP bytes unchanged"
+    else
+        printf 'FAIL: Termux preflight tests changed the imported ZIP\n' >&2
         return 1
     fi
 
@@ -1689,8 +1769,10 @@ pas_termux_main() {
     pas_log "TERMUX_VERSION=${TERMUX_VERSION:-unknown}"
     [[ -d "$shared/Download" ]] ||
         pas_fail 24 "Termux shared storage is not ready. Open Termux, run termux-setup-storage, and grant storage access."
-    [[ -r "$engine_in_shared" ]] ||
-        pas_fail 23 "The standalone build-project.sh script was not copied to shared Downloads."
+    [[ -r "$engine_in_shared" && -s "$engine_in_shared" ]] ||
+        pas_fail 23 "The standalone build-project.sh script is missing, empty or unreadable in shared Downloads."
+    bash -n "$engine_in_shared" ||
+        pas_fail 23 "The copied build-project.sh contains invalid Bash syntax. Update Pocket APK Studio and retry."
     case "$zip_name" in
         ""|*/*|*[!A-Za-z0-9._-]*)
             pas_fail 25 "Invalid imported ZIP name passed from Pocket APK Studio."
@@ -1710,8 +1792,8 @@ pas_termux_main() {
         *.apk) ;;
         *) pas_fail 25 "Reserved APK output file must end in .apk." ;;
     esac
-    [[ -r "$build_dir/$zip_name" ]] ||
-        pas_fail 25 "Imported project ZIP is not readable in Termux shared storage: $build_dir/$zip_name"
+    [[ -r "$build_dir/$zip_name" && -s "$build_dir/$zip_name" ]] ||
+        pas_fail 25 "Imported project ZIP is missing, empty or not readable in Termux shared storage: $build_dir/$zip_name"
     pas_require_command proot-distro ||
         pas_fail 10 "proot-distro is missing in Termux. Install it and set up the Ubuntu distribution."
 
