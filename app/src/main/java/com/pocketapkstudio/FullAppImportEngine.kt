@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
 /**
  * Pure Kotlin Full-App Multi-Page, Multi-Tab, Multi-Tile & Dialog Window Importer.
  * Extracts editable [DesignerScreen]s from:
- *  - XML layouts (resolving @color/* and @string/* resources)
+ *  - XML layouts (resolving @color/… and @string/… resources)
  *  - Non-XML Jetpack Compose (@Composable screens & AlertDialog windows)
  *  - Programmatic Kotlin/Java Android View hierarchies (LinearLayout, ScrollView,
  *    custom helper functions like label/card/actionButton/welcomeMenuItem/workspaceSection,
