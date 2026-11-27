@@ -8,7 +8,7 @@ package com.pocketapkstudio
  * the current build so an old transcript cannot report a previous APK as new.
  */
 internal object BuildApkCallbackParser {
-    private val savedApkPattern = Regex("""APK_SAVED=([^\\r\\n]+)""")
+    private val savedApkPattern = Regex("""APK_SAVED=([^\r\n]+)""")
 
     fun preferredTranscript(
         callbackStdout: String,
