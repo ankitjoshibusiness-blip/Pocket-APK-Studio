@@ -279,7 +279,7 @@ object FullAppImportEngine {
 
     private fun importXmlScreen(file: SourceFileEntry, res: ResourceMaps): DesignerScreen {
         val xml = file.content
-        val bgMatch = Regex("""android:background="([^"]+)"""").find(xml)
+        val bgMatch = Regex("""android:background="([^"]+)""" + '"').find(xml)
         val screenBg = resolveXmlColor(bgMatch?.groupValues?.get(1), res, "#202A33")
         val lightBg = ApkDesignerColorUtils.isLightHex(screenBg)
         val defaultTextColor = if (lightBg) "#17232B" else "#EEF4F6"
@@ -297,7 +297,7 @@ object FullAppImportEngine {
             }
 
             fun attr(name: String): String? =
-                Regex("""$name="([^"]+)"""").find(attrs)?.groupValues?.get(1)
+                Regex("""$name="([^"]+)""" + '"').find(attrs)?.groupValues?.get(1)
 
             val text = resolveXmlString(attr("android:text"), res)
             val hint = resolveXmlString(attr("android:hint"), res)
@@ -532,13 +532,13 @@ object FullAppImportEngine {
                 val dClose = findMatchingDelimiter(body, dOpen, '(', ')')
                 if (dClose < 0) continue
                 val dArgs = body.substring(dOpen + 1, dClose)
-                val titleText = Regex("""title\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)"""").find(dArgs)?.groupValues?.get(1)
+                val titleText = Regex("""title\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)""" + '"').find(dArgs)?.groupValues?.get(1)
                     ?: "Dialog ${++dlgIdx}"
-                val bodyText = Regex("""text\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)"""").find(dArgs)?.groupValues?.get(1)
+                val bodyText = Regex("""text\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)""" + '"').find(dArgs)?.groupValues?.get(1)
                     ?: ""
-                val confirmText = Regex("""confirmButton\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)"""").find(dArgs)?.groupValues?.get(1)
+                val confirmText = Regex("""confirmButton\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)""" + '"').find(dArgs)?.groupValues?.get(1)
                     ?: "OK"
-                val dismissText = Regex("""dismissButton\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)"""").find(dArgs)?.groupValues?.get(1)
+                val dismissText = Regex("""dismissButton\s*=\s*\{[\s\S]*?Text\(\s*"([^"]+)""" + '"').find(dArgs)?.groupValues?.get(1)
 
                 val dlgEls = mutableListOf<DesignerElement>()
                 dlgEls.add(
@@ -770,8 +770,8 @@ object FullAppImportEngine {
                     continue
                 }
                 "OutlinedTextField", "TextField" -> {
-                    val ph = Regex("""placeholder\s*=\s*\{[\s\S]*?"([^"]+)"""").find(args)?.groupValues?.get(1)
-                        ?: Regex("""label\s*=\s*\{[\s\S]*?"([^"]+)"""").find(args)?.groupValues?.get(1)
+                    val ph = Regex("""placeholder\s*=\s*\{[\s\S]*?"([^"]+)""" + '"').find(args)?.groupValues?.get(1)
+                        ?: Regex("""label\s*=\s*\{[\s\S]*?"([^"]+)""" + '"').find(args)?.groupValues?.get(1)
                         ?: "Enter value..."
                     val h = explicitH ?: 48
                     elements.add(
@@ -1930,22 +1930,22 @@ object FullAppImportEngine {
                 val sliceEnd = if (showIdx in i..endIdx) showIdx + 7 else endIdx
                 val chunk = code.substring(i, sliceEnd)
 
-                val title = Regex("""\.setTitle\(\s*"([^"]+)"""").find(chunk)?.groupValues?.get(1)
-                    ?.let(::unescapeKotlinString)
+                val title = Regex("""\.setTitle\(\s*"([^"]+)""" + '"').find(chunk)?.groupValues?.get(1)
+                    ?.let { unescapeKotlinString(it) }
                 if (title.isNullOrBlank() || !seenTitles.add(title)) {
                     i += 19
                     continue
                 }
 
-                val message = Regex("""\.setMessage\(\s*"([^"]+)"""").find(chunk)?.groupValues?.get(1)
-                    ?.let(::unescapeKotlinString)
-                val positive = Regex("""\.setPositiveButton\(\s*"([^"]+)"""").find(chunk)?.groupValues?.get(1)
-                    ?.let(::unescapeKotlinString)
-                val negative = Regex("""\.setNegativeButton\(\s*"([^"]+)"""").find(chunk)?.groupValues?.get(1)
-                    ?.let(::unescapeKotlinString)
+                val message = Regex("""\.setMessage\(\s*"([^"]+)""" + '"').find(chunk)?.groupValues?.get(1)
+                    ?.let { unescapeKotlinString(it) }
+                val positive = Regex("""\.setPositiveButton\(\s*"([^"]+)""" + '"').find(chunk)?.groupValues?.get(1)
+                    ?.let { unescapeKotlinString(it) }
+                val negative = Regex("""\.setNegativeButton\(\s*"([^"]+)""" + '"').find(chunk)?.groupValues?.get(1)
+                    ?.let { unescapeKotlinString(it) }
                 val itemsMatch = Regex("""\.setItems\(\s*arrayOf\(([^)]+)\)""").find(chunk)
                 val listItems = itemsMatch?.groupValues?.get(1)
-                    ?.let { splitTopLevelArgs(it).mapNotNull(::extractFirstStringLiteral) }
+                    ?.let { splitTopLevelArgs(it).mapNotNull { arg -> extractFirstStringLiteral(arg) } }
                     ?: emptyList()
 
                 val viewVar = Regex("""\.setView\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)""").find(chunk)?.groupValues?.get(1)

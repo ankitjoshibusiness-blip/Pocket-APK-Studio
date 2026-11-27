@@ -814,16 +814,20 @@ class ApkDesignerActivity : ComponentActivity() {
         }
         rightDrawerContent.addView(targetRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
 
-        val currentHex = when {
-            colorTarget == 3 || sel == null -> activeScreen().backgroundColor
-            colorTarget == 0 -> sel.fillColor
-            colorTarget == 1 -> sel.textColor
-            else -> sel.strokeColor
+        val colorEl = if (colorTarget == 3) null else sel
+        val currentHex = if (colorEl == null) {
+            activeScreen().backgroundColor
+        } else {
+            when (colorTarget) {
+                0 -> colorEl.fillColor
+                1 -> colorEl.textColor
+                else -> colorEl.strokeColor
+            }
         }
 
         fun applyColorHex(hex: String, recordUndo: Boolean = false) {
-            val liveEl = activeScreen().elements.find { it.id == selectedElementId }
-            if (colorTarget == 3 || liveEl == null) {
+            val liveEl = if (colorTarget == 3) null else activeScreen().elements.find { it.id == selectedElementId }
+            if (liveEl == null) {
                 if (recordUndo) pushUndoSnapshot()
                 screens[activeScreenIndex] = activeScreen().copy(backgroundColor = hex)
                 canvasView.screen = screens[activeScreenIndex]
@@ -978,7 +982,9 @@ class ApkDesignerActivity : ComponentActivity() {
                 progress = sel.borderRadius.coerceIn(0, 40)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                        if (fromUser) replaceElementOnActiveScreen(sel.copy(borderRadius = p), false)
+                        if (!fromUser) return
+                        val live = activeScreen().elements.find { it.id == selectedElementId } ?: return
+                        replaceElementOnActiveScreen(live.copy(borderRadius = p), false)
                     }
                     override fun onStartTrackingTouch(sb: SeekBar?) = Unit
                     override fun onStopTrackingTouch(sb: SeekBar?) = rebuildRightInspector()
@@ -992,7 +998,9 @@ class ApkDesignerActivity : ComponentActivity() {
                 progress = sel.opacity.coerceIn(10, 100)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                        if (fromUser) replaceElementOnActiveScreen(sel.copy(opacity = p.coerceAtLeast(10)), false)
+                        if (!fromUser) return
+                        val live = activeScreen().elements.find { it.id == selectedElementId } ?: return
+                        replaceElementOnActiveScreen(live.copy(opacity = p.coerceAtLeast(10)), false)
                     }
                     override fun onStartTrackingTouch(sb: SeekBar?) = Unit
                     override fun onStopTrackingTouch(sb: SeekBar?) = rebuildRightInspector()
@@ -1031,7 +1039,9 @@ class ApkDesignerActivity : ComponentActivity() {
                 progress = sel.filters.brightness.coerceIn(20, 180)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                        if (fromUser) replaceElementOnActiveScreen(sel.copy(filters = sel.filters.copy(brightness = p.coerceAtLeast(20))), false)
+                        if (!fromUser) return
+                        val live = activeScreen().elements.find { it.id == selectedElementId } ?: return
+                        replaceElementOnActiveScreen(live.copy(filters = live.filters.copy(brightness = p.coerceAtLeast(20))), false)
                     }
                     override fun onStartTrackingTouch(sb: SeekBar?) = Unit
                     override fun onStopTrackingTouch(sb: SeekBar?) = rebuildRightInspector()

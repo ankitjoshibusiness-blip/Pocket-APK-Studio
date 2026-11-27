@@ -55,7 +55,7 @@ class LivePreviewActivity : Activity() {
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
-        val activeFileExtra = intent.getStringExtra("active_file")?.let(::File)?.takeIf { it.isFile }
+        val activeFileExtra = intent.getStringExtra("active_file")?.let { File(it) }?.takeIf { it.isFile }
         fullAppScreens = FullAppImportEngine.scanProjectDirectory(projectRoot, activeFileExtra).screens
         refreshFullAppSwitcherStrip()
 

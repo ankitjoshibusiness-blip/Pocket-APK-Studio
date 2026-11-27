@@ -25,7 +25,6 @@ import com.pocketapkstudio.ApkDesignerModels.ResizeHandle
 import com.pocketapkstudio.ApkDesignerModels.TextAlignMode
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
