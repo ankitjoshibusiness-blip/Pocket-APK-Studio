@@ -176,6 +176,7 @@ class ProjectEditorActivity : Activity() {
             nav("▣ Project") { toggleExplorer() }
             nav("</> Editor") { editor.requestFocus() }
             nav("⚙ Build") { showBuildErrors() }
+            nav("✦ Design") { openApkDesigner() }
             nav("▶ Run") { openLivePreview() }
             nav("••• More") { showMoreMenu(root) }
             root.addView(sidebar, LinearLayout.LayoutParams(dp(76), -1).apply { rightMargin = dp(8) })
@@ -211,12 +212,20 @@ class ProjectEditorActivity : Activity() {
         designToggleButton.visibility = View.GONE
         addToolbarTile(designToggleButton)
         contentRoot.addView(toolbarScroll,LinearLayout.LayoutParams(-1,dp(48)).apply { bottomMargin=dp(5) })
+        val previewDesignerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val livePreviewButton = smallButton("▶  Live UI Preview") { openLivePreview() }.apply {
-            textSize = 14f
+            textSize = 13f
             setTextColor(0xFFFFFFFF.toInt())
             background = roundedSurface(0xFF2563EB.toInt(), 12)
         }
-        if (!landscapeMode) contentRoot.addView(livePreviewButton, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(7) })
+        val apkDesignerButton = smallButton("✦  APK Designer") { openApkDesigner() }.apply {
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            background = roundedSurface(0xFF3E8790.toInt(), 12)
+        }
+        previewDesignerRow.addView(livePreviewButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(4) })
+        previewDesignerRow.addView(apkDesignerButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(4) })
+        if (!landscapeMode) contentRoot.addView(previewDesignerRow, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
         val aiActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val shareAiButton = smallButton("✦  Share to ChatGPT") { shareProjectWithChatGPT() }.apply {
             textSize = 11f
@@ -703,9 +712,19 @@ class ProjectEditorActivity : Activity() {
     private fun openLivePreview() {
         if (!saveCurrent(false)) return
         startActivityForResult(
-            Intent(this, LivePreviewActivity::class.java).putExtra("project_root", rootDir.absolutePath),
+            Intent(this, LivePreviewActivity::class.java)
+                .putExtra("project_root", rootDir.absolutePath)
+                .apply { currentFile?.let { putExtra("active_file", it.absolutePath) } },
             7103
         )
+    }
+
+    private fun openApkDesigner() {
+        if (!saveCurrent(false)) return
+        val intent = Intent(this, ApkDesignerActivity::class.java)
+            .putExtra("project_root", rootDir.absolutePath)
+        currentFile?.let { intent.putExtra("active_file", it.absolutePath) }
+        startActivityForResult(intent, 7104)
     }
 
     private fun toggleExplorer() {
@@ -1017,6 +1036,18 @@ class ProjectEditorActivity : Activity() {
             // Forward the runtime-preview ZIP to MainActivity, which owns the Termux build pipeline.
             setResult(RESULT_OK, data)
             finish()
+            return
+        }
+        if (requestCode == 7104 && resultCode == RESULT_OK) {
+            val exportedRel = data?.getStringExtra("designer_exported_path")
+            refreshExplorer()
+            if (!exportedRel.isNullOrBlank()) {
+                val target = File(rootDir, exportedRel).canonicalFile
+                if (target.isFile && target.path.startsWith(rootDir.canonicalPath + File.separator)) {
+                    openFile(target)
+                    toast("Loaded updated design: ${target.name}")
+                }
+            }
             return
         }
         if (requestCode == 7105) {

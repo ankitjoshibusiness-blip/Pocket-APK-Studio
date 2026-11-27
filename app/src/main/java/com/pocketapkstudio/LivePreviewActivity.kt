@@ -33,6 +33,10 @@ class LivePreviewActivity : Activity() {
     private lateinit var fontScaleButton: Button
     private var webPreviewView: android.webkit.WebView? = null
     private var layouts: List<File> = emptyList()
+    private var fullAppScreens: List<ApkDesignerModels.DesignerScreen> = emptyList()
+    private var activeFullAppIndex: Int = -1
+    private lateinit var fullAppStrip: LinearLayout
+    private lateinit var editAllDesignerBtn: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +55,9 @@ class LivePreviewActivity : Activity() {
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
+        val activeFileExtra = intent.getStringExtra("active_file")?.let(::File)?.takeIf { it.isFile }
+        fullAppScreens = FullAppImportEngine.scanProjectDirectory(projectRoot, activeFileExtra).screens
+        refreshFullAppSwitcherStrip()
 
         val restoredFile = selectedPreviewPath?.let { relative ->
             runCatching {
@@ -68,7 +75,13 @@ class LivePreviewActivity : Activity() {
                 render(restoredFile)
             }
             "kt" -> renderComposeFile(restoredFile)
-            else -> if (!renderWebPreviewIfAvailable()) findLayouts()
+            else -> {
+                if (fullAppScreens.isNotEmpty()) {
+                    renderFullAppScreen(0)
+                } else if (!renderWebPreviewIfAvailable()) {
+                    findLayouts()
+                }
+            }
         }
     }
 
@@ -175,14 +188,36 @@ class LivePreviewActivity : Activity() {
             topMargin = dp(3)
             bottomMargin = dp(4)
         })
+        val actionBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val buildRunButton = Button(this).apply {
-            text = "Build & Run · Exact Device Preview"
+            text = "Build & Run · APK"
             isAllCaps = false
+            textSize = 12f
             setTextColor(Color.WHITE)
             setBackgroundColor(0xFF2563EB.toInt())
             setOnClickListener { exportProjectForDeviceRun() }
         }
-        root.addView(buildRunButton, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(7); bottomMargin = dp(8) })
+        editAllDesignerBtn = Button(this).apply {
+            text = "✦ Edit All in Designer"
+            isAllCaps = false
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF3E8790.toInt())
+            setOnClickListener { openFullAppInDesigner() }
+        }
+        actionBar.addView(buildRunButton, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
+        actionBar.addView(editAllDesignerBtn, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(4) })
+        root.addView(actionBar, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(6) })
+
+        fullAppStrip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val stripScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(fullAppStrip)
+        }
+        root.addView(stripScroll, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFFE0E5EC.toInt()) }
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -219,6 +254,82 @@ class LivePreviewActivity : Activity() {
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         applyDeviceProfile()
+    }
+
+    private fun openFullAppInDesigner() {
+        val intent = android.content.Intent(this, ApkDesignerActivity::class.java)
+            .putExtra("project_root", projectRoot.absolutePath)
+            .putExtra("initial_screen_index", activeFullAppIndex.coerceAtLeast(0))
+        startActivity(intent)
+    }
+
+    private fun refreshFullAppSwitcherStrip() {
+        if (!::fullAppStrip.isInitialized) return
+        fullAppStrip.removeAllViews()
+        if (fullAppScreens.isEmpty()) {
+            editAllDesignerBtn.text = "✦ Open APK Designer"
+            return
+        }
+        editAllDesignerBtn.text = "✦ Edit All (${fullAppScreens.size})"
+        fullAppScreens.forEachIndexed { idx, scr ->
+            val active = idx == activeFullAppIndex
+            val chip = Button(this).apply {
+                text = "[${scr.screenCategory.badge}] ${scr.name}"
+                isAllCaps = false
+                textSize = 11f
+                setTextColor(if (active) Color.WHITE else 0xFFD0DCE3.toInt())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (active) 0xFF3E8790.toInt() else 0xFF1E2B35.toInt())
+                    cornerRadius = dp(8).toFloat()
+                    setStroke(dp(1), if (active) 0xFF69C1B8.toInt() else 0xFF314453.toInt())
+                }
+                setPadding(dp(10), 0, dp(10), 0)
+                setOnClickListener { renderFullAppScreen(idx) }
+            }
+            fullAppStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(6) })
+        }
+    }
+
+    private fun renderFullAppScreen(index: Int) {
+        if (index !in fullAppScreens.indices) return
+        activeFullAppIndex = index
+        val scr = fullAppScreens[index]
+        title.text = "${scr.name} (${index + 1}/${fullAppScreens.size})"
+        refreshFullAppSwitcherStrip()
+
+        webPreviewView = null
+        content.removeAllViews()
+        content.setPadding(0, 0, 0, 0)
+        content.setBackgroundColor(ApkDesignerColorUtils.parseColorInt(scr.backgroundColor, 0xFF202A33.toInt()))
+
+        val canvas = ApkDesignerCanvasView(this).apply {
+            screen = scr
+            zoom = (previewWidthDp / 360f).coerceIn(0.82f, 1.4f)
+            showGrid = false
+            interactivePreviewOnly = true
+            onInteractiveTap = { tappedEl, tabLabel ->
+                val targetName = (tabLabel ?: tappedEl.text).lowercase()
+                val matchIdx = fullAppScreens.indexOfFirst { cand ->
+                    val n = cand.name.lowercase()
+                    when {
+                        targetName.contains("‹") -> n == "home"
+                        targetName.contains("→") || targetName.contains("workspace") || targetName.contains("editor") -> n == "workspace"
+                        targetName.contains("tool") -> n.contains("tool")
+                        targetName.contains("preview") -> n.contains("preview")
+                        targetName.contains("setting") || targetName.contains("preference") -> n.contains("setting")
+                        targetName.contains("clone") || targetName.contains("git") -> n.contains("clone")
+                        targetName.contains("doc") -> n.contains("doc")
+                        targetName.contains("create project") || targetName.contains("quick start") -> n.contains("quick start")
+                        else -> n.isNotBlank() && targetName.contains(n)
+                    }
+                }
+                if (matchIdx >= 0 && matchIdx != activeFullAppIndex) {
+                    renderFullAppScreen(matchIdx)
+                }
+            }
+        }
+        content.addView(canvas, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        deviceContentScroll.scrollTo(0, 0)
     }
 
     /**

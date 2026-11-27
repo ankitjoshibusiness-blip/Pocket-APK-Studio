@@ -554,7 +554,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
         appTitle.addView(label("BUILD  •  ANALYZE  •  RECOVER", 9, 0xFF9AA7D5.toInt(), true))
         appBar.addView(appTitle, LinearLayout.LayoutParams(0, -2, 1f))
         val proBadge = label("✦ PRO", 11, 0xFFFFD36A.toInt(), true).apply {
-            setPadding(dp(9), dp(6), dp(9), dp(6))
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(10), dp(6))
             background = premiumGradient(0xFF806B3F.toInt(), 0xFF9A8050.toInt(), 30)
         }
         appBar.addView(proBadge)
@@ -678,6 +679,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         workspaceHero.addView(workspaceActions)
         homeContent.addView(workspaceHero)
         homeContent.addView(space(10))
+        homeContent.addView(welcomeMenuItem("✦", "APK Designer Canvas") { openApkDesigner() })
         homeContent.addView(welcomeMenuItem("◉", "App Preview") { openPage?.invoke(3) })
         homeContent.addView(welcomeMenuItem("⑂", "Clone git repository") {
             val repoUrl = EditText(this).apply {
@@ -707,7 +709,7 @@ class MainActivity : androidx.activity.ComponentActivity() {
         homeContent.addView(welcomeMenuItem("⬡", "APK Tools") { openPage?.invoke(2) })
         homeContent.addView(welcomeMenuItem("▤", "Documentation") {
             AlertDialog.Builder(this).setTitle("Pocket APK Studio Documentation")
-                .setMessage("Create project: start a Kotlin or Java Android project.\n\nOpen existing project: import an Android Gradle project ZIP.\n\nWorkspace: edit project files and save the updated ZIP.\n\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\n\nAPK Tools: inspect APK details and recover source files with JADX.")
+                .setMessage("Create project: start a Kotlin or Java Android project.\n\nAPK Designer Canvas: visually edit every page, tab, tile and dialog window with drag-and-drop, text alignment, HSV color picker, color combinations, photos, PNG export and Compose/XML code export.\n\nOpen existing project: import an Android Gradle project ZIP.\n\nWorkspace: edit project files and save the updated ZIP.\n\nBuild APK: configure Termux, Ubuntu, Java and Android SDK, then run a local build.\n\nAPK Tools: inspect APK details and recover source files with JADX.")
                 .setPositiveButton("Got it", null).show()
         })
         homeContent.addView(welcomeMenuItem("⚙", "Preferences") { openSettingsPage?.invoke() })
@@ -796,6 +798,8 @@ class MainActivity : androidx.activity.ComponentActivity() {
             if (uri == null) Toast.makeText(this, "Import a project ZIP first.", Toast.LENGTH_SHORT).show()
             else openProjectEditor(uri)
         })
+        projectCard.addView(space(8))
+        projectCard.addView(actionButton("✦  Open Full App in APK Designer") { openApkDesigner() })
         workspaceSection("02  PROJECT DETAILS", "Selected project information and editor entry", projectCard)
 
         val serverCard = card()
@@ -1318,6 +1322,15 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .putExtra("zip_uri", uri.toString())
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         editProjectResult.launch(editorIntent)
+    }
+
+    private fun openApkDesigner() {
+        val designerIntent = Intent(this, ApkDesignerActivity::class.java)
+        val cachedProject = File(cacheDir, "editor-project")
+        if (cachedProject.isDirectory && (cachedProject.listFiles()?.isNotEmpty() == true)) {
+            designerIntent.putExtra("project_root", cachedProject.absolutePath)
+        }
+        startActivity(designerIntent)
     }
 
     private fun inspectZip(uri: Uri) {
