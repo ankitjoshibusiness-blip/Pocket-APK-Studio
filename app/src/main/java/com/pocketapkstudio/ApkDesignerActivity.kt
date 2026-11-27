@@ -822,15 +822,16 @@ class ApkDesignerActivity : ComponentActivity() {
         }
 
         fun applyColorHex(hex: String, recordUndo: Boolean = false) {
-            if (colorTarget == 3 || sel == null) {
+            val liveEl = activeScreen().elements.find { it.id == selectedElementId }
+            if (colorTarget == 3 || liveEl == null) {
                 if (recordUndo) pushUndoSnapshot()
                 screens[activeScreenIndex] = activeScreen().copy(backgroundColor = hex)
                 canvasView.screen = screens[activeScreenIndex]
             } else {
                 val updated = when (colorTarget) {
-                    0 -> sel.copy(fillColor = hex)
-                    1 -> sel.copy(textColor = hex)
-                    else -> sel.copy(strokeColor = hex, strokeWidth = maxOf(1, sel.strokeWidth))
+                    0 -> liveEl.copy(fillColor = hex)
+                    1 -> liveEl.copy(textColor = hex)
+                    else -> liveEl.copy(strokeColor = hex, strokeWidth = maxOf(1, liveEl.strokeWidth))
                 }
                 replaceElementOnActiveScreen(updated, recordUndo)
             }

@@ -176,8 +176,10 @@ object FullAppImportEngine {
         }
         if (ch == '"') {
             if (index + 2 < src.length && src.startsWith("\"\"\"", index)) {
-                val end = src.indexOf("\"\"\"", index + 3)
-                return if (end == -1) src.length else end + 3
+                var end = src.indexOf("\"\"\"", index + 3)
+                if (end == -1) return src.length
+                while (end < src.length && src[end] == '"') end++
+                return end
             }
             var i = index + 1
             while (i < src.length) {
@@ -1199,7 +1201,11 @@ object FullAppImportEngine {
             if (applyIdx >= 0) {
                 val bStart = trimmed.indexOf('{', applyIdx)
                 val bEnd = findMatchingDelimiter(trimmed, bStart, '{', '}')
-                if (bEnd > bStart) applyBlockModifiers(node, trimmed.substring(bStart + 1, bEnd))
+                if (bEnd > bStart) {
+                    val body = trimmed.substring(bStart + 1, bEnd)
+                    applyBlockModifiers(node, body)
+                    evaluateStatementsInto(body, env, node)
+                }
             }
             return node
         }
@@ -2138,80 +2144,87 @@ object FullAppImportEngine {
         val code = file.content
         val screens = mutableListOf<DesignerScreen>()
 
-        val onCreateMatch = Regex("""override\s+fun\s+onCreate\s*\([^)]*\)\s*\{""").find(code)
-            ?: Regex("""private\s+fun\s+(?:showEditor|buildScreen)\s*\([^)]*\)\s*\{""").find(code)
+        val candidateEntryRegexes = listOf(
+            Regex("""(?:private\s+)?fun\s+(?:buildScreen|showEditor|buildUi)\s*\([^)]*\)\s*\{"""),
+            Regex("""override\s+fun\s+onCreate\s*\([^)]*\)\s*\{"""),
+        )
+        val candidateBodies = candidateEntryRegexes.mapNotNull { rx ->
+            rx.find(code)?.let { m ->
+                val openBrace = code.indexOf('{', m.range.first)
+                val closeBrace = findMatchingDelimiter(code, openBrace, '{', '}')
+                if (closeBrace > openBrace) code.substring(openBrace + 1, closeBrace) else null
+            }
+        }
+        val primaryBody = candidateBodies.firstOrNull { Regex("""val\s+pages\s*=\s*listOf\(""").containsMatchIn(it) }
+            ?: candidateBodies.maxByOrNull { Regex("""\baddView\(""").findAll(it).count() }
 
-        if (onCreateMatch != null) {
-            val openBrace = code.indexOf('{', onCreateMatch.range.first)
-            val closeBrace = findMatchingDelimiter(code, openBrace, '{', '}')
-            if (closeBrace > openBrace) {
-                val body = code.substring(openBrace + 1, closeBrace)
-                val env = mutableMapOf<String, KtNode>()
-                evaluateStatementsInto(body, env)
+        if (primaryBody != null) {
+            val body = primaryBody
+            val env = mutableMapOf<String, KtNode>()
+            evaluateStatementsInto(body, env)
 
-                val appBar = env["appBar"]
-                val tabBar = env["tabBar"]
-                val bottomTabs = tabBar?.children
-                    ?.filter { it.kind == "navTab" }
-                    ?.map { "${it.icon ?: "•"} ${it.text ?: "Tab"}".trim() }
-                    ?: emptyList()
+            val appBar = env["appBar"]
+            val tabBar = env["tabBar"]
+            val bottomTabs = tabBar?.children
+                ?.filter { it.kind == "navTab" }
+                ?.map { "${it.icon ?: "•"} ${it.text ?: "Tab"}".trim() }
+                ?: emptyList()
 
-                val pagesListMatch = Regex("""val\s+pages\s*=\s*listOf\(([^)]+)\)""").find(body)
-                if (pagesListMatch != null) {
-                    val pageVars = splitTopLevelArgs(pagesListMatch.groupValues[1])
-                    pageVars.forEachIndexed { idx, varName ->
-                        var pageNode = env[varName] ?: return@forEachIndexed
-                        // Unwrap transparent single-child ScrollView container
-                        if (pageNode.kind == "container" && pageNode.children.size == 1 && pageNode.children[0].kind == "container") {
-                            pageNode = pageNode.children[0]
-                        }
-                        val pageName = inferPageName(varName, pageNode, idx)
-                        val activeBottom = bottomTabs.getOrNull(idx)
-                        val (els, h) = layoutKtTreeToElements(
-                            rootNode = pageNode,
-                            topChrome = appBar,
-                            bottomNavTabs = bottomTabs,
-                            activeBottomTab = activeBottom,
-                        )
-                        if (els.isNotEmpty()) {
-                            screens.add(
-                                DesignerScreen(
-                                    id = ApkDesignerModels.nextId("ktpg"),
-                                    name = pageName,
-                                    width = CANVAS_W,
-                                    height = h,
-                                    backgroundColor = "#202A33",
-                                    elements = els,
-                                    sourceFilePath = file.path,
-                                    sourceKind = "kotlin-view",
-                                    screenCategory = ScreenCategory.TAB,
-                                    sourceSymbol = varName,
-                                )
-                            )
-                        }
+            val pagesListMatch = Regex("""val\s+pages\s*=\s*listOf\(([^)]+)\)""").find(body)
+            if (pagesListMatch != null) {
+                val pageVars = splitTopLevelArgs(pagesListMatch.groupValues[1])
+                pageVars.forEachIndexed { idx, varName ->
+                    var pageNode = env[varName] ?: return@forEachIndexed
+                    // Unwrap transparent single-child ScrollView container
+                    if (pageNode.kind == "container" && pageNode.children.size == 1 && pageNode.children[0].kind == "container") {
+                        pageNode = pageNode.children[0]
                     }
-                } else {
-                    val rootNode = env["root"] ?: env["contentRoot"] ?: env["body"]
-                    if (rootNode != null) {
-                        val (els, h) = layoutKtTreeToElements(rootNode)
-                        if (els.isNotEmpty()) {
-                            val title = file.path.substringAfterLast('/').removeSuffix(".kt")
-                                .replace(Regex("([a-z])([A-Z])"), "$1 $2")
-                            screens.add(
-                                DesignerScreen(
-                                    id = ApkDesignerModels.nextId("ktact"),
-                                    name = title,
-                                    width = CANVAS_W,
-                                    height = h,
-                                    backgroundColor = "#17212B",
-                                    elements = els,
-                                    sourceFilePath = file.path,
-                                    sourceKind = "kotlin-view",
-                                    screenCategory = ScreenCategory.ACTIVITY,
-                                    sourceSymbol = title,
-                                )
+                    val pageName = inferPageName(varName, pageNode, idx)
+                    val activeBottom = bottomTabs.getOrNull(idx)
+                    val (els, h) = layoutKtTreeToElements(
+                        rootNode = pageNode,
+                        topChrome = appBar,
+                        bottomNavTabs = bottomTabs,
+                        activeBottomTab = activeBottom,
+                    )
+                    if (els.isNotEmpty()) {
+                        screens.add(
+                            DesignerScreen(
+                                id = ApkDesignerModels.nextId("ktpg"),
+                                name = pageName,
+                                width = CANVAS_W,
+                                height = h,
+                                backgroundColor = "#202A33",
+                                elements = els,
+                                sourceFilePath = file.path,
+                                sourceKind = "kotlin-view",
+                                screenCategory = ScreenCategory.TAB,
+                                sourceSymbol = varName,
                             )
-                        }
+                        )
+                    }
+                }
+            } else {
+                val rootNode = env["root"] ?: env["contentRoot"] ?: env["body"]
+                if (rootNode != null) {
+                    val (els, h) = layoutKtTreeToElements(rootNode)
+                    if (els.isNotEmpty()) {
+                        val title = file.path.substringAfterLast('/').removeSuffix(".kt")
+                            .replace(Regex("([a-z])([A-Z])"), "\$1 \$2")
+                        screens.add(
+                            DesignerScreen(
+                                id = ApkDesignerModels.nextId("ktact"),
+                                name = title,
+                                width = CANVAS_W,
+                                height = h,
+                                backgroundColor = "#17212B",
+                                elements = els,
+                                sourceFilePath = file.path,
+                                sourceKind = "kotlin-view",
+                                screenCategory = ScreenCategory.ACTIVITY,
+                                sourceSymbol = title,
+                            )
+                        )
                     }
                 }
             }
@@ -2232,7 +2245,7 @@ object FullAppImportEngine {
                 val (els, h) = layoutKtTreeToElements(rootNode)
                 if (els.isNotEmpty()) {
                     val niceName = fnName.removePrefix("build").removeSuffix("Page").removeSuffix("Screen")
-                        .replace(Regex("([a-z])([A-Z])"), "$1 $2").trim()
+                        .replace(Regex("([a-z])([A-Z])"), "\$1 \$2").trim()
                     screens.add(
                         DesignerScreen(
                             id = ApkDesignerModels.nextId("ktbld"),

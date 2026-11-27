@@ -41,7 +41,8 @@ class ApkDesignerAndImportTest {
         // Center X for width=200 on canvas=360 is x=80
         val snapped = ApkDesignerModels.moveElementWithSnap(screen, btn, 77, 121, snapEnabled = true)
         assertEquals(80, snapped.x)
-        assertEquals(180, snapped.guideX)
+        assertNotNull(snapped.guideX)
+        assertEquals(180, snapped.guideX!!)
 
         val resized = ApkDesignerModels.resizeElementFromHandle(btn, ResizeHandle.NW, 180, 30)
         assertEquals(24, resized.width)

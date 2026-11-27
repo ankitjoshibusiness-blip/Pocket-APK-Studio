@@ -724,7 +724,7 @@ class ProjectEditorActivity : Activity() {
         val intent = Intent(this, ApkDesignerActivity::class.java)
             .putExtra("project_root", rootDir.absolutePath)
         currentFile?.let { intent.putExtra("active_file", it.absolutePath) }
-        startActivityForResult(intent, 7104)
+        startActivityForResult(intent, 7106)
     }
 
     private fun toggleExplorer() {
@@ -1038,7 +1038,7 @@ class ProjectEditorActivity : Activity() {
             finish()
             return
         }
-        if (requestCode == 7104 && resultCode == RESULT_OK) {
+        if (requestCode == 7106 && resultCode == RESULT_OK) {
             val exportedRel = data?.getStringExtra("designer_exported_path")
             refreshExplorer()
             if (!exportedRel.isNullOrBlank()) {
