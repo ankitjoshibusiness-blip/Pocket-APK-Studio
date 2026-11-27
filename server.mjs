@@ -261,84 +261,113 @@ async function runNativeBuildCheck(mode) {
   return activeBuildPromise;
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
-    const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const pathname = decodeURIComponent(reqUrl.pathname);
+const isDevMode = process.argv.includes('--dev');
 
-    if (pathname === '/api/health') {
-      return sendJson(res, 200, { ok: true, mode: 'hybrid-android-web-preview' });
-    }
-
-    if (pathname === '/api/repo/files' && req.method === 'GET') {
-      const files = readRepoSourceFiles();
-      return sendJson(res, 200, {
-        projectName: 'Pocket APK Studio (Native Repo)',
-        packageName: 'com.pocketapkstudio',
-        files,
-      });
-    }
-
-    if (pathname === '/api/apk/info' && req.method === 'GET') {
-      const info = await inspectBuiltApk();
-      return sendJson(res, 200, info);
-    }
-
-    if (pathname === '/api/apk/download' && req.method === 'GET') {
-      const apkPath = findBuiltApk();
-      if (!apkPath) {
-        return sendJson(res, 404, { error: 'Compiled APK not found.' });
-      }
-      const stat = fs.statSync(apkPath);
-      res.writeHead(200, {
-        'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Disposition': 'attachment; filename="PocketAPKStudio-debug.apk"',
-        'Content-Length': stat.size,
-      });
-      fs.createReadStream(apkPath).pipe(res);
-      return;
-    }
-
-    if (pathname === '/api/build/verify' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      let mode = 'verify';
-      try {
-        const parsed = JSON.parse(body || '{}');
-        if (parsed.mode === 'assemble') mode = 'assemble';
-      } catch {
-        // ignore invalid body
-      }
-      const result = await runNativeBuildCheck(mode);
-      return sendJson(res, 200, result);
-    }
-
-    // Serve static Vite build from dist/
-    const safePath = path.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '');
-    let filePath = path.join(DIST_DIR, safePath === '/' ? 'index.html' : safePath);
-
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      filePath = path.join(DIST_DIR, 'index.html');
-    }
-
-    if (!fs.existsSync(filePath)) {
-      res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Web preview build not ready yet.');
-      return;
-    }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+async function startServer() {
+  let viteServer = null;
+  if (isDevMode) {
+    const { createServer } = await import('vite');
+    viteServer = await createServer({
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
+      appType: 'spa',
     });
-    fs.createReadStream(filePath).pipe(res);
-  } catch (err) {
-    sendJson(res, 500, { error: err instanceof Error ? err.message : 'Internal server error' });
   }
-});
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Pocket APK Studio web preview running on http://0.0.0.0:${PORT}`);
+  const server = http.createServer(async (req, res) => {
+    try {
+      const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const pathname = decodeURIComponent(reqUrl.pathname);
+
+      if (pathname === '/api/health') {
+        return sendJson(res, 200, { ok: true, mode: 'hybrid-android-web-preview' });
+      }
+
+      if (pathname === '/api/repo/files' && req.method === 'GET') {
+        const files = readRepoSourceFiles();
+        return sendJson(res, 200, {
+          projectName: 'Pocket APK Studio (Native Repo)',
+          packageName: 'com.pocketapkstudio',
+          files,
+        });
+      }
+
+      if (pathname === '/api/apk/info' && req.method === 'GET') {
+        const info = await inspectBuiltApk();
+        return sendJson(res, 200, info);
+      }
+
+      if (pathname === '/api/apk/download' && req.method === 'GET') {
+        const apkPath = findBuiltApk();
+        if (!apkPath) {
+          return sendJson(res, 404, { error: 'Compiled APK not found.' });
+        }
+        const stat = fs.statSync(apkPath);
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.android.package-archive',
+          'Content-Disposition': 'attachment; filename="PocketAPKStudio-debug.apk"',
+          'Content-Length': stat.size,
+        });
+        fs.createReadStream(apkPath).pipe(res);
+        return;
+      }
+
+      if (pathname === '/api/build/verify' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        let mode = 'verify';
+        try {
+          const parsed = JSON.parse(body || '{}');
+          if (parsed.mode === 'assemble') mode = 'assemble';
+        } catch {
+          // ignore invalid body
+        }
+        const result = await runNativeBuildCheck(mode);
+        return sendJson(res, 200, result);
+      }
+
+      if (viteServer) {
+        viteServer.middlewares(req, res, () => {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+        });
+        return;
+      }
+
+      // Serve static Vite build from dist/
+      const safePath = path.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '');
+      let filePath = path.join(DIST_DIR, safePath === '/' ? 'index.html' : safePath);
+
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(DIST_DIR, 'index.html');
+      }
+
+      if (!fs.existsSync(filePath)) {
+        res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Web preview build not ready yet.');
+        return;
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      });
+      fs.createReadStream(filePath).pipe(res);
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : 'Internal server error' });
+    }
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Pocket APK Studio web preview running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start Pocket APK Studio server:', err);
+  process.exit(1);
 });

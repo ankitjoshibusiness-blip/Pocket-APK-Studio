@@ -61,6 +61,9 @@ export interface DesignerScreen {
   height: number;
   backgroundColor: string;
   elements: DesignerElement[];
+  sourceFilePath?: string;
+  screenCategory?: 'page' | 'tab' | 'dialog' | 'activity' | 'xml';
+  sourceSymbol?: string;
 }
 
 export interface SnapGuides {
@@ -660,7 +663,11 @@ export function applyColorCombinationToScreen(
   };
 }
 
-export function generateComposeFromScreen(screen: DesignerScreen, packageName: string): string {
+export function generateComposeFromScreen(
+  screen: DesignerScreen,
+  packageName: string,
+  wrapInActivityClass?: string
+): string {
   const fnName =
     screen.name
       .replace(/[^a-zA-Z0-9]+/g, ' ')
@@ -674,34 +681,42 @@ export function generateComposeFromScreen(screen: DesignerScreen, packageName: s
     const label = escapeKotlinString(el.text || el.placeholder || el.name);
     const offsetMod = `Modifier.offset(x = ${el.x}.dp, y = ${el.y}.dp).size(width = ${el.width}.dp, height = ${el.height}.dp)`;
     const composeAlign = toComposeTextAlign(el.textAlign);
+    const shapeArg = `RoundedCornerShape(${Math.min(Math.max(0, el.borderRadius), 48)}.dp)`;
     switch (el.kind) {
       case 'topBar':
-        return `        TopAppBar(\n            title = { Text("${label}", textAlign = ${composeAlign}) },\n            modifier = ${offsetMod}\n        )`;
+        return `        TopAppBar(\n            title = { Text("${label}", textAlign = ${composeAlign}, color = ${hexToComposeColor(el.textColor)}) },\n            colors = TopAppBarDefaults.topAppBarColors(containerColor = ${hexToComposeColor(el.fillColor)}),\n            modifier = ${offsetMod}\n        )`;
       case 'heading':
       case 'text':
         return `        Text(\n            text = "${label}",\n            fontSize = ${el.fontSize}.sp,\n            fontWeight = FontWeight.${el.fontWeight === '700' ? 'Bold' : el.fontWeight === '600' ? 'SemiBold' : 'Normal'},\n            textAlign = ${composeAlign},\n            color = ${hexToComposeColor(el.textColor)},\n            modifier = ${offsetMod}\n        )`;
       case 'button':
-        return `        Button(\n            onClick = { },\n            modifier = ${offsetMod}\n        ) {\n            Text("${label}", textAlign = ${composeAlign})\n        }`;
+        return `        Button(\n            onClick = { },\n            shape = ${shapeArg},\n            colors = ButtonDefaults.buttonColors(containerColor = ${hexToComposeColor(el.fillColor)}, contentColor = ${hexToComposeColor(el.textColor)}),\n            modifier = ${offsetMod}\n        ) {\n            Text("${label}", fontSize = ${el.fontSize}.sp, textAlign = ${composeAlign})\n        }`;
       case 'outlinedButton':
-        return `        OutlinedButton(\n            onClick = { },\n            modifier = ${offsetMod}\n        ) {\n            Text("${label}", textAlign = ${composeAlign})\n        }`;
+        return `        OutlinedButton(\n            onClick = { },\n            shape = ${shapeArg},\n            colors = ButtonDefaults.outlinedButtonColors(contentColor = ${hexToComposeColor(el.textColor)}),\n            modifier = ${offsetMod}\n        ) {\n            Text("${label}", fontSize = ${el.fontSize}.sp, textAlign = ${composeAlign})\n        }`;
       case 'input':
-        return `        OutlinedTextField(\n            value = "",\n            onValueChange = { },\n            label = { Text("${label}") },\n            modifier = ${offsetMod}\n        )`;
+        return `        OutlinedTextField(\n            value = "",\n            onValueChange = { },\n            label = { Text("${label}") },\n            shape = ${shapeArg},\n            modifier = ${offsetMod}\n        )`;
       case 'switch':
         return `        Row(modifier = ${offsetMod}) {\n            Text("${label}", textAlign = ${composeAlign}, color = ${hexToComposeColor(el.textColor)})\n            Switch(checked = ${el.checked ? 'true' : 'false'}, onCheckedChange = { })\n        }`;
       case 'progress':
-        return `        LinearProgressIndicator(\n            progress = { ${((el.progress ?? 70) / 100).toFixed(2)}f },\n            modifier = ${offsetMod}\n        )`;
+        return `        LinearProgressIndicator(\n            progress = { ${((el.progress ?? 70) / 100).toFixed(2)}f },\n            color = ${hexToComposeColor(el.strokeColor)},\n            trackColor = ${hexToComposeColor(el.fillColor)},\n            modifier = ${offsetMod}\n        )`;
       case 'divider':
-        return `        HorizontalDivider(modifier = ${offsetMod})`;
+        return `        HorizontalDivider(color = ${hexToComposeColor(el.fillColor)}, modifier = ${offsetMod})`;
       case 'fab':
-        return `        FloatingActionButton(onClick = { }, modifier = ${offsetMod}) {\n            Text("${label}")\n        }`;
+        return `        FloatingActionButton(\n            onClick = { },\n            containerColor = ${hexToComposeColor(el.fillColor)},\n            contentColor = ${hexToComposeColor(el.textColor)},\n            modifier = ${offsetMod}\n        ) {\n            Text("${label}")\n        }`;
       default:
-        return `        Surface(\n            color = ${hexToComposeColor(el.fillColor)},\n            shape = RoundedCornerShape(${Math.min(el.borderRadius, 48)}.dp),\n            modifier = ${offsetMod}\n        ) {\n            ${el.text ? `Text("${label}", textAlign = ${composeAlign}, color = ${hexToComposeColor(el.textColor)})` : ''}\n        }`;
+        return `        Surface(\n            color = ${hexToComposeColor(el.fillColor)},\n            shape = ${shapeArg},\n            modifier = ${offsetMod}\n        ) {\n            ${el.text ? `Text("${label}", textAlign = ${composeAlign}, color = ${hexToComposeColor(el.textColor)})` : ''}\n        }`;
     }
   });
 
+  const activityImports = wrapInActivityClass
+    ? `import android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\n`
+    : '';
+  const activityClassBlock = wrapInActivityClass
+    ? `class ${wrapInActivityClass} : ComponentActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        setContent {\n            MaterialTheme {\n                ${fnName}()\n            }\n        }\n    }\n}\n\n`
+    : '';
+
   return `package ${packageName}
 
-import androidx.compose.foundation.background
+${activityImports}import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -709,6 +724,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -719,6 +735,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -727,7 +744,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-@OptIn(ExperimentalMaterial3Api::class)
+${activityClassBlock}@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ${fnName}() {
     Box(

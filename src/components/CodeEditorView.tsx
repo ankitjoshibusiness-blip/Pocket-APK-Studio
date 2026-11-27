@@ -12,6 +12,7 @@ import {
   FolderOpen,
   PanelRightClose,
   PanelRightOpen,
+  PenTool,
   Search,
   Send,
   Smartphone,
@@ -29,6 +30,11 @@ import {
   type AiPatchSuggestion,
   type StudioProject,
 } from '../lib/studioEngine';
+import type { DesignerScreen } from '../lib/apkDesignerEngine';
+import {
+  importAllScreensFromFile,
+  importFullProjectToDesigner,
+} from '../lib/fullAppImportEngine';
 import { LivePhonePreview } from './LivePhonePreview';
 
 interface CodeEditorViewProps {
@@ -38,6 +44,8 @@ interface CodeEditorViewProps {
   onUpdateFile: (path: string, content: string) => void;
   onAddFile: (path: string, content: string) => void;
   onDeleteFile: (path: string) => void;
+  onOpenInDesigner: (path: string) => void;
+  onOpenScreensInDesigner: (screens: DesignerScreen[], activeScreenId?: string, label?: string) => void;
   editorFontSize: number;
   liveDiagnostics: boolean;
   defaultPreviewTheme: 'dark' | 'light';
@@ -55,6 +63,8 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
   onUpdateFile,
   onAddFile,
   onDeleteFile,
+  onOpenInDesigner,
+  onOpenScreensInDesigner,
   editorFontSize,
   liveDiagnostics,
   defaultPreviewTheme,
@@ -103,6 +113,19 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
     }
     return parseUiPreview(activeFile.content, activeFile.path, colorsXml);
   }, [activeFile, colorsXml]);
+
+  const fileScreens = useMemo(() => {
+    if (!activeFile) return [];
+    return importAllScreensFromFile({
+      filePath: activeFile.path,
+      content: activeFile.content,
+      projectFiles: project.files,
+    }).screens;
+  }, [activeFile, project.files]);
+
+  const projectScreens = useMemo(() => {
+    return importFullProjectToDesigner(project.files, activeFile?.path).screens;
+  }, [project.files, activeFile?.path]);
 
   const isXmlFile = activeFile?.path.toLowerCase().endsWith('.xml') ?? false;
   const xmlTextAttr = isXmlFile && activeFile ? readXmlAttribute(activeFile.content, 'text') : null;
@@ -369,6 +392,17 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
               </button>
             </div>
 
+            {activeFile && /\.(kt|java|xml)$/i.test(activeFile.path) && (
+              <button
+                type="button"
+                onClick={() => onOpenInDesigner(activeFile.path)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#3E8790] hover:bg-[#35767E] text-white transition-colors whitespace-nowrap cursor-pointer"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Edit in Designer</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setShowAssistant((v) => !v)}
@@ -453,7 +487,22 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
         {/* Mobile Preview Mode */}
         {mobilePane === 'preview' && (
           <div className="flex-1 min-h-0 overflow-auto lg:hidden">
-            <LivePhonePreview preview={previewResult} defaultTheme={defaultPreviewTheme} />
+            <LivePhonePreview
+              preview={previewResult}
+              fileScreens={fileScreens}
+              projectScreens={projectScreens}
+              defaultTheme={defaultPreviewTheme}
+              onEditInDesigner={(screen) => {
+                if (screen) {
+                  onOpenScreensInDesigner([screen], screen.id, screen.name);
+                } else if (activeFile) {
+                  onOpenInDesigner(activeFile.path);
+                }
+              }}
+              onEditFullAppInDesigner={(screens, activeId) =>
+                onOpenScreensInDesigner(screens, activeId, project.name)
+              }
+            />
           </div>
         )}
 
@@ -545,8 +594,23 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
 
       {/* Desktop Live UI Preview Pane */}
       {showPreviewDesktop && (
-        <aside className="hidden lg:block w-[390px] xl:w-[420px] border-l border-[#253542] bg-[#0F151C] shrink-0 h-full overflow-hidden">
-          <LivePhonePreview preview={previewResult} defaultTheme={defaultPreviewTheme} />
+        <aside className="hidden lg:block w-[400px] xl:w-[440px] border-l border-[#253542] bg-[#0F151C] shrink-0 h-full overflow-hidden">
+          <LivePhonePreview
+            preview={previewResult}
+            fileScreens={fileScreens}
+            projectScreens={projectScreens}
+            defaultTheme={defaultPreviewTheme}
+            onEditInDesigner={(screen) => {
+              if (screen) {
+                onOpenScreensInDesigner([screen], screen.id, screen.name);
+              } else if (activeFile) {
+                onOpenInDesigner(activeFile.path);
+              }
+            }}
+            onEditFullAppInDesigner={(screens, activeId) =>
+              onOpenScreensInDesigner(screens, activeId, project.name)
+            }
+          />
         </aside>
       )}
     </div>

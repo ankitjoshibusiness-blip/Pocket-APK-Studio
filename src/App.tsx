@@ -13,6 +13,8 @@ import {
   type ProjectFile,
   type StudioProject,
 } from './lib/studioEngine';
+import type { DesignerScreen } from './lib/apkDesignerEngine';
+import { importAllScreensFromFile } from './lib/fullAppImportEngine';
 import { HomeView, type StudioTab } from './components/HomeView';
 import { WorkspaceBuildView } from './components/WorkspaceBuildView';
 import { ApkDesignerView } from './components/ApkDesignerView';
@@ -56,6 +58,12 @@ export const App: React.FC = () => {
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [liveDiagnostics, setLiveDiagnostics] = useState(true);
   const [defaultPreviewTheme, setDefaultPreviewTheme] = useState<'dark' | 'light'>('dark');
+  const [pendingDesignerImport, setPendingDesignerImport] = useState<{
+    id: number;
+    screens: DesignerScreen[];
+    activeScreenId?: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     try {
@@ -158,6 +166,49 @@ export const App: React.FC = () => {
     setActiveTab('editor');
   };
 
+  const handleOpenScreensInDesigner = useCallback(
+    (screens: DesignerScreen[], activeScreenId?: string, label?: string) => {
+      if (!screens.length) return;
+      const totalEl = screens.reduce((acc, s) => acc + s.elements.length, 0);
+      const message =
+        screens.length > 1
+          ? `Imported ${screens.length} screens (${totalEl} elements)${label ? ` from ${label}` : ''}`
+          : `Imported ${totalEl} elements from ${label ?? screens[0].name}`;
+
+      setPendingDesignerImport({
+        id: Date.now(),
+        screens,
+        activeScreenId: activeScreenId ?? screens[0].id,
+        message,
+      });
+      setActiveTab('designer');
+    },
+    []
+  );
+
+  const handleOpenFileInDesigner = useCallback(
+    (targetPath?: string) => {
+      const pathToUse = targetPath || activeFilePath;
+      const targetFile =
+        project.files.find((f) => f.path === pathToUse) ??
+        project.files.find((f) => f.path.endsWith('MainActivity.kt')) ??
+        project.files[0];
+      if (!targetFile) return;
+
+      const bundle = importAllScreensFromFile({
+        filePath: targetFile.path,
+        content: targetFile.content,
+        projectFiles: project.files,
+      });
+
+      const fileName = targetFile.path.split('/').pop() ?? targetFile.path;
+      if (bundle.screens.length === 0) return;
+
+      handleOpenScreensInDesigner(bundle.screens, bundle.screens[0].id, fileName);
+    },
+    [activeFilePath, project.files, handleOpenScreensInDesigner]
+  );
+
   const handleExportDesignToProject = (
     exportedFiles: Array<{ path: string; content: string }>,
     openPath: string
@@ -254,6 +305,9 @@ export const App: React.FC = () => {
         {activeTab === 'designer' && (
           <ApkDesignerView
             packageName={project.packageName}
+            projectFiles={project.files}
+            pendingImport={pendingDesignerImport}
+            onConsumePendingImport={() => setPendingDesignerImport(null)}
             onExportCodeToProject={handleExportDesignToProject}
           />
         )}
@@ -266,6 +320,8 @@ export const App: React.FC = () => {
             onUpdateFile={handleUpdateFile}
             onAddFile={handleAddFile}
             onDeleteFile={handleDeleteFile}
+            onOpenInDesigner={handleOpenFileInDesigner}
+            onOpenScreensInDesigner={handleOpenScreensInDesigner}
             editorFontSize={editorFontSize}
             liveDiagnostics={liveDiagnostics}
             defaultPreviewTheme={defaultPreviewTheme}

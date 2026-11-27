@@ -49,10 +49,24 @@ import {
   type SnapGuides,
 } from '../lib/apkDesignerEngine';
 import type { ColorCombination } from '../lib/colorUtils';
+import type { ProjectFile } from '../lib/studioEngine';
+import { listImportableUiFiles } from '../lib/codeToDesignerEngine';
+import {
+  importAllScreensFromFile,
+  importFullProjectToDesigner,
+} from '../lib/fullAppImportEngine';
 import { DesignerInspector } from './DesignerInspector';
 
 interface ApkDesignerViewProps {
   packageName: string;
+  projectFiles: ProjectFile[];
+  pendingImport?: {
+    id: number;
+    screens: DesignerScreen[];
+    activeScreenId?: string;
+    message: string;
+  } | null;
+  onConsumePendingImport?: () => void;
   onExportCodeToProject: (files: Array<{ path: string; content: string }>, openPath: string) => void;
 }
 
@@ -120,6 +134,9 @@ function getInitialWideLayout(): boolean {
 
 export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
   packageName,
+  projectFiles,
+  pendingImport,
+  onConsumePendingImport,
   onExportCodeToProject,
 }) => {
   const [screens, setScreens] = useState<DesignerScreen[]>(loadSavedScreens);
@@ -167,8 +184,9 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
     const padY = 84;
     const availW = Math.max(180, container.clientWidth - padX);
     const availH = Math.max(240, container.clientHeight - padY);
-    const ratio = Math.min(availW / activeScreen.width, availH / activeScreen.height, 1.0);
-    return Math.max(0.35, Math.min(1.25, Number(ratio.toFixed(2))));
+    const effectiveFitH = activeScreen.height > 920 ? 840 : activeScreen.height;
+    const ratio = Math.min(availW / activeScreen.width, availH / effectiveFitH, 1.0);
+    return Math.max(0.42, Math.min(1.25, Number(ratio.toFixed(2))));
   }, [activeScreen.height, activeScreen.width]);
 
   // Keep canvas auto-fitted when container resizes or panels collapse/open
@@ -211,6 +229,89 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
     },
     []
   );
+
+  const importableProjectFiles = useMemo(
+    () => listImportableUiFiles(projectFiles),
+    [projectFiles]
+  );
+
+  const applyImportedScreens = useCallback(
+    (importedList: DesignerScreen[], focusScreenId: string | undefined, toastMessage: string) => {
+      if (importedList.length === 0) return;
+      let resolvedFocusId = focusScreenId ?? importedList[0].id;
+      commitScreens((prev) => {
+        const next = [...prev];
+        for (const imported of importedList) {
+          const existingIdx = imported.sourceFilePath
+            ? next.findIndex(
+                (s) =>
+                  s.sourceFilePath === imported.sourceFilePath &&
+                  (s.sourceSymbol ?? s.name) === (imported.sourceSymbol ?? imported.name)
+              )
+            : -1;
+          if (existingIdx >= 0) {
+            const keptId = next[existingIdx].id;
+            if (imported.id === resolvedFocusId) resolvedFocusId = keptId;
+            next[existingIdx] = { ...imported, id: keptId };
+          } else {
+            next.push(imported);
+          }
+        }
+        return next;
+      });
+      setActiveScreenId(resolvedFocusId);
+      setSelectedId(null);
+      setAutoFitEnabled(true);
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        setLeftPanelOpen(false);
+        setRightPanelOpen(false);
+      }
+      showToast(toastMessage);
+    },
+    [commitScreens, showToast]
+  );
+
+  useEffect(() => {
+    if (!pendingImport) return;
+    applyImportedScreens(pendingImport.screens, pendingImport.activeScreenId, pendingImport.message);
+    onConsumePendingImport?.();
+  }, [applyImportedScreens, onConsumePendingImport, pendingImport]);
+
+  const handleImportProjectFile = useCallback(
+    (file: ProjectFile) => {
+      const bundle = importAllScreensFromFile({
+        filePath: file.path,
+        content: file.content,
+        projectFiles,
+      });
+      const shortName = file.path.split('/').pop() ?? file.path;
+      if (bundle.screens.length === 0) {
+        showToast(`No UI widgets found in ${shortName}`);
+        return;
+      }
+      applyImportedScreens(
+        bundle.screens,
+        bundle.screens[0].id,
+        bundle.screens.length > 1
+          ? `Imported ${bundle.screens.length} screens (${bundle.totalElements} elements) from ${shortName}`
+          : `Imported ${bundle.totalElements} elements from ${shortName}`
+      );
+    },
+    [applyImportedScreens, projectFiles, showToast]
+  );
+
+  const handleImportFullProject = useCallback(() => {
+    const bundle = importFullProjectToDesigner(projectFiles);
+    if (bundle.screens.length === 0) {
+      showToast('No UI screens found in current project');
+      return;
+    }
+    applyImportedScreens(
+      bundle.screens,
+      bundle.screens[0].id,
+      `Imported Full App: ${bundle.screens.length} pages/tabs/windows (${bundle.totalElements} elements)`
+    );
+  }, [applyImportedScreens, projectFiles, showToast]);
 
   const updateActiveScreen = useCallback(
     (updater: (screen: DesignerScreen) => DesignerScreen, recordHistory = true) => {
@@ -586,14 +687,20 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
     showToast('Exported PNG image');
   };
 
+  const sourceActivityClass = useMemo(() => {
+    const fileName = activeScreen.sourceFilePath?.split('/').pop() ?? '';
+    const match = fileName.match(/^([A-Za-z_][A-Za-z0-9_]*Activity)\.kt$/);
+    return match ? match[1] : undefined;
+  }, [activeScreen.sourceFilePath]);
+
   const generatedCompose = useMemo(
-    () => generateComposeFromScreen(activeScreen, packageName),
-    [activeScreen, packageName]
+    () => generateComposeFromScreen(activeScreen, packageName, sourceActivityClass),
+    [activeScreen, packageName, sourceActivityClass]
   );
 
   const generatedXml = useMemo(() => generateXmlFromScreen(activeScreen), [activeScreen]);
 
-  const handleSendToEditor = () => {
+  const handleSendToEditor = (overwriteSource = false) => {
     const slug =
       activeScreen.name
         .replace(/[^a-zA-Z0-9]+/g, ' ')
@@ -603,12 +710,25 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
         .join('') || 'DesignedScreen';
     const xmlSlug = slug.toLowerCase();
     const pkgPath = packageName.replace(/\./g, '/');
+
+    if (overwriteSource && activeScreen.sourceFilePath) {
+      const srcPath = activeScreen.sourceFilePath;
+      const isXml = srcPath.toLowerCase().endsWith('.xml');
+      onExportCodeToProject(
+        [{ path: srcPath, content: isXml ? generatedXml : generatedCompose }],
+        srcPath
+      );
+      setExportModalOpen(false);
+      return;
+    }
+
     const composePath = `app/src/main/java/${pkgPath}/${slug}.kt`;
     const xmlPath = `app/src/main/res/layout/activity_${xmlSlug}.xml`;
+    const standaloneCompose = generateComposeFromScreen(activeScreen, packageName);
 
     onExportCodeToProject(
       [
-        { path: composePath, content: generatedCompose },
+        { path: composePath, content: standaloneCompose },
         { path: xmlPath, content: generatedXml },
       ],
       exportTab === 'compose' ? composePath : xmlPath
@@ -711,24 +831,43 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
             </div>
           ) : el.kind === 'bottomNav' ? (
             <div
-              className="w-full px-4 grid grid-cols-3"
-              style={{ color: el.textColor, fontSize: `${el.fontSize}px`, textAlign: el.textAlign }}
+              className="w-full h-full px-1.5 flex items-center justify-around gap-1"
+              style={{ color: el.textColor, fontSize: `${Math.min(el.fontSize, 11)}px` }}
             >
               {(el.text || 'Home | Search | Profile')
                 .split('|')
-                .slice(0, 4)
-                .map((tab, idx) => (
-                  <span key={idx} className={idx === 0 ? 'text-[#78A5A8] font-semibold' : ''}>
-                    {tab.trim()}
-                  </span>
-                ))}
+                .filter(Boolean)
+                .slice(0, 6)
+                .map((rawTab, idx) => {
+                  const tab = rawTab.trim();
+                  const isActive = el.placeholder ? tab === el.placeholder : idx === 0;
+                  const parts = tab.split(/\s+/);
+                  const icon = parts.length > 1 ? parts[0] : '';
+                  const caption = parts.length > 1 ? parts.slice(1).join(' ') : tab;
+                  return (
+                    <span
+                      key={idx}
+                      style={{
+                        backgroundColor: isActive ? '#568B91' : '#344653',
+                      }}
+                      className="flex-1 h-[80%] rounded-[10px] flex flex-col items-center justify-center px-0.5 leading-tight text-[#EEF4F6] font-semibold overflow-hidden"
+                    >
+                      {icon && <span className="text-[12px]">{icon}</span>}
+                      <span className="truncate max-w-full text-[10px]">{caption}</span>
+                    </span>
+                  );
+                })}
             </div>
           ) : el.kind === 'input' ? (
             <span
               className="w-full px-3.5 truncate"
-              style={{ color: '#7A909E', fontSize: `${el.fontSize}px`, textAlign: el.textAlign }}
+              style={{
+                color: el.text ? el.textColor || '#EEF4F6' : '#7A909E',
+                fontSize: `${el.fontSize}px`,
+                textAlign: el.textAlign,
+              }}
             >
-              {el.placeholder || 'Enter value…'}
+              {el.text || el.placeholder || 'Enter value…'}
             </span>
           ) : el.kind === 'divider' || el.kind === 'card' || el.kind === 'rectangle' ? (
             el.text ? (
@@ -902,34 +1041,110 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
         )}
 
         {leftTab === 'templates' && (
-          <div className="space-y-2">
-            {(
-              [
-                ['dashboard', 'Home Dashboard', 'App bar, hero card, photo, switch & FAB'],
-                ['login', 'Sign In Screen', 'Avatar, email/password fields & buttons'],
-                ['product', 'App Showcase', 'Hero photo, title, progress card & nav'],
-                ['blank', 'Blank Canvas', 'Clean empty phone artboard'],
-              ] as const
-            ).map(([preset, title, desc]) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => {
-                  const next = createStarterDesignerScreen(preset, activeScreen.width, activeScreen.height);
-                  next.id = activeScreen.id;
-                  updateActiveScreen(() => next);
-                  setSelectedId(null);
-                  if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-                    setLeftPanelOpen(false);
-                  }
-                  showToast(`Loaded "${title}"`);
-                }}
-                className="w-full text-left p-2.5 rounded-lg bg-[#16202A] hover:bg-[#1E2C39] border border-[#253542] hover:border-[#4B9BA2] transition-colors cursor-pointer"
-              >
-                <p className="text-xs font-semibold text-[#EEF4F6]">{title}</p>
-                <p className="text-[11px] text-[#89A0AD] mt-0.5 leading-snug">{desc}</p>
-              </button>
-            ))}
+          <div className="space-y-3">
+            {importableProjectFiles.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold text-[#78A5A8] px-0.5">
+                  Import Full App / Project ZIP
+                </p>
+                <button
+                  type="button"
+                  onClick={handleImportFullProject}
+                  className="w-full text-left p-2.5 rounded-lg bg-[#3E8790] hover:bg-[#35767E] text-white transition-colors cursor-pointer"
+                >
+                  <p className="text-xs font-semibold">Import Full App (All Pages & Windows)</p>
+                  <p className="text-[10px] text-white/80 mt-0.5">
+                    Loads all pages, tabs, tiles & dialogs across {importableProjectFiles.length} UI files
+                  </p>
+                </button>
+                {importableProjectFiles.map((file) => {
+                  const fileName = file.path.split('/').pop() ?? file.path;
+                  return (
+                    <button
+                      key={file.path}
+                      type="button"
+                      onClick={() => handleImportProjectFile(file)}
+                      className="w-full text-left p-2 rounded-lg bg-[#172633] hover:bg-[#1E3242] border border-[#2D485A] hover:border-[#4B9BA2] transition-colors cursor-pointer"
+                    >
+                      <p className="text-xs font-semibold text-[#EEF4F6] truncate">{fileName}</p>
+                      <p className="text-[10px] text-[#8FA8B5] truncate mt-0.5">{file.path}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {screens.length > 1 && (
+              <div className="space-y-1">
+                <p className="text-[10px] font-semibold text-[#7F97A5] px-0.5">
+                  Loaded Pages & Windows ({screens.length})
+                </p>
+                <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5">
+                  {screens.map((s) => {
+                    const active = s.id === activeScreen.id;
+                    const badge =
+                      s.screenCategory === 'dialog'
+                        ? 'Window'
+                        : s.screenCategory === 'tab'
+                        ? 'Tab'
+                        : s.screenCategory === 'activity'
+                        ? 'Activity'
+                        : 'Page';
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveScreenId(s.id);
+                          setSelectedId(null);
+                        }}
+                        className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg text-left text-xs border transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[#203442] border-[#4B9BA2] text-white font-semibold'
+                            : 'bg-[#141E28] border-[#233240] text-[#B8C9D2] hover:text-white'
+                        }`}
+                      >
+                        <span className="truncate">{s.name}</span>
+                        <span className="text-[9px] uppercase font-mono px-1 py-0.5 rounded bg-[#0E161E] text-[#8CBCC1] shrink-0">
+                          {badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold text-[#7F97A5] px-0.5">Starter Templates</p>
+              {(
+                [
+                  ['dashboard', 'Home Dashboard', 'App bar, hero card, photo, switch & FAB'],
+                  ['login', 'Sign In Screen', 'Avatar, email/password fields & buttons'],
+                  ['product', 'App Showcase', 'Hero photo, title, progress card & nav'],
+                  ['blank', 'Blank Canvas', 'Clean empty phone artboard'],
+                ] as const
+              ).map(([preset, title, desc]) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => {
+                    const next = createStarterDesignerScreen(preset, activeScreen.width, activeScreen.height);
+                    next.id = activeScreen.id;
+                    updateActiveScreen(() => next);
+                    setSelectedId(null);
+                    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                      setLeftPanelOpen(false);
+                    }
+                    showToast(`Loaded "${title}"`);
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg bg-[#16202A] hover:bg-[#1E2C39] border border-[#253542] hover:border-[#4B9BA2] transition-colors cursor-pointer"
+                >
+                  <p className="text-xs font-semibold text-[#EEF4F6]">{title}</p>
+                  <p className="text-[11px] text-[#89A0AD] mt-0.5 leading-snug">{desc}</p>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -1152,7 +1367,7 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
                 }
               : undefined
           }
-          className="flex-1 min-w-0 min-h-0 h-full overflow-auto touch-pan-x touch-pan-y bg-[#0B1016] relative flex items-center justify-center p-4 pb-16"
+          className="flex-1 min-w-0 min-h-0 h-full overflow-auto touch-pan-x touch-pan-y bg-[#0B1016] relative flex items-start justify-center p-4 pb-20"
         >
           {toastMsg && (
             <div className="fixed top-28 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1D2D3A] border border-[#4B9BA2] text-xs font-medium text-[#EEF4F6] shadow-lg">
@@ -1419,13 +1634,24 @@ export const ApkDesignerView: React.FC<ApkDesignerViewProps> = ({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={handleSendToEditor}
-                className="px-4 py-1.5 rounded-lg bg-[#3E8790] hover:bg-[#35767E] text-xs font-semibold text-white cursor-pointer"
-              >
-                Add to Project & Open Editor
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeScreen.sourceFilePath && (
+                  <button
+                    type="button"
+                    onClick={() => handleSendToEditor(true)}
+                    className="px-3 py-1.5 rounded-lg bg-[#1E3342] hover:bg-[#274357] border border-[#4B9BA2] text-xs font-semibold text-[#EEF4F6] cursor-pointer"
+                  >
+                    Update {activeScreen.sourceFilePath.split('/').pop()}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleSendToEditor(false)}
+                  className="px-4 py-1.5 rounded-lg bg-[#3E8790] hover:bg-[#35767E] text-xs font-semibold text-white cursor-pointer"
+                >
+                  Save as New File & Open Editor
+                </button>
+              </div>
             </div>
 
             <pre className="flex-1 overflow-auto p-4 text-xs font-mono text-[#D0DFE7] bg-[#0B1016] leading-relaxed">
