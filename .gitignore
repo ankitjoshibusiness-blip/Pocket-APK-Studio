@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.gradle/
+.kotlin/
+.build-outputs/
+build/
+app/build/
+local.properties
+debug.keystore
+.env
+.playwright-cli/
+build.log
