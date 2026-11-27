@@ -715,6 +715,23 @@ pas_run_self_tests() (
         test_count=$((test_count + 1))
     }
 
+    # Termux's live log is written through an asynchronous process-substitution
+    # tee. Wait briefly for its final EXIT-trap marker to become visible before
+    # asserting on the persisted transcript; the child exit status is checked
+    # separately and never inferred from the marker alone.
+    test_log_contains() {
+        local log_file="$1"
+        local marker="$2"
+        local attempt
+        for ((attempt = 0; attempt < 40; attempt++)); do
+            if grep -Fq -- "$marker" "$log_file"; then
+                return 0
+            fi
+            sleep 0.025
+        done
+        return 1
+    }
+
     for tool in python3 unzip find grep sha256sum mktemp cmp; do
         pas_require_command "$tool" || {
             printf 'FAIL: required test tool is missing: %s\n' "$tool" >&2
@@ -1416,8 +1433,8 @@ PAS_TEST_PROOT_DISTRO
         termux_rc=$?
     fi
     if [[ "$termux_rc" -eq 43 ]] &&
-        grep -Fq "Ubuntu PRoot build process returned a failure" "$termux_failure_log" &&
-        grep -Fq "BUILD_ENGINE_EXIT=43" "$termux_failure_log"; then
+        test_log_contains "$termux_failure_log" "Ubuntu PRoot build process returned a failure" &&
+        test_log_contains "$termux_failure_log" "BUILD_ENGINE_EXIT=43"; then
         test_pass "Termux reports a non-zero PRoot result with a persisted, explicit exit code"
     else
         printf 'FAIL: Termux did not persist a clear PRoot failure result (exit=%s)\n' "$termux_rc" >&2
@@ -1441,8 +1458,8 @@ PAS_TEST_PROOT_DISTRO
         termux_rc=$?
     fi
     if [[ "$termux_rc" -eq 23 ]] &&
-        grep -Fq "script is missing, empty or unreadable" "$termux_empty_engine_log" &&
-        grep -Fq "BUILD_ENGINE_EXIT=23" "$termux_empty_engine_log"; then
+        test_log_contains "$termux_empty_engine_log" "script is missing, empty or unreadable" &&
+        test_log_contains "$termux_empty_engine_log" "BUILD_ENGINE_EXIT=23"; then
         test_pass "Termux rejects an empty copied build engine before PRoot"
     else
         printf 'FAIL: empty copied build engine was not reported clearly (exit=%s)\n' "$termux_rc" >&2
@@ -1463,8 +1480,8 @@ PAS_TEST_PROOT_DISTRO
         termux_rc=$?
     fi
     if [[ "$termux_rc" -eq 23 ]] &&
-        grep -Fq "contains invalid Bash syntax" "$termux_syntax_engine_log" &&
-        grep -Fq "BUILD_ENGINE_EXIT=23" "$termux_syntax_engine_log"; then
+        test_log_contains "$termux_syntax_engine_log" "contains invalid Bash syntax" &&
+        test_log_contains "$termux_syntax_engine_log" "BUILD_ENGINE_EXIT=23"; then
         test_pass "Termux syntax-checks the copied engine before PRoot"
     else
         printf 'FAIL: invalid copied engine syntax was not reported clearly (exit=%s)\n' "$termux_rc" >&2
@@ -1485,8 +1502,8 @@ PAS_TEST_PROOT_DISTRO
         termux_rc=$?
     fi
     if [[ "$termux_rc" -eq 25 ]] &&
-        grep -Fq "ZIP is missing, empty or not readable" "$termux_empty_zip_log" &&
-        grep -Fq "BUILD_ENGINE_EXIT=25" "$termux_empty_zip_log"; then
+        test_log_contains "$termux_empty_zip_log" "ZIP is missing, empty or not readable" &&
+        test_log_contains "$termux_empty_zip_log" "BUILD_ENGINE_EXIT=25"; then
         test_pass "Termux rejects an empty imported ZIP before PRoot"
     else
         printf 'FAIL: empty imported ZIP was not reported clearly (exit=%s)\n' "$termux_rc" >&2
