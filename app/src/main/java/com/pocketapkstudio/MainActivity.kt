@@ -1408,11 +1408,26 @@ class MainActivity : androidx.activity.ComponentActivity() {
             .putString("last_build_log", "Preparing project…")
             .putString("last_apk_path", null)
             .apply()
-        runCatching {
+        val liveLogError = runCatching {
             prepareBuildLiveLog()
             appendBuildLiveLog("BUILD: Live transcript initialized; detailed command tracing enabled.")
-        }.onFailure { error ->
-            buildPrefs.edit().putString("last_build_log", "Preparing project…\nLive log file unavailable: ${error.message}").apply()
+        }.exceptionOrNull()
+        if (liveLogError != null) {
+            val message = "Build cancelled: a fresh build-live.log could not be initialized, so no Termux command was started. ${liveLogError.message ?: "Check Downloads storage access."}"
+            buildLogHandler.removeCallbacks(buildLogPollTask)
+            buildPrefs.edit()
+                .putBoolean("build_running", false)
+                .putString("last_build_status", message)
+                .putString("last_build_log", message)
+                .putInt("last_build_percent", 0)
+                .putString("last_apk_path", null)
+                .remove("live_build_log_uri")
+                .commit()
+            buildProgress.visibility = View.GONE
+            status.text = message
+            logs.text = message
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            return
         }
         buildLogHandler.removeCallbacks(buildLogPollTask)
         buildLogHandler.post(buildLogPollTask)
@@ -1533,11 +1548,29 @@ class MainActivity : androidx.activity.ComponentActivity() {
     }
 
     private fun prepareBuildLiveLog() {
+        val prefs = getSharedPreferences("build_state", MODE_PRIVATE)
+        check(prefs.edit().remove("live_build_log_uri").commit()) {
+            "Could not clear the previous live build log reference"
+        }
         val uri = createSharedDownloadEntry("PocketAPKStudio", "build-live.log", "text/plain", replaceExisting = true)
-        openSharedOutputStream(uri)?.use { it.write("Build starting…\n".toByteArray(Charsets.UTF_8)) }
-            ?: error("Could not initialize live build log")
-        getSharedPreferences("build_state", MODE_PRIVATE).edit()
-            .putString("live_build_log_uri", uri.toString()).apply()
+        try {
+            openSharedOutputStream(uri)?.use {
+                it.write("Build starting…\n".toByteArray(Charsets.UTF_8))
+                it.flush()
+            } ?: error("Could not initialize live build log")
+            val initialContents = openSharedInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                ?: error("Could not verify that the new live build log can be read")
+            check(initialContents.startsWith("Build starting…")) {
+                "The new live build log could not be verified after writing"
+            }
+            check(prefs.edit().putString("live_build_log_uri", uri.toString()).commit()) {
+                "Could not save the new live build log reference"
+            }
+        } catch (error: Exception) {
+            runCatching { deleteSharedDownloadUri(uri) }
+            prefs.edit().remove("live_build_log_uri").commit()
+            throw error
+        }
     }
 
     private fun appendBuildLiveLog(message: String) {

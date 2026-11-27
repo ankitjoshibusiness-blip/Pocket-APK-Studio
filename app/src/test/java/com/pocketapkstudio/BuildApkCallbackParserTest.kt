@@ -51,4 +51,43 @@ class BuildApkCallbackParserTest {
         assertNull(BuildApkCallbackParser.findSavedApkPath("BUILD_SUCCESS=1"))
         assertNull(BuildApkCallbackParser.findSavedApkPath("APK_SAVED=   \n"))
     }
+
+    @Test
+    fun rejectsSavedPathFromPreviousBuildWhenReservedNameDiffers() {
+        val previousBuild = "APK_SAVED=/storage/emulated/0/Download/OldBuild.apk\n"
+        assertNull(BuildApkCallbackParser.findSavedApkPath(previousBuild, "CurrentBuild.apk"))
+    }
+
+    @Test
+    fun prefersCurrentCallbackOverLongerLiveLogContainingOnlyPreviousBuild() {
+        val callback = "APK_SAVED=/storage/emulated/0/Download/CurrentBuild.apk\n"
+        val staleLiveLog = "Older Gradle output and details\n".repeat(8) +
+            "APK_SAVED=/storage/emulated/0/Download/OldBuild.apk\n"
+        assertEquals(
+            callback,
+            BuildApkCallbackParser.preferredTranscript(callback, staleLiveLog, "CurrentBuild.apk")
+        )
+    }
+
+    @Test
+    fun prefersCurrentLiveLogOverCallbackContainingOnlyPreviousBuild() {
+        val staleCallback = "APK_SAVED=/storage/emulated/0/Download/OldBuild.apk\n"
+        val liveLog = "Gradle output\nAPK_SAVED=/storage/emulated/0/Download/CurrentBuild.apk\n"
+        assertEquals(
+            liveLog,
+            BuildApkCallbackParser.preferredTranscript(staleCallback, liveLog, "CurrentBuild.apk")
+        )
+    }
+
+    @Test
+    fun acceptsOnlyTheReservedOutputNameWhenSeveralMarkersExist() {
+        val transcript = """
+            APK_SAVED=/storage/emulated/0/Download/OldBuild.apk
+            APK_SAVED=/storage/emulated/0/Download/CurrentBuild.apk
+        """.trimIndent()
+        assertEquals(
+            "/storage/emulated/0/Download/CurrentBuild.apk",
+            BuildApkCallbackParser.findSavedApkPath(transcript, "CurrentBuild.apk")
+        )
+    }
 }

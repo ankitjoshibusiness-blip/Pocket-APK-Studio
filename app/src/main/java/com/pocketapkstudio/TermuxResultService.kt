@@ -196,8 +196,12 @@ internal object TermuxResultHandler {
                 stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             }.getOrDefault("")
         }.orEmpty()
-        val primaryBuildLog = BuildApkCallbackParser.preferredTranscript(stdout, liveLogFallback)
-        val apkPath = BuildApkCallbackParser.findSavedApkPath(primaryBuildLog)
+        val primaryBuildLog = BuildApkCallbackParser.preferredTranscript(
+            callbackStdout = stdout,
+            liveLog = liveLogFallback,
+            expectedFileName = pendingApkName
+        )
+        val apkPath = BuildApkCallbackParser.findSavedApkPath(primaryBuildLog, pendingApkName)
         val verifiedApk = materializeOutputFile(
             context = context,
             subDirName = "built-apks",
