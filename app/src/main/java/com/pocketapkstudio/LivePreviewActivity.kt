@@ -28,7 +28,9 @@ class LivePreviewActivity : Activity() {
     private var previewHeightDp = 800
     private var selectedPreviewPath: String? = null
     private var previewDarkThemeOverride: Boolean? = null
+    private var previewFontScaleIndex: Int = PreviewFontScale.DEFAULT_INDEX
     private lateinit var themeButton: Button
+    private lateinit var fontScaleButton: Button
     private var webPreviewView: android.webkit.WebView? = null
     private var layouts: List<File> = emptyList()
 
@@ -42,6 +44,10 @@ class LivePreviewActivity : Activity() {
             2 -> false
             else -> null
         }
+        previewFontScaleIndex = PreviewFontScale.normalize(
+            savedInstanceState?.getInt("preview_font_scale_index", PreviewFontScale.DEFAULT_INDEX)
+                ?: PreviewFontScale.DEFAULT_INDEX
+        )
         projectRoot = File(intent.getStringExtra("project_root") ?: "")
         if (!projectRoot.isDirectory) { Toast.makeText(this, "Project folder unavailable.", Toast.LENGTH_LONG).show(); finish(); return }
         buildScreen()
@@ -75,6 +81,7 @@ class LivePreviewActivity : Activity() {
             false -> 2
             null -> 0
         })
+        outState.putInt("preview_font_scale_index", previewFontScaleIndex)
         super.onSaveInstanceState(outState)
     }
 
@@ -116,12 +123,36 @@ class LivePreviewActivity : Activity() {
         previewOptions.addView(Button(this).apply {
             text = "Custom size"
             isAllCaps = false
+            textSize = 12f
             contentDescription = "Set a custom device preview width and height in dp"
             setOnClickListener { showCustomDeviceDialog() }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(4) })
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+            rightMargin = dp(3)
+        })
+        fontScaleButton = Button(this).apply {
+            text = previewFontScaleLabel()
+            isAllCaps = false
+            textSize = 12f
+            contentDescription = "Cycle preview text scaling from 85 to 150 percent"
+            setOnClickListener {
+                previewFontScaleIndex = PreviewFontScale.nextIndex(previewFontScaleIndex)
+                text = previewFontScaleLabel()
+                val webPreview = webPreviewView
+                if (webPreview != null) {
+                    webPreview.settings.textZoom = (PreviewFontScale.scale(previewFontScaleIndex) * 100f).toInt()
+                } else {
+                    refreshCurrentPreview()
+                }
+            }
+        }
+        previewOptions.addView(fontScaleButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+            leftMargin = dp(3)
+            rightMargin = dp(3)
+        })
         themeButton = Button(this).apply {
             text = previewThemeLabel()
             isAllCaps = false
+            textSize = 12f
             contentDescription = "Cycle between system, dark and light Compose preview themes"
             setOnClickListener {
                 previewDarkThemeOverride = when (previewDarkThemeOverride) {
@@ -137,7 +168,9 @@ class LivePreviewActivity : Activity() {
                 }
             }
         }
-        previewOptions.addView(themeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(4) })
+        previewOptions.addView(themeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+            leftMargin = dp(3)
+        })
         root.addView(previewOptions, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = dp(3)
             bottomMargin = dp(4)
@@ -281,6 +314,28 @@ class LivePreviewActivity : Activity() {
         null -> "System"
     }
 
+    private fun previewFontScaleLabel(): String =
+        "Text: " + PreviewFontScale.label(previewFontScaleIndex)
+
+    /**
+     * Scales only generated text-bearing native Views. This is a visual stress-test,
+     * not a replacement for the imported app's Compose LocalDensity or font settings.
+     */
+    private fun applyPreviewFontScale(root: View) {
+        val scale = PreviewFontScale.scale(previewFontScaleIndex)
+        if (scale == 1f) return
+
+        fun visit(view: View) {
+            if (view is TextView) {
+                view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, view.textSize * scale)
+            }
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) visit(view.getChildAt(index))
+            }
+        }
+        visit(root)
+    }
+
     private fun applyDeviceProfile() {
         if (!::deviceViewport.isInitialized) return
         deviceViewport.layoutParams = (deviceViewport.layoutParams ?: FrameLayout.LayoutParams(
@@ -347,6 +402,7 @@ class LivePreviewActivity : Activity() {
             settings.loadWithOverviewMode = false
             settings.javaScriptCanOpenWindowsAutomatically = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            settings.textZoom = (PreviewFontScale.scale(previewFontScaleIndex) * 100f).toInt()
             setBackgroundColor(Color.WHITE)
             webViewClient = object : android.webkit.WebViewClient() {
                 override fun shouldInterceptRequest(
@@ -1584,6 +1640,7 @@ class LivePreviewActivity : Activity() {
                 })
             }
             content.addView(screen, LinearLayout.LayoutParams(-1, -2))
+            applyPreviewFontScale(content)
         } catch (e: Exception) {
             showMessage("Could not create Compose preview.\n\n" + (e.message ?: e.javaClass.simpleName))
         }
@@ -1683,7 +1740,10 @@ class LivePreviewActivity : Activity() {
                 event = parser.next()
             }
             if (rootView == null) showMessage("No renderable root view in " + file.name)
-            else content.addView(rootView, LinearLayout.LayoutParams(-1, -2))
+            else {
+                content.addView(rootView, LinearLayout.LayoutParams(-1, -2))
+                applyPreviewFontScale(content)
+            }
         } catch (e: Exception) { showMessage("Could not render layout.\n\n" + (e.message ?: e.javaClass.simpleName)) }
     }
 
@@ -1840,6 +1900,7 @@ class LivePreviewActivity : Activity() {
     private fun showMessage(s: String) {
         clearPreviewContent()
         content.addView(TextView(this).apply { text = s; textSize = 14f; setTextColor(Color.DKGRAY); setPadding(dp(14),dp(18),dp(14),dp(18)) })
+        applyPreviewFontScale(content)
     }
     override fun onDestroy() {
         if (::content.isInitialized) clearPreviewContent()
