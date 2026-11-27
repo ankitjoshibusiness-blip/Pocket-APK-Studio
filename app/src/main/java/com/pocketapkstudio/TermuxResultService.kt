@@ -9,6 +9,11 @@ import java.io.File
 
 internal object TermuxResultHandler {
 
+    private fun isValidOutputFile(file: File, expectedExtension: String): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        return !expectedExtension.equals("apk", ignoreCase = true) || ApkFileValidator.isValidApk(file)
+    }
+
     private fun materializeOutputFile(
         context: Context,
         subDirName: String,
@@ -42,8 +47,13 @@ internal object TermuxResultHandler {
                 input.use { source ->
                     temporary.outputStream().buffered().use { output -> source.copyTo(output) }
                 }
-                if (!temporary.isFile || temporary.length() <= 0L) {
-                    error("The reserved output file is empty")
+                if (!isValidOutputFile(temporary, expectedExtension)) {
+                    error(
+                        if (expectedExtension.equals("apk", ignoreCase = true))
+                            "The reserved output does not contain a valid APK ZIP with a non-empty AndroidManifest.xml"
+                        else
+                            "The reserved output file is empty"
+                    )
                 }
                 if (target.exists() && !target.delete()) {
                     error("Could not replace the previous private output copy")
@@ -52,17 +62,17 @@ internal object TermuxResultHandler {
                     temporary.copyTo(target, overwrite = true)
                     temporary.delete()
                 }
-                target.takeIf { it.isFile && it.length() > 0L }
+                target.takeIf { isValidOutputFile(it, expectedExtension) }
                     ?: error("The private output copy failed verification")
             } catch (error: Exception) {
                 temporary.delete()
                 Log.e("PocketAPKStudio", "Could not materialize output file from URI", error)
-                reportedFile?.takeIf { it.isFile && it.length() > 0L }
+                reportedFile?.takeIf { isValidOutputFile(it, expectedExtension) }
             }
         }
 
         // Compatibility fallback for older builds that reported a direct readable path.
-        return reportedFile?.takeIf { it.isFile && it.length() > 0L }
+        return reportedFile?.takeIf { isValidOutputFile(it, expectedExtension) }
     }
 
     private fun deletePendingUri(context: Context, uriText: String?) {
