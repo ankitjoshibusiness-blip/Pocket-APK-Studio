@@ -1249,6 +1249,8 @@ PAS_TEST_SDKMANAGER
     local termux_empty_engine_log
     local termux_syntax_engine_log
     local termux_empty_zip_log
+    local termux_missing_download_root
+    local termux_missing_download_log
     local termux_rc
 
     test_script="$0"
@@ -1519,6 +1521,32 @@ PAS_TEST_PROOT_DISTRO
         return 1
     fi
 
+    # The old flow created Download/PocketAPKStudio before checking whether the
+    # Download directory existed, making its storage-ready check ineffective.
+    termux_missing_download_root="$test_root/Termux Shared Root Without Downloads"
+    termux_missing_download_log="$test_root/Termux Missing Downloads Log.txt"
+    mkdir -p "$termux_missing_download_root"
+    if PAS_TEST_MODE=1 \
+        PAS_TEST_SHARED_STORAGE_ROOT="$termux_missing_download_root" \
+        PAS_TEST_PROOT_ARGS="$termux_args" PAS_TEST_PROOT_EXIT=0 \
+        PATH="$termux_fake_bin:$saved_path" \
+        bash "$test_script" "$termux_zip_name" "$termux_output_name" > "$termux_missing_download_log" 2>&1; then
+        printf 'FAIL: Termux accepted a shared root without an accessible Download directory\n' >&2
+        return 1
+    else
+        termux_rc=$?
+    fi
+    if [[ "$termux_rc" -eq 24 ]] &&
+        test_log_contains "$termux_missing_download_log" "Termux cannot access shared Downloads" &&
+        test_log_contains "$termux_missing_download_log" "BUILD_ENGINE_EXIT=24" &&
+        [[ ! -e "$termux_missing_download_root/Download" ]]; then
+        test_pass "Termux detects unavailable shared Downloads before creating directories or entering PRoot"
+    else
+        printf 'FAIL: missing shared Downloads was not detected before directory creation (exit=%s)\n' "$termux_rc" >&2
+        cat "$termux_missing_download_log" >&2
+        return 1
+    fi
+
     printf 'SELF_TESTS_PASSED=%s\n' "$test_count"
 )
 
@@ -1776,6 +1804,13 @@ pas_termux_main() {
 
     trap 'rc=$?; printf "BUILD_ENGINE_EXIT=%s\n" "$rc"' EXIT
 
+    # MainActivity creates the ZIP and engine under MediaStore Downloads before
+    # this command starts. Check Downloads before mkdir creates the child path
+    # and masks a missing or inaccessible shared-storage mount.
+    [[ -d "$shared/Download" && -r "$shared/Download" &&
+        -w "$shared/Download" && -x "$shared/Download" ]] ||
+        pas_fail 24 "Termux cannot access shared Downloads at $shared/Download. Open Termux, run termux-setup-storage, grant storage permission, and retry."
+
     mkdir -p "$build_dir" || pas_fail 20 "Could not create Downloads/PocketAPKStudio."
     : > "$live_log" || pas_fail 20 "Could not create the live build log: $live_log"
     exec > >(tee -a "$live_log") 2>&1
@@ -1784,8 +1819,6 @@ pas_termux_main() {
 
     pas_log "Pocket APK Studio: local Android build started"
     pas_log "TERMUX_VERSION=${TERMUX_VERSION:-unknown}"
-    [[ -d "$shared/Download" ]] ||
-        pas_fail 24 "Termux shared storage is not ready. Open Termux, run termux-setup-storage, and grant storage access."
     [[ -r "$engine_in_shared" && -s "$engine_in_shared" ]] ||
         pas_fail 23 "The standalone build-project.sh script is missing, empty or unreadable in shared Downloads."
     bash -n "$engine_in_shared" ||
